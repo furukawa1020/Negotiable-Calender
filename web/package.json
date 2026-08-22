@@ -10,6 +10,8 @@
     "test": "vitest run",
     "test:watch": "vitest"
   },
-  "dependencies": {},
-  "devDependencies": {}
+  "dependencies": {
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  }
 }

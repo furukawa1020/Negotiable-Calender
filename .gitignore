@@ -1,0 +1,17 @@
+.env
+.DS_Store
+Thumbs.db
+
+# Web
+web/node_modules/
+web/dist/
+web/coverage/
+
+# Go
+apps/api/bin/
+apps/api/coverage.out
+
+# Editors
+.idea/
+.vscode/
+*.swp

@@ -1,7 +1,5 @@
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Noto+Sans+JP:wght@400;500;600;700&display=swap');
-
 :root {
-  font-family: 'DM Sans', 'Noto Sans JP', sans-serif;
+  font-family: 'Aptos', 'Noto Sans JP', 'Yu Gothic UI', sans-serif;
   color: #17211d;
   background: #f3f2eb;
   font-synthesis: none;
@@ -142,12 +140,13 @@ main {
 
 h1 {
   margin: 0;
-  max-width: 650px;
+  max-width: none;
   font-family: Georgia, 'Noto Sans JP', serif;
   font-size: clamp(42px, 6vw, 72px);
   font-weight: 400;
   letter-spacing: -0.055em;
   line-height: 1.08;
+  white-space: nowrap;
 }
 
 .hero-copy {
@@ -421,6 +420,10 @@ footer {
     padding-top: 48px;
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  h1 {
+    white-space: normal;
   }
 
   .privacy-note {

@@ -9,6 +9,8 @@ web/coverage/
 
 # Go
 apps/api/bin/
+apps/api/api
+apps/api/api.exe
 apps/api/coverage.out
 
 # Editors

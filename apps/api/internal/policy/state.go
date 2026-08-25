@@ -66,10 +66,10 @@ func (v Reschedulability) Valid() bool {
 }
 
 type InteractionState struct {
-	Availability     Availability
-	Interruptibility Interruptibility
-	Requestability   Requestability
-	Reschedulability Reschedulability
+	Availability     Availability     `json:"availability"`
+	Interruptibility Interruptibility `json:"interruptibility"`
+	Requestability   Requestability   `json:"requestability"`
+	Reschedulability Reschedulability `json:"reschedulability"`
 }
 
 func (s InteractionState) Validate() error {

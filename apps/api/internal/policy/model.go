@@ -33,13 +33,13 @@ func (w WorkingWindow) Validate() error {
 }
 
 type SharingPolicy struct {
-	ID           string
-	UserID       string
-	Default      InteractionState
-	WorkingHours []WorkingWindow
-	Rules        []Rule
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	ID           string           `json:"id"`
+	UserID       string           `json:"userId"`
+	Default      InteractionState `json:"default"`
+	WorkingHours []WorkingWindow  `json:"workingHours"`
+	Rules        []Rule           `json:"rules"`
+	CreatedAt    time.Time        `json:"createdAt"`
+	UpdatedAt    time.Time        `json:"updatedAt"`
 }
 
 func (p SharingPolicy) Validate() error {
@@ -66,13 +66,13 @@ func (p SharingPolicy) Validate() error {
 }
 
 type Rule struct {
-	ID            string
-	PolicyID      string
-	ConditionType string
-	Condition     json.RawMessage
-	State         InteractionState
-	Priority      int
-	Enabled       bool
+	ID            string           `json:"id"`
+	PolicyID      string           `json:"policyId"`
+	ConditionType string           `json:"conditionType"`
+	Condition     json.RawMessage  `json:"condition"`
+	State         InteractionState `json:"state"`
+	Priority      int              `json:"priority"`
+	Enabled       bool             `json:"enabled"`
 }
 
 func (r Rule) Validate() error {
@@ -84,6 +84,11 @@ func (r Rule) Validate() error {
 	}
 	if strings.TrimSpace(r.ConditionType) == "" {
 		return fmt.Errorf("condition type is required")
+	}
+	switch r.ConditionType {
+	case "organization", "calendar", "event":
+	default:
+		return fmt.Errorf("invalid condition type")
 	}
 	if !json.Valid(r.Condition) {
 		return fmt.Errorf("condition must be valid JSON")

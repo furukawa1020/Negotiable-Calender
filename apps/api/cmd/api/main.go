@@ -15,6 +15,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/httpapi"
+	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/policy"
 )
 
 const defaultPort = "8080"
@@ -41,6 +42,12 @@ func main() {
 		os.Exit(1)
 	}
 	defer db.Close()
+	migrationContext, cancelMigration := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancelMigration()
+	if err := policy.EnsureSchema(migrationContext, db); err != nil {
+		logger.Error("migrate database", "error", err)
+		os.Exit(1)
+	}
 
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -49,7 +56,7 @@ func main() {
 
 	server := &http.Server{
 		Addr:              ":" + port,
-		Handler:           httpapi.New(db, os.Getenv("WEB_ORIGIN"), logger),
+		Handler:           httpapi.New(db, policy.NewPostgresStore(db), os.Getenv("WEB_ORIGIN"), logger),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      10 * time.Second,

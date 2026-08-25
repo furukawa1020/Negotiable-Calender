@@ -74,19 +74,39 @@ func NewView(userID, timezone string, projections []ScheduleProjection) (View, e
 		if err := item.Validate(); err != nil {
 			return View{}, err
 		}
-		view.Segments = append(view.Segments, Segment{
+		segment := Segment{
 			StartAt: item.StartAt, EndAt: item.EndAt,
 			Availability:           item.State.Availability,
 			Interruptibility:       item.State.Interruptibility,
 			Requestability:         item.State.Requestability,
 			Reschedulability:       item.State.Reschedulability,
 			ExpectedResponseBucket: item.ExpectedResponseBucket,
-		})
+		}
+		if canMerge(view.Segments, segment) {
+			view.Segments[len(view.Segments)-1].EndAt = segment.EndAt
+		} else {
+			view.Segments = append(view.Segments, segment)
+		}
 		if item.GeneratedAt.After(view.GeneratedAt) {
 			view.GeneratedAt = item.GeneratedAt
 		}
 	}
 	return view, nil
+}
+
+func canMerge(segments []Segment, next Segment) bool {
+	if len(segments) == 0 {
+		return false
+	}
+	current := segments[len(segments)-1]
+	if !current.EndAt.Equal(next.StartAt) {
+		return false
+	}
+	return current.Availability == next.Availability &&
+		current.Interruptibility == next.Interruptibility &&
+		current.Requestability == next.Requestability &&
+		current.Reschedulability == next.Reschedulability &&
+		current.ExpectedResponseBucket == next.ExpectedResponseBucket
 }
 
 func validRange(startAt, endAt time.Time) error {

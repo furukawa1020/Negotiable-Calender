@@ -69,12 +69,21 @@ ORDER BY start_at, id
 		); err != nil {
 			return View{}, fmt.Errorf("scan schedule projection: %w", err)
 		}
+		value = normalizeTimestamps(value)
 		values = append(values, value)
 	}
 	if err := rows.Err(); err != nil {
 		return View{}, fmt.Errorf("iterate schedule projections: %w", err)
 	}
 	return NewView(userID, timezone, values)
+}
+
+func normalizeTimestamps(value ScheduleProjection) ScheduleProjection {
+	value.StartAt = value.StartAt.UTC()
+	value.EndAt = value.EndAt.UTC()
+	value.GeneratedAt = value.GeneratedAt.UTC()
+	value.ExpiresAt = value.ExpiresAt.UTC()
+	return value
 }
 
 func SeedDemo(ctx context.Context, database *sql.DB, now time.Time) error {

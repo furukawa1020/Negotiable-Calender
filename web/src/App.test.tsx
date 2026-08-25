@@ -24,14 +24,23 @@ describe('App', () => {
     expect(screen.getByRole('status')).toHaveTextContent('レビュー依頼を送信しました')
   })
 
-  it('opens sharing rules and toggles the member preview', () => {
+  it('opens sharing rules and loads the member preview from the public API', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      segments: [{
+        startAt: '2026-08-23T00:00:00Z',
+        endAt: '2026-08-23T01:00:00Z',
+        availability: 'available',
+        interruptibility: 'open',
+      }],
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
     render(<App />)
 
     fireEvent.click(screen.getByRole('button', { name: '共有ルールを確認' }))
     expect(screen.getByRole('dialog', { name: '共有ルール' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '閉じる' }))
     fireEvent.click(screen.getByRole('button', { name: /メンバー表示をプレビュー/ }))
-    expect(screen.getByRole('button', { name: /自分の表示に戻る/ })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: /自分の表示に戻る/ })).toBeInTheDocument()
+    expect(globalThis.fetch).toHaveBeenCalledWith(expect.stringContaining('/api/v1/people/demo-manager/projection'))
   })
 
   it('navigates days and switches manager calendar layers', () => {

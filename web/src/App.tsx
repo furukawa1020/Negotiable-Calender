@@ -17,6 +17,17 @@ const initialProjections = [
 
 const apiURL = import.meta.env.VITE_API_URL || 'http://localhost:8080'
 
+type ProjectionRow = (typeof initialProjections)[number]
+
+type PublicProjection = {
+  segments: Array<{
+    startAt: string
+    endAt: string
+    availability: string
+    interruptibility: string
+  }>
+}
+
 function ShieldIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -34,6 +45,8 @@ function App() {
   const [dayOffset, setDayOffset] = useState(0)
   const [calendarLayer, setCalendarLayer] = useState<'both' | 'private' | 'projection'>('both')
   const [projections, setProjections] = useState(initialProjections)
+  const [memberProjections, setMemberProjections] = useState<ProjectionRow[]>([])
+  const [previewLoading, setPreviewLoading] = useState(false)
   const [overrideSaving, setOverrideSaving] = useState(false)
   const visibleDate = useMemo(() => {
     const value = new Date()
@@ -43,6 +56,7 @@ function App() {
   const dateLabel = new Intl.DateTimeFormat('ja-JP', {
     month: 'long', day: 'numeric', weekday: 'short',
   }).format(visibleDate)
+  const displayedProjections = memberPreview ? memberProjections : projections
 
   const submitRequest = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -93,6 +107,45 @@ function App() {
       setNotice('保存できませんでした。APIの接続を確認してください。')
     } finally {
       setOverrideSaving(false)
+    }
+  }
+
+  const toggleMemberPreview = async () => {
+    if (memberPreview) {
+      setMemberPreview(false)
+      return
+    }
+    const from = new Date(visibleDate)
+    from.setHours(0, 0, 0, 0)
+    const to = new Date(from)
+    to.setDate(to.getDate() + 1)
+    setPreviewLoading(true)
+    try {
+      const query = new URLSearchParams({
+        timezone: 'Asia/Tokyo',
+        from: from.toISOString(),
+        to: to.toISOString(),
+      })
+      const response = await fetch(`${apiURL}/api/v1/people/demo-manager/projection?${query}`)
+      if (!response.ok) {
+        throw new Error('preview failed')
+      }
+      const view = await response.json() as PublicProjection
+      const formatter = new Intl.DateTimeFormat('ja-JP', { hour: '2-digit', minute: '2-digit', hour12: false })
+      setMemberProjections(view.segments.map((segment) => ({
+        time: `${formatter.format(new Date(segment.startAt))} — ${formatter.format(new Date(segment.endAt))}`,
+        label: segment.availability === 'available'
+          ? '相談可能'
+          : segment.interruptibility === 'urgent_only' ? '緊急のみ' : '対応困難',
+        tone: segment.availability === 'available'
+          ? 'available'
+          : segment.availability === 'limited' ? 'urgent' : 'unavailable',
+      })))
+      setMemberPreview(true)
+    } catch {
+      setNotice('メンバー表示を取得できませんでした。')
+    } finally {
+      setPreviewLoading(false)
     }
   }
 
@@ -184,16 +237,19 @@ function App() {
               <span className="projection-label"><span /> PROJECTION</span>
             </div>
             <div className="projection-list">
-              {projections.map((projection) => (
+              {displayedProjections.map((projection) => (
                 <div className={`projection-row ${projection.tone}`} key={projection.time}>
                   <time>{projection.time}</time>
                   <strong>{projection.label}</strong>
                   <span className="state-dot" aria-hidden="true" />
                 </div>
               ))}
+              {memberPreview && displayedProjections.length === 0 ? (
+                <p className="empty-state">この日に共有されている状態はありません。</p>
+              ) : null}
             </div>
-            <button className="preview-button" type="button" onClick={() => setMemberPreview(!memberPreview)}>
-              {memberPreview ? '自分の表示に戻る' : 'メンバー表示をプレビュー'} <span aria-hidden="true">→</span>
+            <button className="preview-button" type="button" disabled={previewLoading} onClick={toggleMemberPreview}>
+              {previewLoading ? '取得中…' : memberPreview ? '自分の表示に戻る' : 'メンバー表示をプレビュー'} <span aria-hidden="true">→</span>
             </button>
           </article>
         </section>

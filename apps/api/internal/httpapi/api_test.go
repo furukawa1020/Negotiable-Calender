@@ -1,7 +1,9 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -9,6 +11,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/policy"
 )
@@ -18,8 +21,18 @@ type stubDatabase struct {
 }
 
 type stubPolicyStore struct {
-	value policy.SharingPolicy
-	err   error
+	value     policy.SharingPolicy
+	err       error
+	overrides []policy.ManualOverride
+}
+
+func (store *stubPolicyStore) ListActiveOverrides(context.Context, string, time.Time) ([]policy.ManualOverride, error) {
+	return store.overrides, store.err
+}
+
+func (store *stubPolicyStore) CreateOverride(_ context.Context, value policy.ManualOverride) error {
+	store.overrides = append(store.overrides, value)
+	return store.err
 }
 
 func (store *stubPolicyStore) Get(context.Context, string) (policy.SharingPolicy, error) {
@@ -177,6 +190,49 @@ func TestSharingPolicyGetReturnsNotFound(t *testing.T) {
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d", response.Code)
+	}
+}
+
+func TestManualOverrideCreateThenList(t *testing.T) {
+	t.Parallel()
+	store := &stubPolicyStore{}
+	handler := New(stubDatabase{}, store, "", testLogger())
+	now := time.Now().UTC()
+	body, err := json.Marshal(map[string]any{
+		"startAt":   now.Add(time.Hour),
+		"endAt":     now.Add(2 * time.Hour),
+		"expiresAt": now.Add(3 * time.Hour),
+		"state": map[string]string{
+			"availability":     "limited",
+			"interruptibility": "urgent_only",
+			"requestability":   "later",
+			"reschedulability": "low",
+		},
+	})
+	if err != nil {
+		t.Fatalf("encode request: %v", err)
+	}
+	post := httptest.NewRequest(http.MethodPost, "/api/v1/users/manager-1/manual-overrides", bytes.NewReader(body))
+	postResponse := httptest.NewRecorder()
+	handler.ServeHTTP(postResponse, post)
+	if postResponse.Code != http.StatusCreated {
+		t.Fatalf("expected POST 201, got %d: %s", postResponse.Code, postResponse.Body)
+	}
+	if len(store.overrides) != 1 {
+		t.Fatalf("override was not persisted")
+	}
+	if store.overrides[0].UserID != "manager-1" {
+		t.Fatalf("path user was not persisted")
+	}
+
+	get := httptest.NewRequest(http.MethodGet, "/api/v1/users/manager-1/manual-overrides", nil)
+	getResponse := httptest.NewRecorder()
+	handler.ServeHTTP(getResponse, get)
+	if getResponse.Code != http.StatusOK {
+		t.Fatalf("expected GET 200, got %d", getResponse.Code)
+	}
+	if !strings.Contains(getResponse.Body.String(), "urgent_only") {
+		t.Fatalf("stored override missing from list: %s", getResponse.Body)
 	}
 }
 

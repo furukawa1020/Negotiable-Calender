@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 )
 
 var ErrNotFound = errors.New("sharing policy not found")
@@ -13,6 +14,8 @@ var ErrNotFound = errors.New("sharing policy not found")
 type Store interface {
 	Get(context.Context, string) (SharingPolicy, error)
 	Upsert(context.Context, SharingPolicy) error
+	ListActiveOverrides(context.Context, string, time.Time) ([]ManualOverride, error)
+	CreateOverride(context.Context, ManualOverride) error
 }
 
 type PostgresStore struct {
@@ -50,9 +53,73 @@ CREATE TABLE IF NOT EXISTS policy_rules (
 );
 CREATE INDEX IF NOT EXISTS policy_rules_policy_priority_idx
     ON policy_rules(policy_id, priority DESC, id);
+CREATE TABLE IF NOT EXISTS manual_overrides (
+    id text PRIMARY KEY,
+    user_id text NOT NULL,
+    start_at timestamptz NOT NULL,
+    end_at timestamptz NOT NULL,
+    availability text NOT NULL,
+    interruptibility text NOT NULL,
+    requestability text NOT NULL,
+    reschedulability text NOT NULL,
+    expires_at timestamptz NOT NULL,
+    created_at timestamptz NOT NULL
+);
+CREATE INDEX IF NOT EXISTS manual_overrides_user_active_idx
+    ON manual_overrides(user_id, end_at, expires_at);
 `
 	if _, err := database.ExecContext(ctx, schema); err != nil {
 		return fmt.Errorf("create sharing policy schema: %w", err)
+	}
+	return nil
+}
+
+func (store *PostgresStore) ListActiveOverrides(ctx context.Context, userID string, now time.Time) ([]ManualOverride, error) {
+	rows, err := store.database.QueryContext(ctx, `
+SELECT id, user_id, start_at, end_at, availability, interruptibility,
+       requestability, reschedulability, expires_at, created_at
+FROM manual_overrides
+WHERE user_id = $1 AND end_at > $2 AND expires_at > $2
+ORDER BY start_at, id
+`, userID, now)
+	if err != nil {
+		return nil, fmt.Errorf("list manual overrides: %w", err)
+	}
+	defer rows.Close()
+	var result []ManualOverride
+	for rows.Next() {
+		var value ManualOverride
+		if err := rows.Scan(
+			&value.ID, &value.UserID, &value.StartAt, &value.EndAt,
+			&value.State.Availability, &value.State.Interruptibility,
+			&value.State.Requestability, &value.State.Reschedulability,
+			&value.ExpiresAt, &value.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan manual override: %w", err)
+		}
+		result = append(result, value)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate manual overrides: %w", err)
+	}
+	return result, nil
+}
+
+func (store *PostgresStore) CreateOverride(ctx context.Context, value ManualOverride) error {
+	if err := value.Validate(); err != nil {
+		return err
+	}
+	_, err := store.database.ExecContext(ctx, `
+INSERT INTO manual_overrides (
+    id, user_id, start_at, end_at, availability, interruptibility,
+    requestability, reschedulability, expires_at, created_at
+) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+`, value.ID, value.UserID, value.StartAt, value.EndAt,
+		value.State.Availability, value.State.Interruptibility,
+		value.State.Requestability, value.State.Reschedulability,
+		value.ExpiresAt, value.CreatedAt)
+	if err != nil {
+		return fmt.Errorf("create manual override: %w", err)
 	}
 	return nil
 }

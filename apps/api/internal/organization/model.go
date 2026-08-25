@@ -11,10 +11,10 @@ import (
 type Role string
 
 const (
-	Owner Role = "OWNER"
-	Admin Role = "ADMIN"
+	Owner   Role = "OWNER"
+	Admin   Role = "ADMIN"
 	Manager Role = "MANAGER"
-	Member Role = "MEMBER"
+	Member  Role = "MEMBER"
 )
 
 func (r Role) Valid() bool {
@@ -27,8 +27,8 @@ func (r Role) Valid() bool {
 }
 
 type Organization struct {
-	ID string
-	Name string
+	ID        string
+	Name      string
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
@@ -44,13 +44,13 @@ func (o Organization) Validate() error {
 }
 
 type User struct {
-	ID string
-	Email string
+	ID          string
+	Email       string
 	DisplayName string
-	AvatarURL string
-	Timezone string
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	AvatarURL   string
+	Timezone    string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 func (u User) Validate() error {
@@ -74,11 +74,11 @@ func (u User) Validate() error {
 }
 
 type Membership struct {
-	ID string
+	ID             string
 	OrganizationID string
-	UserID string
-	Role Role
-	CreatedAt time.Time
+	UserID         string
+	Role           Role
+	CreatedAt      time.Time
 }
 
 func (m Membership) Validate() error {

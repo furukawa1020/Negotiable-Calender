@@ -33,8 +33,56 @@ func New(database databasePinger, policies policy.Store, webOrigin string, logge
 	mux.HandleFunc("GET /api/v1/status", api.status)
 	mux.HandleFunc("GET /api/v1/users/{userId}/sharing-policy", api.getSharingPolicy)
 	mux.HandleFunc("PUT /api/v1/users/{userId}/sharing-policy", api.putSharingPolicy)
+	mux.HandleFunc("GET /api/v1/users/{userId}/manual-overrides", api.listManualOverrides)
+	mux.HandleFunc("POST /api/v1/users/{userId}/manual-overrides", api.createManualOverride)
 	mux.HandleFunc("OPTIONS /api/v1/{path...}", api.options)
 	return api.middleware(mux)
+}
+
+type createOverrideRequest struct {
+	StartAt   time.Time               `json:"startAt"`
+	EndAt     time.Time               `json:"endAt"`
+	State     policy.InteractionState `json:"state"`
+	ExpiresAt time.Time               `json:"expiresAt"`
+}
+
+func (api *API) listManualOverrides(response http.ResponseWriter, request *http.Request) {
+	values, err := api.policies.ListActiveOverrides(request.Context(), request.PathValue("userId"), time.Now().UTC())
+	if err != nil {
+		api.logger.Error("list manual overrides", "error", err)
+		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to load manual overrides"})
+		return
+	}
+	if values == nil {
+		values = []policy.ManualOverride{}
+	}
+	writeJSON(response, http.StatusOK, map[string]any{"overrides": values})
+}
+
+func (api *API) createManualOverride(response http.ResponseWriter, request *http.Request) {
+	var input createOverrideRequest
+	decoder := json.NewDecoder(http.MaxBytesReader(response, request.Body, 1<<20))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&input); err != nil {
+		writeJSON(response, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+		return
+	}
+	now := time.Now().UTC()
+	value := policy.ManualOverride{
+		ID: newID("override"), UserID: request.PathValue("userId"),
+		StartAt: input.StartAt, EndAt: input.EndAt, State: input.State,
+		ExpiresAt: input.ExpiresAt, CreatedAt: now,
+	}
+	if err := value.Validate(); err != nil {
+		writeJSON(response, http.StatusUnprocessableEntity, map[string]string{"error": fmt.Sprintf("invalid manual override: %s", err)})
+		return
+	}
+	if err := api.policies.CreateOverride(request.Context(), value); err != nil {
+		api.logger.Error("create manual override", "error", err)
+		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to create manual override"})
+		return
+	}
+	writeJSON(response, http.StatusCreated, value)
 }
 
 func (api *API) health(response http.ResponseWriter, _ *http.Request) {
@@ -156,7 +204,7 @@ func (api *API) middleware(next http.Handler) http.Handler {
 		if api.webOrigin != "" && request.Header.Get("Origin") == api.webOrigin {
 			response.Header().Set("Access-Control-Allow-Origin", api.webOrigin)
 			response.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-			response.Header().Set("Access-Control-Allow-Methods", "GET, PUT, OPTIONS")
+			response.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
 			response.Header().Set("Vary", "Origin")
 		}
 

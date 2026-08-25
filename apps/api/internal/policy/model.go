@@ -97,13 +97,13 @@ func (r Rule) Validate() error {
 }
 
 type ManualOverride struct {
-	ID        string
-	UserID    string
-	StartAt   time.Time
-	EndAt     time.Time
-	State     InteractionState
-	ExpiresAt time.Time
-	CreatedAt time.Time
+	ID        string           `json:"id"`
+	UserID    string           `json:"userId"`
+	StartAt   time.Time        `json:"startAt"`
+	EndAt     time.Time        `json:"endAt"`
+	State     InteractionState `json:"state"`
+	ExpiresAt time.Time        `json:"expiresAt"`
+	CreatedAt time.Time        `json:"createdAt"`
 }
 
 func (o ManualOverride) Validate() error {
@@ -121,6 +121,9 @@ func (o ManualOverride) Validate() error {
 	}
 	if err := validUTC("created_at", o.CreatedAt); err != nil {
 		return err
+	}
+	if !o.ExpiresAt.After(o.CreatedAt) {
+		return fmt.Errorf("expires_at must be after created_at")
 	}
 	return o.State.Validate()
 }

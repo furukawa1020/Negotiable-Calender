@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/policy"
+	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/projection"
 )
 
 type stubDatabase struct {
@@ -24,6 +25,15 @@ type stubPolicyStore struct {
 	value     policy.SharingPolicy
 	err       error
 	overrides []policy.ManualOverride
+}
+
+type stubProjectionStore struct {
+	view projection.View
+	err  error
+}
+
+func (store *stubProjectionStore) GetView(context.Context, string, string, time.Time, time.Time) (projection.View, error) {
+	return store.view, store.err
 }
 
 func (store *stubPolicyStore) ListActiveOverrides(context.Context, string, time.Time) ([]policy.ManualOverride, error) {
@@ -54,7 +64,7 @@ func TestHealth(t *testing.T) {
 
 	request := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	response := httptest.NewRecorder()
-	New(stubDatabase{}, &stubPolicyStore{}, "", testLogger()).ServeHTTP(response, request)
+	New(stubDatabase{}, &stubPolicyStore{}, &stubProjectionStore{}, "", testLogger()).ServeHTTP(response, request)
 
 	if response.Code != http.StatusOK {
 		t.Fatalf("expected %d, got %d", http.StatusOK, response.Code)
@@ -69,7 +79,7 @@ func TestReadinessFailsClosedWhenDatabaseIsUnavailable(t *testing.T) {
 
 	request := httptest.NewRequest(http.MethodGet, "/readyz", nil)
 	response := httptest.NewRecorder()
-	New(stubDatabase{err: errors.New("database unavailable")}, &stubPolicyStore{}, "", testLogger()).ServeHTTP(response, request)
+	New(stubDatabase{err: errors.New("database unavailable")}, &stubPolicyStore{}, &stubProjectionStore{}, "", testLogger()).ServeHTTP(response, request)
 
 	if response.Code != http.StatusServiceUnavailable {
 		t.Fatalf("expected %d, got %d", http.StatusServiceUnavailable, response.Code)
@@ -85,7 +95,7 @@ func TestReadinessFailsClosedWhenDatabaseIsUnavailable(t *testing.T) {
 func TestCORSAllowsOnlyConfiguredWebOrigin(t *testing.T) {
 	t.Parallel()
 
-	handler := New(stubDatabase{}, &stubPolicyStore{}, "https://calendar.example", testLogger())
+	handler := New(stubDatabase{}, &stubPolicyStore{}, &stubProjectionStore{}, "https://calendar.example", testLogger())
 	for _, test := range []struct {
 		name           string
 		origin         string
@@ -108,7 +118,7 @@ func TestCORSAllowsOnlyConfiguredWebOrigin(t *testing.T) {
 
 func TestCORSPreflightAllowsSharingPolicyUpdate(t *testing.T) {
 	t.Parallel()
-	handler := New(stubDatabase{}, &stubPolicyStore{}, "https://calendar.example", testLogger())
+	handler := New(stubDatabase{}, &stubPolicyStore{}, &stubProjectionStore{}, "https://calendar.example", testLogger())
 	request := httptest.NewRequest(http.MethodOptions, "/api/v1/users/manager-1/sharing-policy", nil)
 	request.Header.Set("Origin", "https://calendar.example")
 	response := httptest.NewRecorder()
@@ -124,7 +134,7 @@ func TestCORSPreflightAllowsSharingPolicyUpdate(t *testing.T) {
 func TestSharingPolicyPutThenGet(t *testing.T) {
 	t.Parallel()
 	store := &stubPolicyStore{err: policy.ErrNotFound}
-	handler := New(stubDatabase{}, store, "", testLogger())
+	handler := New(stubDatabase{}, store, &stubProjectionStore{}, "", testLogger())
 	body := `{
   "default": {
     "availability": "available",
@@ -172,7 +182,7 @@ func TestSharingPolicyPutThenGet(t *testing.T) {
 func TestSharingPolicyRejectsInvalidState(t *testing.T) {
 	t.Parallel()
 	store := &stubPolicyStore{err: policy.ErrNotFound}
-	handler := New(stubDatabase{}, store, "", testLogger())
+	handler := New(stubDatabase{}, store, &stubProjectionStore{}, "", testLogger())
 	body := `{"default":{"availability":"secret_meeting"},"workingHours":[],"rules":[]}`
 	request := httptest.NewRequest(http.MethodPut, "/api/v1/users/manager-1/sharing-policy", strings.NewReader(body))
 	response := httptest.NewRecorder()
@@ -184,7 +194,7 @@ func TestSharingPolicyRejectsInvalidState(t *testing.T) {
 
 func TestSharingPolicyGetReturnsNotFound(t *testing.T) {
 	t.Parallel()
-	handler := New(stubDatabase{}, &stubPolicyStore{err: policy.ErrNotFound}, "", testLogger())
+	handler := New(stubDatabase{}, &stubPolicyStore{err: policy.ErrNotFound}, &stubProjectionStore{}, "", testLogger())
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/users/missing/sharing-policy", nil)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
@@ -196,7 +206,7 @@ func TestSharingPolicyGetReturnsNotFound(t *testing.T) {
 func TestManualOverrideCreateThenList(t *testing.T) {
 	t.Parallel()
 	store := &stubPolicyStore{}
-	handler := New(stubDatabase{}, store, "", testLogger())
+	handler := New(stubDatabase{}, store, &stubProjectionStore{}, "", testLogger())
 	now := time.Now().UTC()
 	body, err := json.Marshal(map[string]any{
 		"startAt":   now.Add(time.Hour),
@@ -233,6 +243,38 @@ func TestManualOverrideCreateThenList(t *testing.T) {
 	}
 	if !strings.Contains(getResponse.Body.String(), "urgent_only") {
 		t.Fatalf("stored override missing from list: %s", getResponse.Body)
+	}
+}
+
+func TestPublicProjectionContainsOnlySafeFields(t *testing.T) {
+	t.Parallel()
+	now := time.Now().UTC()
+	projectionStore := &stubProjectionStore{view: projection.View{
+		UserID: "manager-1", Timezone: "Asia/Tokyo", GeneratedAt: now,
+		Segments: []projection.Segment{{
+			StartAt: now, EndAt: now.Add(time.Hour),
+			Availability: policy.Limited, Interruptibility: policy.UrgentOnly,
+			Requestability: policy.RequestLater, Reschedulability: policy.RescheduleLow,
+			ExpectedResponseBucket: "unknown",
+		}},
+	}}
+	handler := New(stubDatabase{}, &stubPolicyStore{}, projectionStore, "", testLogger())
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/people/manager-1/projection?timezone=Asia%2FTokyo", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", response.Code, response.Body)
+	}
+	encoded := response.Body.String()
+	for _, expected := range []string{"segments", "availability", "interruptibility", "requestability", "reschedulability"} {
+		if !strings.Contains(encoded, expected) {
+			t.Fatalf("public projection missing %q: %s", expected, encoded)
+		}
+	}
+	for _, forbidden := range []string{"title", "description", "location", "attendees", "organizer", "providerEventId", "calendarName"} {
+		if strings.Contains(encoded, forbidden) {
+			t.Fatalf("private field %q leaked: %s", forbidden, encoded)
+		}
 	}
 }
 

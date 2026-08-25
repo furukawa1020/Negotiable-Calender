@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/policy"
+	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/projection"
 )
 
 type databasePinger interface {
@@ -19,14 +20,15 @@ type databasePinger interface {
 }
 
 type API struct {
-	database  databasePinger
-	policies  policy.Store
-	webOrigin string
-	logger    *slog.Logger
+	database    databasePinger
+	policies    policy.Store
+	projections projection.Store
+	webOrigin   string
+	logger      *slog.Logger
 }
 
-func New(database databasePinger, policies policy.Store, webOrigin string, logger *slog.Logger) http.Handler {
-	api := &API{database: database, policies: policies, webOrigin: webOrigin, logger: logger}
+func New(database databasePinger, policies policy.Store, projections projection.Store, webOrigin string, logger *slog.Logger) http.Handler {
+	api := &API{database: database, policies: policies, projections: projections, webOrigin: webOrigin, logger: logger}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", api.health)
 	mux.HandleFunc("GET /readyz", api.ready)
@@ -35,8 +37,52 @@ func New(database databasePinger, policies policy.Store, webOrigin string, logge
 	mux.HandleFunc("PUT /api/v1/users/{userId}/sharing-policy", api.putSharingPolicy)
 	mux.HandleFunc("GET /api/v1/users/{userId}/manual-overrides", api.listManualOverrides)
 	mux.HandleFunc("POST /api/v1/users/{userId}/manual-overrides", api.createManualOverride)
+	mux.HandleFunc("GET /api/v1/people/{userId}/projection", api.getPublicProjection)
 	mux.HandleFunc("OPTIONS /api/v1/{path...}", api.options)
 	return api.middleware(mux)
+}
+
+func (api *API) getPublicProjection(response http.ResponseWriter, request *http.Request) {
+	timezone := request.URL.Query().Get("timezone")
+	if timezone == "" {
+		timezone = "Asia/Tokyo"
+	}
+	location, err := time.LoadLocation(timezone)
+	if err != nil {
+		writeJSON(response, http.StatusBadRequest, map[string]string{"error": "invalid timezone"})
+		return
+	}
+	localNow := time.Now().In(location)
+	localStart := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), 0, 0, 0, 0, location)
+	from := localStart.UTC()
+	to := localStart.Add(24 * time.Hour).UTC()
+	if raw := request.URL.Query().Get("from"); raw != "" {
+		from, err = time.Parse(time.RFC3339, raw)
+		if err != nil {
+			writeJSON(response, http.StatusBadRequest, map[string]string{"error": "invalid from"})
+			return
+		}
+		from = from.UTC()
+	}
+	if raw := request.URL.Query().Get("to"); raw != "" {
+		to, err = time.Parse(time.RFC3339, raw)
+		if err != nil {
+			writeJSON(response, http.StatusBadRequest, map[string]string{"error": "invalid to"})
+			return
+		}
+		to = to.UTC()
+	}
+	if !to.After(from) {
+		writeJSON(response, http.StatusBadRequest, map[string]string{"error": "to must be after from"})
+		return
+	}
+	view, err := api.projections.GetView(request.Context(), request.PathValue("userId"), timezone, from, to)
+	if err != nil {
+		api.logger.Error("get public projection", "error", err)
+		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to load projection"})
+		return
+	}
+	writeJSON(response, http.StatusOK, view)
 }
 
 type createOverrideRequest struct {

@@ -1,4 +1,4 @@
-import { type FormEvent, useState } from 'react'
+import { type FormEvent, useMemo, useState } from 'react'
 
 const privateEvents = [
   { time: '09:00', label: 'Product Review', size: 'short' },
@@ -7,13 +7,15 @@ const privateEvents = [
   { time: '13:00', label: 'Recruiting Interview', size: 'large' },
 ]
 
-const projections = [
+const initialProjections = [
   { time: '09:00 — 10:00', label: '相談可能', tone: 'available' },
   { time: '10:00 — 11:30', label: '緊急のみ', tone: 'urgent' },
   { time: '11:30 — 13:00', label: '割り込み非推奨', tone: 'focus' },
   { time: '13:00 — 15:30', label: '対応困難', tone: 'unavailable' },
   { time: '15:30 —', label: '15分相談可能', tone: 'available' },
 ]
+
+const apiURL = import.meta.env.VITE_API_URL || 'http://localhost:8080'
 
 function ShieldIcon() {
   return (
@@ -29,11 +31,69 @@ function App() {
   const [memberPreview, setMemberPreview] = useState(false)
   const [accountOpen, setAccountOpen] = useState(false)
   const [notice, setNotice] = useState('')
+  const [dayOffset, setDayOffset] = useState(0)
+  const [calendarLayer, setCalendarLayer] = useState<'both' | 'private' | 'projection'>('both')
+  const [projections, setProjections] = useState(initialProjections)
+  const [overrideSaving, setOverrideSaving] = useState(false)
+  const visibleDate = useMemo(() => {
+    const value = new Date()
+    value.setDate(value.getDate() + dayOffset)
+    return value
+  }, [dayOffset])
+  const dateLabel = new Intl.DateTimeFormat('ja-JP', {
+    month: 'long', day: 'numeric', weekday: 'short',
+  }).format(visibleDate)
 
   const submitRequest = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setActiveDialog('')
     setNotice('レビュー依頼を送信しました。候補時間を生成しています。')
+  }
+
+  const submitOverride = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const form = new FormData(event.currentTarget)
+    const startTime = String(form.get('startTime'))
+    const endTime = String(form.get('endTime'))
+    const availability = String(form.get('availability'))
+    const [startHour, startMinute] = startTime.split(':').map(Number)
+    const [endHour, endMinute] = endTime.split(':').map(Number)
+    const startAt = new Date(visibleDate)
+    startAt.setHours(startHour, startMinute, 0, 0)
+    const endAt = new Date(visibleDate)
+    endAt.setHours(endHour, endMinute, 0, 0)
+    setOverrideSaving(true)
+    try {
+      const response = await fetch(`${apiURL}/api/v1/users/demo-manager/manual-overrides`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          startAt: startAt.toISOString(),
+          endAt: endAt.toISOString(),
+          expiresAt: new Date(endAt.getTime() + 24 * 60 * 60 * 1000).toISOString(),
+          state: {
+            availability,
+            interruptibility: availability === 'available' ? 'open' : 'urgent_only',
+            requestability: availability === 'available' ? 'open' : 'later',
+            reschedulability: availability === 'available' ? 'high' : 'low',
+          },
+        }),
+      })
+      if (!response.ok) {
+        throw new Error('save failed')
+      }
+      const label = availability === 'available' ? '相談可能（上書き）' : '緊急のみ（上書き）'
+      setProjections((current) => [
+        ...current,
+        { time: `${startTime} — ${endTime}`, label, tone: availability === 'available' ? 'available' : 'urgent' },
+      ])
+      setActiveDialog('')
+      setNotice('公開状態を上書きしました。')
+    } catch {
+      setNotice('保存できませんでした。APIの接続を確認してください。')
+    } finally {
+      setOverrideSaving(false)
+    }
   }
 
   return (
@@ -61,7 +121,7 @@ function App() {
       <main id="top">
         <section className="hero" aria-labelledby="page-title">
           <div>
-            <p className="eyebrow">SUNDAY · 23 AUGUST</p>
+            <p className="eyebrow">{dateLabel}</p>
             <h1 id="page-title">今日、どう関われるか。</h1>
             <p className="hero-copy">予定の中身はあなたのもの。組織には、調整に必要な余地だけを共有します。</p>
           </div>
@@ -79,7 +139,21 @@ function App() {
           <button type="button" onClick={() => setActiveDialog('rules')}>共有ルールを確認</button>
         </section>
 
-        <section className={memberPreview ? 'calendar-grid member-preview' : 'calendar-grid'} aria-label="今日のプライベート予定と公開状態">
+        <section className="calendar-toolbar" aria-label="カレンダー操作">
+          <div className="date-controls">
+            <button type="button" aria-label="前の日" onClick={() => setDayOffset((value) => value - 1)}>←</button>
+            <button type="button" onClick={() => setDayOffset(0)}>今日</button>
+            <button type="button" aria-label="次の日" onClick={() => setDayOffset((value) => value + 1)}>→</button>
+          </div>
+          <div className="layer-controls" aria-label="表示レイヤー">
+            <button className={calendarLayer === 'both' ? 'active' : ''} type="button" onClick={() => setCalendarLayer('both')}>両方</button>
+            <button className={calendarLayer === 'private' ? 'active' : ''} type="button" onClick={() => setCalendarLayer('private')}>Private</button>
+            <button className={calendarLayer === 'projection' ? 'active' : ''} type="button" onClick={() => setCalendarLayer('projection')}>Projection</button>
+          </div>
+          <button className="override-button" type="button" onClick={() => setActiveDialog('override')}>状態を上書き</button>
+        </section>
+
+        <section className={memberPreview ? 'calendar-grid member-preview' : `calendar-grid layer-${calendarLayer}`} aria-label="今日のプライベート予定と公開状態">
           <article className="calendar-panel private-panel">
             <div className="panel-heading">
               <div>
@@ -198,6 +272,38 @@ function App() {
               <div><span>勤務時間外</span><strong>対応不可</strong></div>
             </div>
             <button className="primary-button full-button" type="button" onClick={() => { setActiveDialog(''); setNotice('共有ルールを保存しました。') }}>このルールを保存</button>
+          </section>
+        </div>
+      ) : null}
+
+      {activeDialog === 'override' ? (
+        <div className="modal-backdrop" role="presentation">
+          <section className="modal" role="dialog" aria-modal="true" aria-labelledby="override-title">
+            <div className="modal-heading">
+              <div>
+                <p className="eyebrow">MANUAL OVERRIDE</p>
+                <h2 id="override-title">公開状態を上書き</h2>
+              </div>
+              <button className="close-button" type="button" aria-label="閉じる" onClick={() => setActiveDialog('')}>×</button>
+            </div>
+            <p className="modal-copy">予定の内容は変更せず、組織に見える関わりやすさだけを一時変更します。</p>
+            <form className="request-form" onSubmit={submitOverride}>
+              <div className="form-row">
+                <label>開始<input name="startTime" type="time" defaultValue="15:30" required /></label>
+                <label>終了<input name="endTime" type="time" defaultValue="16:00" required /></label>
+              </div>
+              <label>
+                公開状態
+                <select name="availability" defaultValue="available">
+                  <option value="available">相談可能</option>
+                  <option value="limited">緊急のみ</option>
+                </select>
+              </label>
+              <div className="modal-actions">
+                <button className="secondary-button" type="button" onClick={() => setActiveDialog('')}>キャンセル</button>
+                <button className="primary-button" type="submit" disabled={overrideSaving}>{overrideSaving ? '保存中…' : '上書きを保存'}</button>
+              </div>
+            </form>
           </section>
         </div>
       ) : null}

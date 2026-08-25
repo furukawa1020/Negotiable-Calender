@@ -257,6 +257,66 @@ h1 {
   box-shadow: 0 18px 50px rgba(46, 55, 50, 0.06);
 }
 
+.calendar-toolbar {
+  margin-top: 24px;
+  padding: 10px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-bottom: 0;
+  border-radius: 12px 12px 0 0;
+  background: rgba(251, 250, 246, 0.9);
+}
+
+.calendar-toolbar + .calendar-grid {
+  margin-top: 0;
+  border-radius: 0 0 14px 14px;
+}
+
+.date-controls,
+.layer-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.date-controls button,
+.layer-controls button,
+.override-button {
+  padding: 8px 11px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  background: transparent;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.layer-controls {
+  margin-left: auto;
+  padding: 3px;
+  border-radius: 8px;
+  background: #ebece6;
+}
+
+.layer-controls button {
+  border-color: transparent;
+}
+
+.layer-controls button.active {
+  color: var(--green);
+  background: white;
+  box-shadow: 0 2px 7px rgba(23, 33, 29, 0.09);
+}
+
+.override-button {
+  color: white;
+  border-color: var(--green);
+  background: var(--green);
+}
+
 .calendar-panel {
   min-width: 0;
   padding: 28px;
@@ -276,6 +336,20 @@ h1 {
 }
 
 .member-preview .projection-panel {
+  border-left: 0;
+}
+
+.layer-private,
+.layer-projection {
+  grid-template-columns: 1fr;
+}
+
+.layer-private .projection-panel,
+.layer-projection .private-panel {
+  display: none;
+}
+
+.layer-projection .projection-panel {
   border-left: 0;
 }
 

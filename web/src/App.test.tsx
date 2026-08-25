@@ -40,8 +40,7 @@ describe('App', () => {
     fireEvent.click(screen.getByRole('button', { name: '次の日' }))
     expect(screen.getByText(/月|火|水|木|金|土|日/, { selector: '.eyebrow' }).textContent).not.toBe(initialDate)
     fireEvent.click(screen.getByRole('button', { name: 'Private' }))
-    expect(screen.getByRole('heading', { name: 'あなたの予定' })).toBeVisible()
-    expect(screen.getByRole('heading', { name: '組織に見える状態' })).not.toBeVisible()
+    expect(screen.getByLabelText('今日のプライベート予定と公開状態')).toHaveClass('layer-private')
   })
 
   it('persists a manual override and reflects it in the projection', async () => {

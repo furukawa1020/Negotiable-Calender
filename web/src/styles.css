@@ -116,6 +116,44 @@ a:focus-visible {
   cursor: pointer;
 }
 
+.account-wrap {
+  position: relative;
+}
+
+.account-menu {
+  position: absolute;
+  z-index: 20;
+  top: 46px;
+  right: 0;
+  width: 220px;
+  padding: 16px;
+  display: grid;
+  gap: 7px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--paper);
+  box-shadow: 0 18px 45px rgba(23, 33, 29, 0.16);
+}
+
+.account-menu strong {
+  font-size: 13px;
+}
+
+.account-menu span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.account-menu button {
+  margin-top: 5px;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  background: transparent;
+  cursor: pointer;
+}
+
 main {
   width: min(1180px, calc(100% - 48px));
   margin: 0 auto;
@@ -227,6 +265,18 @@ h1 {
 .projection-panel {
   border-left: 1px solid var(--line);
   background: #f7f8f3;
+}
+
+.member-preview {
+  grid-template-columns: 1fr;
+}
+
+.member-preview .private-panel {
+  display: none;
+}
+
+.member-preview .projection-panel {
+  border-left: 0;
 }
 
 .panel-heading {

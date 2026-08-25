@@ -1,8 +1,11 @@
 import { fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 
 describe('App', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
   it('explains the privacy projection without exposing sample details as shared data', () => {
     render(<App />)
 
@@ -29,5 +32,29 @@ describe('App', () => {
     fireEvent.click(screen.getByRole('button', { name: '閉じる' }))
     fireEvent.click(screen.getByRole('button', { name: /メンバー表示をプレビュー/ }))
     expect(screen.getByRole('button', { name: /自分の表示に戻る/ })).toBeInTheDocument()
+  })
+
+  it('navigates days and switches manager calendar layers', () => {
+    render(<App />)
+    const initialDate = screen.getByText(/月|火|水|木|金|土|日/, { selector: '.eyebrow' }).textContent
+    fireEvent.click(screen.getByRole('button', { name: '次の日' }))
+    expect(screen.getByText(/月|火|水|木|金|土|日/, { selector: '.eyebrow' }).textContent).not.toBe(initialDate)
+    fireEvent.click(screen.getByRole('button', { name: 'Private' }))
+    expect(screen.getByRole('heading', { name: 'あなたの予定' })).toBeVisible()
+    expect(screen.getByRole('heading', { name: '組織に見える状態' })).not.toBeVisible()
+  })
+
+  it('persists a manual override and reflects it in the projection', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{}', { status: 201 }))
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: '状態を上書き' }))
+    expect(screen.getByRole('dialog', { name: '公開状態を上書き' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '上書きを保存' }))
+    expect(await screen.findByText('公開状態を上書きしました。')).toBeInTheDocument()
+    expect(screen.getByText('相談可能（上書き）')).toBeInTheDocument()
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/manual-overrides'),
+      expect.objectContaining({ method: 'POST' }),
+    )
   })
 })

@@ -2,7 +2,7 @@
 
 予定の詳細を公開せず、「いつ・どの程度・どう関われるか」だけを共有する、管理職向けのプライバシー重視カレンダーです。
 
-現在は Issue 001（Project bootstrap）の実装段階です。Go API、React Web、PostgreSQL をローカルまたは Docker Compose で起動でき、lint・test・build を CI で検証します。画面内のスケジュールは UI シェル確認用のサンプルで、外部カレンダーとはまだ同期していません。
+Issue 001（Project bootstrap）を完了し、Issue 002（Domain model）を実装しています。Go API、React Web、PostgreSQL をローカルまたは Docker Compose で起動でき、lint・test・build を CI で検証します。画面内のスケジュールは操作可能なデモデータで、外部カレンダーとはまだ同期していません。
 
 ## 必要なもの
 
@@ -65,4 +65,4 @@ docs/           要件・設計資料
 compose.yaml    ローカル統合環境
 ```
 
-仕様の Source of Truth は [docs/requirements.md](docs/requirements.md) です。Private Event と組織向け Projection は異なる trust domain として扱い、組織向け API から予定詳細を参照できない境界を今後も維持します。
+仕様の Source of Truth は [docs/requirements.md](docs/requirements.md) です。ドメイン境界と不変条件は [docs/domain-model.md](docs/domain-model.md) に記録します。Private Event と組織向け Projection は異なる trust domain として扱い、組織向け API から予定詳細を参照できない境界を維持します。

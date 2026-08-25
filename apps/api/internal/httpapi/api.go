@@ -2,10 +2,16 @@ package httpapi
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"time"
+
+	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/policy"
 )
 
 type databasePinger interface {
@@ -14,16 +20,20 @@ type databasePinger interface {
 
 type API struct {
 	database  databasePinger
+	policies  policy.Store
 	webOrigin string
 	logger    *slog.Logger
 }
 
-func New(database databasePinger, webOrigin string, logger *slog.Logger) http.Handler {
-	api := &API{database: database, webOrigin: webOrigin, logger: logger}
+func New(database databasePinger, policies policy.Store, webOrigin string, logger *slog.Logger) http.Handler {
+	api := &API{database: database, policies: policies, webOrigin: webOrigin, logger: logger}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", api.health)
 	mux.HandleFunc("GET /readyz", api.ready)
 	mux.HandleFunc("GET /api/v1/status", api.status)
+	mux.HandleFunc("GET /api/v1/users/{userId}/sharing-policy", api.getSharingPolicy)
+	mux.HandleFunc("PUT /api/v1/users/{userId}/sharing-policy", api.putSharingPolicy)
+	mux.HandleFunc("OPTIONS /api/v1/{path...}", api.options)
 	return api.middleware(mux)
 }
 
@@ -50,6 +60,93 @@ func (api *API) status(response http.ResponseWriter, _ *http.Request) {
 	})
 }
 
+func (api *API) options(response http.ResponseWriter, _ *http.Request) {
+	response.WriteHeader(http.StatusNoContent)
+}
+
+type updatePolicyRequest struct {
+	Default      policy.InteractionState `json:"default"`
+	WorkingHours []policy.WorkingWindow  `json:"workingHours"`
+	Rules        []updateRuleRequest     `json:"rules"`
+}
+
+type updateRuleRequest struct {
+	ConditionType string                  `json:"conditionType"`
+	Condition     json.RawMessage         `json:"condition"`
+	State         policy.InteractionState `json:"state"`
+	Priority      int                     `json:"priority"`
+	Enabled       bool                    `json:"enabled"`
+}
+
+func (api *API) getSharingPolicy(response http.ResponseWriter, request *http.Request) {
+	value, err := api.policies.Get(request.Context(), request.PathValue("userId"))
+	if errors.Is(err, policy.ErrNotFound) {
+		writeJSON(response, http.StatusNotFound, map[string]string{"error": "sharing policy not found"})
+		return
+	}
+	if err != nil {
+		api.logger.Error("get sharing policy", "error", err)
+		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to load sharing policy"})
+		return
+	}
+	writeJSON(response, http.StatusOK, value)
+}
+
+func (api *API) putSharingPolicy(response http.ResponseWriter, request *http.Request) {
+	var input updatePolicyRequest
+	decoder := json.NewDecoder(http.MaxBytesReader(response, request.Body, 1<<20))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&input); err != nil {
+		writeJSON(response, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+		return
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		writeJSON(response, http.StatusBadRequest, map[string]string{"error": "request body must contain one JSON value"})
+		return
+	}
+
+	userID := request.PathValue("userId")
+	now := time.Now().UTC()
+	value, err := api.policies.Get(request.Context(), userID)
+	if errors.Is(err, policy.ErrNotFound) {
+		value = policy.SharingPolicy{ID: newID("policy"), UserID: userID, CreatedAt: now}
+	} else if err != nil {
+		api.logger.Error("load sharing policy before update", "error", err)
+		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to update sharing policy"})
+		return
+	}
+	value.Default = input.Default
+	value.WorkingHours = input.WorkingHours
+	value.Rules = make([]policy.Rule, 0, len(input.Rules))
+	value.UpdatedAt = now
+	for _, inputRule := range input.Rules {
+		value.Rules = append(value.Rules, policy.Rule{
+			ID: newID("rule"), PolicyID: value.ID,
+			ConditionType: inputRule.ConditionType, Condition: inputRule.Condition,
+			State: inputRule.State, Priority: inputRule.Priority, Enabled: inputRule.Enabled,
+		})
+	}
+	if err := value.Validate(); err != nil {
+		writeJSON(response, http.StatusUnprocessableEntity, map[string]string{"error": fmt.Sprintf("invalid sharing policy: %s", err)})
+		return
+	}
+	if err := api.policies.Upsert(request.Context(), value); err != nil {
+		api.logger.Error("update sharing policy", "error", err)
+		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to update sharing policy"})
+		return
+	}
+	writeJSON(response, http.StatusOK, value)
+}
+
+func newID(prefix string) string {
+	bytes := make([]byte, 16)
+	if _, err := rand.Read(bytes); err != nil {
+		panic("secure random source unavailable")
+	}
+	return fmt.Sprintf("%s-%x", prefix, bytes)
+}
+
 func (api *API) middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		response.Header().Set("X-Content-Type-Options", "nosniff")
@@ -58,6 +155,8 @@ func (api *API) middleware(next http.Handler) http.Handler {
 
 		if api.webOrigin != "" && request.Header.Get("Origin") == api.webOrigin {
 			response.Header().Set("Access-Control-Allow-Origin", api.webOrigin)
+			response.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+			response.Header().Set("Access-Control-Allow-Methods", "GET, PUT, OPTIONS")
 			response.Header().Set("Vary", "Origin")
 		}
 

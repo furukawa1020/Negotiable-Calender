@@ -48,6 +48,24 @@ func TestGenerateCandidatesFallsBackToAsync(t *testing.T) {
 	}
 }
 
+func TestGenerateCandidatesHonorsAsyncPreference(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 8, 27, 6, 0, 0, 0, time.UTC)
+	value := validCandidateRequest(now)
+	value.SyncPreference = AsyncPreferred
+	options, err := GenerateCandidates(CandidateInput{
+		Request:     value,
+		Projections: []projection.ScheduleProjection{validCandidateProjection(now, now.Add(time.Hour))},
+		Now:         now,
+	})
+	if err != nil {
+		t.Fatalf("candidate generation failed: %v", err)
+	}
+	if len(options) != 1 || options[0].Type != OptionAsync {
+		t.Fatalf("async preference was not honored: %#v", options)
+	}
+}
+
 func validCandidateRequest(now time.Time) CoordinationRequest {
 	return CoordinationRequest{
 		ID: "request-1", OrganizationID: "org-1", RequesterUserID: "member-1", TargetUserID: "manager-1",

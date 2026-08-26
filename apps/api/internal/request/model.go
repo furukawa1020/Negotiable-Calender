@@ -91,20 +91,20 @@ func (v OptionType) Valid() bool {
 }
 
 type CoordinationRequest struct {
-	ID              string
-	OrganizationID  string
-	RequesterUserID string
-	TargetUserID    string
-	Type            Type
-	Title           string
-	DurationMinutes int
-	DeadlineAt      time.Time
-	SyncPreference  SyncPreference
-	Priority        Priority
-	Status          Status
-	Options         []Option
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	ID              string         `json:"id"`
+	OrganizationID  string         `json:"organizationId"`
+	RequesterUserID string         `json:"requesterUserId"`
+	TargetUserID    string         `json:"targetUserId"`
+	Type            Type           `json:"type"`
+	Title           string         `json:"title"`
+	DurationMinutes int            `json:"durationMinutes"`
+	DeadlineAt      time.Time      `json:"deadlineAt"`
+	SyncPreference  SyncPreference `json:"syncPreference"`
+	Priority        Priority       `json:"priority"`
+	Status          Status         `json:"status"`
+	Options         []Option       `json:"options"`
+	CreatedAt       time.Time      `json:"createdAt"`
+	UpdatedAt       time.Time      `json:"updatedAt"`
 }
 
 func (r CoordinationRequest) Validate() error {
@@ -134,6 +134,9 @@ func (r CoordinationRequest) Validate() error {
 	}
 	if err := validUTC("deadline_at", r.DeadlineAt); err != nil {
 		return err
+	}
+	if !r.DeadlineAt.After(r.CreatedAt) {
+		return fmt.Errorf("deadline must be after creation")
 	}
 	if !r.SyncPreference.Valid() {
 		return fmt.Errorf("invalid sync preference")

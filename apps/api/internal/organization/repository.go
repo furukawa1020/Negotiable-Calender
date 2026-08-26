@@ -96,9 +96,15 @@ VALUES ($1,$2,$3,$3) ON CONFLICT (id) DO NOTHING`, []any{"demo-org", "Product St
 		{`INSERT INTO users (id, email, display_name, avatar_url, timezone, created_at, updated_at)
 VALUES ($1,$2,$3,'',$4,$5,$5) ON CONFLICT (id) DO NOTHING`,
 			[]any{"demo-manager", "manager@example.invalid", "山田 太郎", "Asia/Tokyo", now}},
+		{`INSERT INTO users (id, email, display_name, avatar_url, timezone, created_at, updated_at)
+VALUES ($1,$2,$3,'',$4,$5,$5) ON CONFLICT (id) DO NOTHING`,
+			[]any{"demo-member", "member@example.invalid", "佐藤 花子", "Asia/Tokyo", now}},
 		{`INSERT INTO memberships (id, organization_id, user_id, role, created_at)
 VALUES ($1,$2,$3,$4,$5) ON CONFLICT (organization_id, user_id) DO NOTHING`,
 			[]any{"demo-membership-manager", "demo-org", "demo-manager", Manager, now}},
+		{`INSERT INTO memberships (id, organization_id, user_id, role, created_at)
+VALUES ($1,$2,$3,$4,$5) ON CONFLICT (organization_id, user_id) DO NOTHING`,
+			[]any{"demo-membership-member", "demo-org", "demo-member", Member, now}},
 	}
 	for _, statement := range statements {
 		if _, err := database.ExecContext(ctx, statement.query, statement.args...); err != nil {

@@ -14,6 +14,7 @@ import (
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/organization"
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/policy"
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/projection"
+	coordinationrequest "github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/request"
 )
 
 type databasePinger interface {
@@ -25,12 +26,13 @@ type API struct {
 	policies      policy.Store
 	projections   projection.Store
 	organizations organization.Store
+	requests      coordinationrequest.Store
 	webOrigin     string
 	logger        *slog.Logger
 }
 
-func New(database databasePinger, policies policy.Store, projections projection.Store, organizations organization.Store, webOrigin string, logger *slog.Logger) http.Handler {
-	api := &API{database: database, policies: policies, projections: projections, organizations: organizations, webOrigin: webOrigin, logger: logger}
+func New(database databasePinger, policies policy.Store, projections projection.Store, organizations organization.Store, requests coordinationrequest.Store, webOrigin string, logger *slog.Logger) http.Handler {
+	api := &API{database: database, policies: policies, projections: projections, organizations: organizations, requests: requests, webOrigin: webOrigin, logger: logger}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", api.health)
 	mux.HandleFunc("GET /readyz", api.ready)
@@ -41,8 +43,54 @@ func New(database databasePinger, policies policy.Store, projections projection.
 	mux.HandleFunc("POST /api/v1/users/{userId}/manual-overrides", api.createManualOverride)
 	mux.HandleFunc("GET /api/v1/people/{userId}/projection", api.getPublicProjection)
 	mux.HandleFunc("GET /api/v1/people", api.listPeople)
+	mux.HandleFunc("POST /api/v1/requests", api.createCoordinationRequest)
 	mux.HandleFunc("OPTIONS /api/v1/{path...}", api.options)
 	return api.middleware(mux)
+}
+
+type createCoordinationRequestInput struct {
+	TargetUserID    string                             `json:"targetUserId"`
+	Type            coordinationrequest.Type           `json:"type"`
+	Title           string                             `json:"title"`
+	DurationMinutes int                                `json:"durationMinutes"`
+	DeadlineAt      time.Time                          `json:"deadlineAt"`
+	SyncPreference  coordinationrequest.SyncPreference `json:"syncPreference"`
+	Priority        coordinationrequest.Priority       `json:"priority"`
+}
+
+func (api *API) createCoordinationRequest(response http.ResponseWriter, request *http.Request) {
+	requesterID := request.Header.Get("X-Demo-User-ID")
+	organizationID := request.Header.Get("X-Organization-ID")
+	if requesterID == "" || organizationID == "" {
+		writeJSON(response, http.StatusUnauthorized, map[string]string{"error": "request identity is required"})
+		return
+	}
+	var input createCoordinationRequestInput
+	decoder := json.NewDecoder(http.MaxBytesReader(response, request.Body, 1<<20))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&input); err != nil {
+		writeJSON(response, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+		return
+	}
+	now := time.Now().UTC()
+	value := coordinationrequest.CoordinationRequest{
+		ID: newID("request"), OrganizationID: organizationID,
+		RequesterUserID: requesterID, TargetUserID: input.TargetUserID,
+		Type: input.Type, Title: input.Title, DurationMinutes: input.DurationMinutes,
+		DeadlineAt: input.DeadlineAt.UTC(), SyncPreference: input.SyncPreference,
+		Priority: input.Priority, Status: coordinationrequest.Pending,
+		Options: []coordinationrequest.Option{}, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := value.Validate(); err != nil {
+		writeJSON(response, http.StatusUnprocessableEntity, map[string]string{"error": fmt.Sprintf("invalid coordination request: %s", err)})
+		return
+	}
+	if err := api.requests.Create(request.Context(), value); err != nil {
+		api.logger.Error("create coordination request", "error", err)
+		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to create request"})
+		return
+	}
+	writeJSON(response, http.StatusCreated, value)
 }
 
 func (api *API) listPeople(response http.ResponseWriter, request *http.Request) {
@@ -267,7 +315,7 @@ func (api *API) middleware(next http.Handler) http.Handler {
 
 		if api.webOrigin != "" && request.Header.Get("Origin") == api.webOrigin {
 			response.Header().Set("Access-Control-Allow-Origin", api.webOrigin)
-			response.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+			response.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Demo-User-ID, X-Organization-ID")
 			response.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
 			response.Header().Set("Vary", "Origin")
 		}

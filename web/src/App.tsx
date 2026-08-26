@@ -59,6 +59,7 @@ function App() {
   const [people, setPeople] = useState<PersonCard[]>([])
   const [peopleLoading, setPeopleLoading] = useState(false)
   const [peopleError, setPeopleError] = useState('')
+  const [requestSaving, setRequestSaving] = useState(false)
   const [overrideSaving, setOverrideSaving] = useState(false)
   const visibleDate = useMemo(() => {
     const value = new Date()
@@ -70,10 +71,44 @@ function App() {
   }).format(visibleDate)
   const displayedProjections = memberPreview ? memberProjections : projections
 
-  const submitRequest = (event: FormEvent<HTMLFormElement>) => {
+  const submitRequest = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    setActiveDialog('')
-    setNotice('レビュー依頼を送信しました。候補時間を生成しています。')
+    const form = new FormData(event.currentTarget)
+    const deadline = new Date()
+    const [hour, minute] = String(form.get('deadline')).split(':').map(Number)
+    deadline.setHours(hour, minute, 0, 0)
+    if (deadline.getTime() <= Date.now()) {
+      deadline.setDate(deadline.getDate() + 1)
+    }
+    setRequestSaving(true)
+    try {
+      const response = await fetch(`${apiURL}/api/v1/requests`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Demo-User-ID': 'demo-member',
+          'X-Organization-ID': 'demo-org',
+        },
+        body: JSON.stringify({
+          targetUserId: 'demo-manager',
+          type: 'review',
+          title: String(form.get('title')),
+          durationMinutes: Number(form.get('duration')),
+          deadlineAt: deadline.toISOString(),
+          syncPreference: String(form.get('sync')),
+          priority: String(form.get('priority')),
+        }),
+      })
+      if (!response.ok) {
+        throw new Error('request failed')
+      }
+      setActiveDialog('')
+      setNotice('レビュー依頼を送信しました。候補時間を生成しています。')
+    } catch {
+      setNotice('依頼を送信できませんでした。入力内容とAPI接続を確認してください。')
+    } finally {
+      setRequestSaving(false)
+    }
   }
 
   const submitOverride = async (event: FormEvent<HTMLFormElement>) => {
@@ -402,7 +437,7 @@ function App() {
               </label>
               <div className="modal-actions">
                 <button className="secondary-button" type="button" onClick={() => setActiveDialog('')}>キャンセル</button>
-                <button className="primary-button" type="submit">候補を生成して送信</button>
+                <button className="primary-button" type="submit" disabled={requestSaving}>{requestSaving ? '送信中…' : '候補を生成して送信'}</button>
               </div>
             </form>
           </section>

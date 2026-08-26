@@ -16,6 +16,7 @@ import (
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/organization"
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/policy"
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/projection"
+	coordinationrequest "github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/request"
 )
 
 type stubDatabase struct {
@@ -36,6 +37,16 @@ type stubProjectionStore struct {
 type stubOrganizationStore struct {
 	people []organization.Person
 	err    error
+}
+
+type stubRequestStore struct {
+	value coordinationrequest.CoordinationRequest
+	err   error
+}
+
+func (store *stubRequestStore) Create(_ context.Context, value coordinationrequest.CoordinationRequest) error {
+	store.value = value
+	return store.err
 }
 
 func (store *stubOrganizationStore) ListPeople(context.Context, string) ([]organization.Person, error) {
@@ -74,7 +85,7 @@ func TestHealth(t *testing.T) {
 
 	request := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	response := httptest.NewRecorder()
-	New(stubDatabase{}, &stubPolicyStore{}, &stubProjectionStore{}, &stubOrganizationStore{}, "", testLogger()).ServeHTTP(response, request)
+	New(stubDatabase{}, &stubPolicyStore{}, &stubProjectionStore{}, &stubOrganizationStore{}, &stubRequestStore{}, "", testLogger()).ServeHTTP(response, request)
 
 	if response.Code != http.StatusOK {
 		t.Fatalf("expected %d, got %d", http.StatusOK, response.Code)
@@ -89,7 +100,7 @@ func TestReadinessFailsClosedWhenDatabaseIsUnavailable(t *testing.T) {
 
 	request := httptest.NewRequest(http.MethodGet, "/readyz", nil)
 	response := httptest.NewRecorder()
-	New(stubDatabase{err: errors.New("database unavailable")}, &stubPolicyStore{}, &stubProjectionStore{}, &stubOrganizationStore{}, "", testLogger()).ServeHTTP(response, request)
+	New(stubDatabase{err: errors.New("database unavailable")}, &stubPolicyStore{}, &stubProjectionStore{}, &stubOrganizationStore{}, &stubRequestStore{}, "", testLogger()).ServeHTTP(response, request)
 
 	if response.Code != http.StatusServiceUnavailable {
 		t.Fatalf("expected %d, got %d", http.StatusServiceUnavailable, response.Code)
@@ -105,7 +116,7 @@ func TestReadinessFailsClosedWhenDatabaseIsUnavailable(t *testing.T) {
 func TestCORSAllowsOnlyConfiguredWebOrigin(t *testing.T) {
 	t.Parallel()
 
-	handler := New(stubDatabase{}, &stubPolicyStore{}, &stubProjectionStore{}, &stubOrganizationStore{}, "https://calendar.example", testLogger())
+	handler := New(stubDatabase{}, &stubPolicyStore{}, &stubProjectionStore{}, &stubOrganizationStore{}, &stubRequestStore{}, "https://calendar.example", testLogger())
 	for _, test := range []struct {
 		name           string
 		origin         string
@@ -128,7 +139,7 @@ func TestCORSAllowsOnlyConfiguredWebOrigin(t *testing.T) {
 
 func TestCORSPreflightAllowsSharingPolicyUpdate(t *testing.T) {
 	t.Parallel()
-	handler := New(stubDatabase{}, &stubPolicyStore{}, &stubProjectionStore{}, &stubOrganizationStore{}, "https://calendar.example", testLogger())
+	handler := New(stubDatabase{}, &stubPolicyStore{}, &stubProjectionStore{}, &stubOrganizationStore{}, &stubRequestStore{}, "https://calendar.example", testLogger())
 	request := httptest.NewRequest(http.MethodOptions, "/api/v1/users/manager-1/sharing-policy", nil)
 	request.Header.Set("Origin", "https://calendar.example")
 	response := httptest.NewRecorder()
@@ -144,7 +155,7 @@ func TestCORSPreflightAllowsSharingPolicyUpdate(t *testing.T) {
 func TestSharingPolicyPutThenGet(t *testing.T) {
 	t.Parallel()
 	store := &stubPolicyStore{err: policy.ErrNotFound}
-	handler := New(stubDatabase{}, store, &stubProjectionStore{}, &stubOrganizationStore{}, "", testLogger())
+	handler := New(stubDatabase{}, store, &stubProjectionStore{}, &stubOrganizationStore{}, &stubRequestStore{}, "", testLogger())
 	body := `{
   "default": {
     "availability": "available",
@@ -192,7 +203,7 @@ func TestSharingPolicyPutThenGet(t *testing.T) {
 func TestSharingPolicyRejectsInvalidState(t *testing.T) {
 	t.Parallel()
 	store := &stubPolicyStore{err: policy.ErrNotFound}
-	handler := New(stubDatabase{}, store, &stubProjectionStore{}, &stubOrganizationStore{}, "", testLogger())
+	handler := New(stubDatabase{}, store, &stubProjectionStore{}, &stubOrganizationStore{}, &stubRequestStore{}, "", testLogger())
 	body := `{"default":{"availability":"secret_meeting"},"workingHours":[],"rules":[]}`
 	request := httptest.NewRequest(http.MethodPut, "/api/v1/users/manager-1/sharing-policy", strings.NewReader(body))
 	response := httptest.NewRecorder()
@@ -204,7 +215,7 @@ func TestSharingPolicyRejectsInvalidState(t *testing.T) {
 
 func TestSharingPolicyGetReturnsNotFound(t *testing.T) {
 	t.Parallel()
-	handler := New(stubDatabase{}, &stubPolicyStore{err: policy.ErrNotFound}, &stubProjectionStore{}, &stubOrganizationStore{}, "", testLogger())
+	handler := New(stubDatabase{}, &stubPolicyStore{err: policy.ErrNotFound}, &stubProjectionStore{}, &stubOrganizationStore{}, &stubRequestStore{}, "", testLogger())
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/users/missing/sharing-policy", nil)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
@@ -216,7 +227,7 @@ func TestSharingPolicyGetReturnsNotFound(t *testing.T) {
 func TestManualOverrideCreateThenList(t *testing.T) {
 	t.Parallel()
 	store := &stubPolicyStore{}
-	handler := New(stubDatabase{}, store, &stubProjectionStore{}, &stubOrganizationStore{}, "", testLogger())
+	handler := New(stubDatabase{}, store, &stubProjectionStore{}, &stubOrganizationStore{}, &stubRequestStore{}, "", testLogger())
 	now := time.Now().UTC()
 	body, err := json.Marshal(map[string]any{
 		"startAt":   now.Add(time.Hour),
@@ -268,7 +279,7 @@ func TestPublicProjectionContainsOnlySafeFields(t *testing.T) {
 			ExpectedResponseBucket: "unknown",
 		}},
 	}}
-	handler := New(stubDatabase{}, &stubPolicyStore{}, projectionStore, &stubOrganizationStore{}, "", testLogger())
+	handler := New(stubDatabase{}, &stubPolicyStore{}, projectionStore, &stubOrganizationStore{}, &stubRequestStore{}, "", testLogger())
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/people/manager-1/projection?timezone=Asia%2FTokyo", nil)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
@@ -293,7 +304,7 @@ func TestPeopleResponseOmitsEmailAndCalendarDetails(t *testing.T) {
 	organizations := &stubOrganizationStore{people: []organization.Person{{
 		ID: "manager-1", DisplayName: "山田 太郎", Timezone: "Asia/Tokyo", Role: organization.Manager,
 	}}}
-	handler := New(stubDatabase{}, &stubPolicyStore{}, &stubProjectionStore{}, organizations, "", testLogger())
+	handler := New(stubDatabase{}, &stubPolicyStore{}, &stubProjectionStore{}, organizations, &stubRequestStore{}, "", testLogger())
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/people?organizationId=org-1", nil)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
@@ -315,12 +326,60 @@ func TestPeopleResponseOmitsEmailAndCalendarDetails(t *testing.T) {
 
 func TestPeopleRequiresOrganizationID(t *testing.T) {
 	t.Parallel()
-	handler := New(stubDatabase{}, &stubPolicyStore{}, &stubProjectionStore{}, &stubOrganizationStore{}, "", testLogger())
+	handler := New(stubDatabase{}, &stubPolicyStore{}, &stubProjectionStore{}, &stubOrganizationStore{}, &stubRequestStore{}, "", testLogger())
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/people", nil)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", response.Code)
+	}
+}
+
+func TestCoordinationRequestCreate(t *testing.T) {
+	t.Parallel()
+	requests := &stubRequestStore{}
+	handler := New(stubDatabase{}, &stubPolicyStore{}, &stubProjectionStore{}, &stubOrganizationStore{}, requests, "", testLogger())
+	body, err := json.Marshal(map[string]any{
+		"targetUserId":    "demo-manager",
+		"type":            "review",
+		"title":           "API design review",
+		"durationMinutes": 15,
+		"deadlineAt":      time.Now().UTC().Add(4 * time.Hour),
+		"syncPreference":  "either",
+		"priority":        "normal",
+	})
+	if err != nil {
+		t.Fatalf("encode request: %v", err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/requests", bytes.NewReader(body))
+	request.Header.Set("X-Demo-User-ID", "demo-member")
+	request.Header.Set("X-Organization-ID", "demo-org")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", response.Code, response.Body)
+	}
+	if requests.value.Status != coordinationrequest.Pending {
+		t.Fatalf("new request status is %q", requests.value.Status)
+	}
+	if requests.value.RequesterUserID != "demo-member" {
+		t.Fatalf("requester identity was not persisted")
+	}
+	for _, forbidden := range []string{"privateEvent", "attendees", "location", "calendar"} {
+		if strings.Contains(response.Body.String(), forbidden) {
+			t.Fatalf("private field %q leaked: %s", forbidden, response.Body)
+		}
+	}
+}
+
+func TestCoordinationRequestRequiresIdentity(t *testing.T) {
+	t.Parallel()
+	handler := New(stubDatabase{}, &stubPolicyStore{}, &stubProjectionStore{}, &stubOrganizationStore{}, &stubRequestStore{}, "", testLogger())
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/requests", strings.NewReader("{}"))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", response.Code)
 	}
 }
 

@@ -28,6 +28,14 @@ type PublicProjection = {
   }>
 }
 
+type PersonCard = {
+  id: string
+  displayName: string
+  timezone: string
+  role: string
+  segments: ProjectionRow[]
+}
+
 function ShieldIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -47,6 +55,10 @@ function App() {
   const [projections, setProjections] = useState(initialProjections)
   const [memberProjections, setMemberProjections] = useState<ProjectionRow[]>([])
   const [previewLoading, setPreviewLoading] = useState(false)
+  const [currentView, setCurrentView] = useState<'calendar' | 'people'>('calendar')
+  const [people, setPeople] = useState<PersonCard[]>([])
+  const [peopleLoading, setPeopleLoading] = useState(false)
+  const [peopleError, setPeopleError] = useState('')
   const [overrideSaving, setOverrideSaving] = useState(false)
   const visibleDate = useMemo(() => {
     const value = new Date()
@@ -149,6 +161,47 @@ function App() {
     }
   }
 
+  const mapPublicSegments = (view: PublicProjection): ProjectionRow[] => {
+    const formatter = new Intl.DateTimeFormat('ja-JP', { hour: '2-digit', minute: '2-digit', hour12: false })
+    return view.segments.map((segment) => ({
+      time: `${formatter.format(new Date(segment.startAt))} — ${formatter.format(new Date(segment.endAt))}`,
+      label: segment.availability === 'available'
+        ? '相談可能'
+        : segment.interruptibility === 'urgent_only' ? '緊急のみ' : '対応困難',
+      tone: segment.availability === 'available'
+        ? 'available'
+        : segment.availability === 'limited' ? 'urgent' : 'unavailable',
+    }))
+  }
+
+  const openPeopleView = async () => {
+    setCurrentView('people')
+    setPeopleLoading(true)
+    setPeopleError('')
+    try {
+      const response = await fetch(`${apiURL}/api/v1/people?organizationId=demo-org`)
+      if (!response.ok) {
+        throw new Error('people failed')
+      }
+      const directory = await response.json() as { people: Array<Omit<PersonCard, 'segments'>> }
+      const cards = await Promise.all(directory.people.map(async (person) => {
+        const projectionResponse = await fetch(
+          `${apiURL}/api/v1/people/${person.id}/projection?timezone=${encodeURIComponent(person.timezone)}`,
+        )
+        if (!projectionResponse.ok) {
+          throw new Error('projection failed')
+        }
+        const view = await projectionResponse.json() as PublicProjection
+        return { ...person, segments: mapPublicSegments(view) }
+      }))
+      setPeople(cards)
+    } catch {
+      setPeopleError('組織の公開状態を取得できませんでした。')
+    } finally {
+      setPeopleLoading(false)
+    }
+  }
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -156,6 +209,10 @@ function App() {
           <span className="brand-mark" aria-hidden="true">N</span>
           <span>Negotiable Calendar</span>
         </a>
+        <nav className="top-nav" aria-label="メインナビゲーション">
+          <button className={currentView === 'calendar' ? 'active' : ''} type="button" onClick={() => setCurrentView('calendar')}>マイカレンダー</button>
+          <button className={currentView === 'people' ? 'active' : ''} type="button" onClick={openPeopleView}>組織</button>
+        </nav>
         <div className="topbar-actions">
           <span className="protected-badge"><ShieldIcon />予定詳細は保護されています</span>
           <div className="account-wrap">
@@ -172,6 +229,8 @@ function App() {
       </header>
 
       <main id="top">
+        {currentView === 'calendar' ? (
+        <>
         <section className="hero" aria-labelledby="page-title">
           <div>
             <p className="eyebrow">{dateLabel}</p>
@@ -253,6 +312,47 @@ function App() {
             </button>
           </article>
         </section>
+        </>
+        ) : (
+          <section className="people-view" aria-labelledby="people-title">
+            <div className="people-heading">
+              <div>
+                <p className="eyebrow">PRODUCT STUDIO · PEOPLE</p>
+                <h1 id="people-title">誰に、どう相談できるか。</h1>
+                <p className="hero-copy">予定名ではなく、いま共有されている関わりやすさだけを表示します。</p>
+              </div>
+              <button className="secondary-button" type="button" onClick={openPeopleView}>更新</button>
+            </div>
+            {peopleLoading ? <p className="people-status" role="status">公開状態を取得しています…</p> : null}
+            {peopleError ? <p className="people-status error" role="alert">{peopleError}</p> : null}
+            {!peopleLoading && !peopleError && people.length === 0 ? (
+              <p className="people-status">表示できる管理職はいません。</p>
+            ) : null}
+            <div className="people-list">
+              {people.map((person) => (
+                <article className="person-card" key={person.id}>
+                  <div className="person-profile">
+                    <span className="person-avatar">{person.displayName.slice(0, 1)}</span>
+                    <div>
+                      <h2>{person.displayName}</h2>
+                      <p>{person.role} · {person.timezone}</p>
+                    </div>
+                    <button type="button" onClick={() => setActiveDialog('request')}>依頼を作成</button>
+                  </div>
+                  <div className="person-timeline" aria-label={`${person.displayName}の公開状態`}>
+                    {person.segments.map((segment) => (
+                      <div className={`person-segment ${segment.tone}`} key={`${person.id}-${segment.time}`}>
+                        <time>{segment.time}</time>
+                        <strong>{segment.label}</strong>
+                      </div>
+                    ))}
+                    {person.segments.length === 0 ? <p>公開状態はありません。</p> : null}
+                  </div>
+                </article>
+              ))}
+            </div>
+          </section>
+        )}
       </main>
 
       {activeDialog === 'request' ? (

@@ -15,6 +15,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/httpapi"
+	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/organization"
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/policy"
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/projection"
 )
@@ -49,11 +50,19 @@ func main() {
 		logger.Error("migrate database", "error", err)
 		os.Exit(1)
 	}
+	if err := organization.EnsureSchema(migrationContext, db); err != nil {
+		logger.Error("migrate organization database", "error", err)
+		os.Exit(1)
+	}
 	if err := projection.EnsureSchema(migrationContext, db); err != nil {
 		logger.Error("migrate projection database", "error", err)
 		os.Exit(1)
 	}
 	if os.Getenv("DEMO_MODE") == "true" {
+		if err := organization.SeedDemo(migrationContext, db, time.Now().UTC()); err != nil {
+			logger.Error("seed demo organization", "error", err)
+			os.Exit(1)
+		}
 		if err := projection.SeedDemo(migrationContext, db, time.Now()); err != nil {
 			logger.Error("seed demo projections", "error", err)
 			os.Exit(1)
@@ -67,7 +76,7 @@ func main() {
 
 	server := &http.Server{
 		Addr:              ":" + port,
-		Handler:           httpapi.New(db, policy.NewPostgresStore(db), projection.NewPostgresStore(db), os.Getenv("WEB_ORIGIN"), logger),
+		Handler:           httpapi.New(db, policy.NewPostgresStore(db), projection.NewPostgresStore(db), organization.NewPostgresStore(db), os.Getenv("WEB_ORIGIN"), logger),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      10 * time.Second,

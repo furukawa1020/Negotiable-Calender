@@ -65,4 +65,26 @@ describe('App', () => {
       expect.objectContaining({ method: 'POST' }),
     )
   })
+
+  it('loads the organization people view from privacy-safe APIs', async () => {
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        people: [{ id: 'demo-manager', displayName: '山田 太郎', timezone: 'Asia/Tokyo', role: 'MANAGER' }],
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        segments: [{
+          startAt: '2026-08-23T00:00:00Z',
+          endAt: '2026-08-23T01:00:00Z',
+          availability: 'limited',
+          interruptibility: 'urgent_only',
+        }],
+      }), { status: 200 }))
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: '組織' }))
+    expect(await screen.findByRole('heading', { name: '誰に、どう相談できるか。' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '山田 太郎' })).toBeInTheDocument()
+    expect(screen.getByText('緊急のみ')).toBeInTheDocument()
+    expect(screen.queryByText('Product Review')).not.toBeInTheDocument()
+    expect(globalThis.fetch).toHaveBeenCalledWith(expect.stringContaining('/api/v1/people?organizationId=demo-org'))
+  })
 })

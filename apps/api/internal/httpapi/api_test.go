@@ -313,6 +313,17 @@ func TestPeopleResponseOmitsEmailAndCalendarDetails(t *testing.T) {
 	}
 }
 
+func TestPeopleRequiresOrganizationID(t *testing.T) {
+	t.Parallel()
+	handler := New(stubDatabase{}, &stubPolicyStore{}, &stubProjectionStore{}, &stubOrganizationStore{}, "", testLogger())
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/people", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", response.Code)
+	}
+}
+
 func testLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }

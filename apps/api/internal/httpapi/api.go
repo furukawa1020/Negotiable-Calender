@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/organization"
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/policy"
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/projection"
 )
@@ -20,15 +21,16 @@ type databasePinger interface {
 }
 
 type API struct {
-	database    databasePinger
-	policies    policy.Store
-	projections projection.Store
-	webOrigin   string
-	logger      *slog.Logger
+	database      databasePinger
+	policies      policy.Store
+	projections   projection.Store
+	organizations organization.Store
+	webOrigin     string
+	logger        *slog.Logger
 }
 
-func New(database databasePinger, policies policy.Store, projections projection.Store, webOrigin string, logger *slog.Logger) http.Handler {
-	api := &API{database: database, policies: policies, projections: projections, webOrigin: webOrigin, logger: logger}
+func New(database databasePinger, policies policy.Store, projections projection.Store, organizations organization.Store, webOrigin string, logger *slog.Logger) http.Handler {
+	api := &API{database: database, policies: policies, projections: projections, organizations: organizations, webOrigin: webOrigin, logger: logger}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", api.health)
 	mux.HandleFunc("GET /readyz", api.ready)
@@ -38,8 +40,24 @@ func New(database databasePinger, policies policy.Store, projections projection.
 	mux.HandleFunc("GET /api/v1/users/{userId}/manual-overrides", api.listManualOverrides)
 	mux.HandleFunc("POST /api/v1/users/{userId}/manual-overrides", api.createManualOverride)
 	mux.HandleFunc("GET /api/v1/people/{userId}/projection", api.getPublicProjection)
+	mux.HandleFunc("GET /api/v1/people", api.listPeople)
 	mux.HandleFunc("OPTIONS /api/v1/{path...}", api.options)
 	return api.middleware(mux)
+}
+
+func (api *API) listPeople(response http.ResponseWriter, request *http.Request) {
+	organizationID := request.URL.Query().Get("organizationId")
+	if organizationID == "" {
+		writeJSON(response, http.StatusBadRequest, map[string]string{"error": "organizationId is required"})
+		return
+	}
+	people, err := api.organizations.ListPeople(request.Context(), organizationID)
+	if err != nil {
+		api.logger.Error("list organization people", "error", err)
+		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to load people"})
+		return
+	}
+	writeJSON(response, http.StatusOK, map[string]any{"people": people})
 }
 
 func (api *API) getPublicProjection(response http.ResponseWriter, request *http.Request) {

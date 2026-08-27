@@ -16,13 +16,16 @@ describe('App', () => {
   })
 
   it('creates a coordination request from the dialog', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{}', { status: 201 }))
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      status: 'suggested',
+      options: [{ type: 'meeting' }, { type: 'async' }],
+    }), { status: 201 }))
     render(<App />)
 
     fireEvent.click(screen.getByRole('button', { name: '依頼を作成' }))
     expect(screen.getByRole('dialog', { name: '依頼を作成' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '候補を生成して送信' }))
-    expect(await screen.findByRole('status')).toHaveTextContent('レビュー依頼を送信しました')
+    expect(await screen.findByRole('status')).toHaveTextContent('2件の候補を生成しました')
     expect(globalThis.fetch).toHaveBeenCalledWith(
       expect.stringContaining('/api/v1/requests'),
       expect.objectContaining({ method: 'POST' }),

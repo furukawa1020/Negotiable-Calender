@@ -85,6 +85,22 @@ func (api *API) createCoordinationRequest(response http.ResponseWriter, request 
 		writeJSON(response, http.StatusUnprocessableEntity, map[string]string{"error": fmt.Sprintf("invalid coordination request: %s", err)})
 		return
 	}
+	publicProjections, err := api.projections.List(request.Context(), value.TargetUserID, now, value.DeadlineAt)
+	if err != nil {
+		api.logger.Error("load projections for request candidates", "error", err)
+		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to generate request options"})
+		return
+	}
+	options, err := coordinationrequest.GenerateCandidates(coordinationrequest.CandidateInput{
+		Request: value, Projections: publicProjections, Now: now,
+	})
+	if err != nil {
+		api.logger.Error("generate request candidates", "error", err)
+		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to generate request options"})
+		return
+	}
+	value.Options = options
+	value.Status = coordinationrequest.Suggested
 	if err := api.requests.Create(request.Context(), value); err != nil {
 		api.logger.Error("create coordination request", "error", err)
 		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to create request"})

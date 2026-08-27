@@ -102,8 +102,12 @@ function App() {
       if (!response.ok) {
         throw new Error('request failed')
       }
+      const created = await response.json() as { options?: unknown[] }
+      const optionCount = Array.isArray(created.options) ? created.options.length : 0
       setActiveDialog('')
-      setNotice('レビュー依頼を送信しました。候補時間を生成しています。')
+      setNotice(optionCount > 0
+        ? `レビュー依頼を送信し、${optionCount}件の候補を生成しました。`
+        : 'レビュー依頼を送信しました。')
     } catch {
       setNotice('依頼を送信できませんでした。入力内容とAPI接続を確認してください。')
     } finally {

@@ -156,15 +156,15 @@ func (r CoordinationRequest) Validate() error {
 }
 
 type Option struct {
-	ID             string
-	RequestID      string
-	Type           OptionType
-	StartAt        *time.Time
-	EndAt          *time.Time
-	ResponseBy     *time.Time
-	DelegateUserID string
-	Score          int
-	CreatedAt      time.Time
+	ID             string     `json:"id"`
+	RequestID      string     `json:"requestId"`
+	Type           OptionType `json:"type"`
+	StartAt        *time.Time `json:"startAt,omitempty"`
+	EndAt          *time.Time `json:"endAt,omitempty"`
+	ResponseBy     *time.Time `json:"responseBy,omitempty"`
+	DelegateUserID string     `json:"delegateUserId,omitempty"`
+	Score          int        `json:"-"`
+	CreatedAt      time.Time  `json:"createdAt"`
 }
 
 func (o Option) Validate() error {

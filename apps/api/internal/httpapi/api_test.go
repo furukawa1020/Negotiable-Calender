@@ -30,8 +30,13 @@ type stubPolicyStore struct {
 }
 
 type stubProjectionStore struct {
-	view projection.View
-	err  error
+	view   projection.View
+	values []projection.ScheduleProjection
+	err    error
+}
+
+func (store *stubProjectionStore) List(context.Context, string, time.Time, time.Time) ([]projection.ScheduleProjection, error) {
+	return store.values, store.err
 }
 
 type stubOrganizationStore struct {
@@ -359,13 +364,16 @@ func TestCoordinationRequestCreate(t *testing.T) {
 	if response.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d: %s", response.Code, response.Body)
 	}
-	if requests.value.Status != coordinationrequest.Pending {
+	if requests.value.Status != coordinationrequest.Suggested {
 		t.Fatalf("new request status is %q", requests.value.Status)
+	}
+	if len(requests.value.Options) != 1 || requests.value.Options[0].Type != coordinationrequest.OptionAsync {
+		t.Fatalf("expected async fallback option, got %#v", requests.value.Options)
 	}
 	if requests.value.RequesterUserID != "demo-member" {
 		t.Fatalf("requester identity was not persisted")
 	}
-	for _, forbidden := range []string{"privateEvent", "attendees", "location", "calendar"} {
+	for _, forbidden := range []string{"privateEvent", "attendees", "location", "calendar", "score"} {
 		if strings.Contains(response.Body.String(), forbidden) {
 			t.Fatalf("private field %q leaked: %s", forbidden, response.Body)
 		}

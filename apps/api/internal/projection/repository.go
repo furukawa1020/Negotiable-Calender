@@ -11,6 +11,7 @@ import (
 
 type Store interface {
 	GetView(context.Context, string, string, time.Time, time.Time) (View, error)
+	List(context.Context, string, time.Time, time.Time) ([]ScheduleProjection, error)
 }
 
 type PostgresStore struct {
@@ -46,6 +47,14 @@ CREATE INDEX IF NOT EXISTS schedule_projections_user_range_idx
 }
 
 func (store *PostgresStore) GetView(ctx context.Context, userID, timezone string, from, to time.Time) (View, error) {
+	values, err := store.List(ctx, userID, from, to)
+	if err != nil {
+		return View{}, err
+	}
+	return NewView(userID, timezone, values)
+}
+
+func (store *PostgresStore) List(ctx context.Context, userID string, from, to time.Time) ([]ScheduleProjection, error) {
 	rows, err := store.database.QueryContext(ctx, `
 SELECT id, user_id, start_at, end_at, availability, interruptibility,
        requestability, reschedulability, expected_response_bucket,
@@ -55,7 +64,7 @@ WHERE user_id = $1 AND start_at < $3 AND end_at > $2 AND expires_at > NOW()
 ORDER BY start_at, id
 `, userID, from, to)
 	if err != nil {
-		return View{}, fmt.Errorf("list schedule projections: %w", err)
+		return nil, fmt.Errorf("list schedule projections: %w", err)
 	}
 	defer rows.Close()
 	var values []ScheduleProjection
@@ -67,15 +76,15 @@ ORDER BY start_at, id
 			&value.State.Requestability, &value.State.Reschedulability,
 			&value.ExpectedResponseBucket, &value.GeneratedAt, &value.ExpiresAt,
 		); err != nil {
-			return View{}, fmt.Errorf("scan schedule projection: %w", err)
+			return nil, fmt.Errorf("scan schedule projection: %w", err)
 		}
 		value = normalizeTimestamps(value)
 		values = append(values, value)
 	}
 	if err := rows.Err(); err != nil {
-		return View{}, fmt.Errorf("iterate schedule projections: %w", err)
+		return nil, fmt.Errorf("iterate schedule projections: %w", err)
 	}
-	return NewView(userID, timezone, values)
+	return values, nil
 }
 
 func normalizeTimestamps(value ScheduleProjection) ScheduleProjection {

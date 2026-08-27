@@ -36,6 +36,27 @@ type PersonCard = {
   segments: ProjectionRow[]
 }
 
+type CoordinationOption = {
+  id: string
+  type: 'meeting' | 'async' | 'delegate' | 'decline'
+  startAt?: string
+  endAt?: string
+  responseBy?: string
+}
+
+type CoordinationRequest = {
+  id: string
+  requesterUserId: string
+  title: string
+  type: string
+  durationMinutes: number
+  deadlineAt: string
+  priority: string
+  status: string
+  options: CoordinationOption[]
+  createdAt: string
+}
+
 function ShieldIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -55,11 +76,14 @@ function App() {
   const [projections, setProjections] = useState(initialProjections)
   const [memberProjections, setMemberProjections] = useState<ProjectionRow[]>([])
   const [previewLoading, setPreviewLoading] = useState(false)
-  const [currentView, setCurrentView] = useState<'calendar' | 'people'>('calendar')
+  const [currentView, setCurrentView] = useState<'calendar' | 'people' | 'inbox'>('calendar')
   const [people, setPeople] = useState<PersonCard[]>([])
   const [peopleLoading, setPeopleLoading] = useState(false)
   const [peopleError, setPeopleError] = useState('')
   const [requestSaving, setRequestSaving] = useState(false)
+  const [inboxRequests, setInboxRequests] = useState<CoordinationRequest[]>([])
+  const [inboxLoading, setInboxLoading] = useState(false)
+  const [inboxError, setInboxError] = useState('')
   const [overrideSaving, setOverrideSaving] = useState(false)
   const visibleDate = useMemo(() => {
     const value = new Date()
@@ -241,6 +265,30 @@ function App() {
     }
   }
 
+  const openInbox = async () => {
+    setCurrentView('inbox')
+    setInboxLoading(true)
+    setInboxError('')
+    try {
+      const response = await fetch(`${apiURL}/api/v1/requests`, {
+        headers: { 'X-Demo-User-ID': 'demo-manager' },
+      })
+      if (!response.ok) {
+        throw new Error('inbox failed')
+      }
+      const payload = await response.json() as { requests: CoordinationRequest[] }
+      setInboxRequests(payload.requests)
+    } catch {
+      setInboxError('依頼を取得できませんでした。')
+    } finally {
+      setInboxLoading(false)
+    }
+  }
+
+  const formatDateTime = (value: string) => new Intl.DateTimeFormat('ja-JP', {
+    month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false,
+  }).format(new Date(value))
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -251,6 +299,7 @@ function App() {
         <nav className="top-nav" aria-label="メインナビゲーション">
           <button className={currentView === 'calendar' ? 'active' : ''} type="button" onClick={() => setCurrentView('calendar')}>マイカレンダー</button>
           <button className={currentView === 'people' ? 'active' : ''} type="button" onClick={openPeopleView}>組織</button>
+          <button className={currentView === 'inbox' ? 'active' : ''} type="button" onClick={openInbox}>依頼</button>
         </nav>
         <div className="topbar-actions">
           <span className="protected-badge"><ShieldIcon />予定詳細は保護されています</span>
@@ -352,7 +401,7 @@ function App() {
           </article>
         </section>
         </>
-        ) : (
+        ) : currentView === 'people' ? (
           <section className="people-view" aria-labelledby="people-title">
             <div className="people-heading">
               <div>
@@ -386,6 +435,46 @@ function App() {
                       </div>
                     ))}
                     {person.segments.length === 0 ? <p>公開状態はありません。</p> : null}
+                  </div>
+                </article>
+              ))}
+            </div>
+          </section>
+        ) : (
+          <section className="inbox-view" aria-labelledby="inbox-title">
+            <div className="people-heading">
+              <div>
+                <p className="eyebrow">COORDINATION · INBOX</p>
+                <h1 id="inbox-title">届いた依頼を、余白から選ぶ。</h1>
+                <p className="hero-copy">予定の詳細を開かず、共有された候補と期限だけで判断できます。</p>
+              </div>
+              <button className="secondary-button" type="button" onClick={openInbox}>更新</button>
+            </div>
+            {inboxLoading ? <p className="people-status" role="status">依頼を取得しています…</p> : null}
+            {inboxError ? <p className="people-status error" role="alert">{inboxError}</p> : null}
+            {!inboxLoading && !inboxError && inboxRequests.length === 0 ? (
+              <p className="people-status">新しい依頼はありません。</p>
+            ) : null}
+            <div className="request-list">
+              {inboxRequests.map((item) => (
+                <article className="request-card" key={item.id}>
+                  <div className="request-summary">
+                    <div className="request-meta">
+                      <span className={`priority priority-${item.priority}`}>{item.priority}</span>
+                      <span>{item.status}</span>
+                    </div>
+                    <h2>{item.title}</h2>
+                    <p>{item.requesterUserId} · {item.durationMinutes}分 · 期限 {formatDateTime(item.deadlineAt)}</p>
+                  </div>
+                  <div className="option-list" aria-label={`${item.title}の候補`}>
+                    {item.options.map((option) => (
+                      <div className="option-row" key={option.id}>
+                        <span>{option.type === 'meeting' ? 'MEETING' : 'ASYNC'}</span>
+                        <strong>{option.startAt && option.endAt
+                          ? `${formatDateTime(option.startAt)} — ${new Intl.DateTimeFormat('ja-JP', { hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(option.endAt))}`
+                          : '非同期で回答'}</strong>
+                      </div>
+                    ))}
                   </div>
                 </article>
               ))}

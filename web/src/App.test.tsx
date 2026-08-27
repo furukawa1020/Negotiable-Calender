@@ -95,4 +95,28 @@ describe('App', () => {
     expect(screen.queryByText('Product Review')).not.toBeInTheDocument()
     expect(globalThis.fetch).toHaveBeenCalledWith(expect.stringContaining('/api/v1/people?organizationId=demo-org'))
   })
+
+  it('loads the manager request inbox with generated options', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      requests: [{
+        id: 'request-1', requesterUserId: 'demo-member', title: '新API設計レビュー',
+        type: 'review', durationMinutes: 15, deadlineAt: '2026-08-27T08:00:00Z',
+        priority: 'high', status: 'suggested', createdAt: '2026-08-27T00:00:00Z',
+        options: [{
+          id: 'option-1', type: 'meeting',
+          startAt: '2026-08-27T01:00:00Z', endAt: '2026-08-27T01:15:00Z',
+        }],
+      }],
+    }), { status: 200 }))
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: '依頼' }))
+    expect(await screen.findByRole('heading', { name: '届いた依頼を、余白から選ぶ。' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '新API設計レビュー' })).toBeInTheDocument()
+    expect(screen.getByText('MEETING')).toBeInTheDocument()
+    expect(screen.queryByText('Product Review')).not.toBeInTheDocument()
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/api/v1/requests'),
+      expect.objectContaining({ headers: { 'X-Demo-User-ID': 'demo-manager' } }),
+    )
+  })
 })

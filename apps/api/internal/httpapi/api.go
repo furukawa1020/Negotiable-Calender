@@ -43,9 +43,28 @@ func New(database databasePinger, policies policy.Store, projections projection.
 	mux.HandleFunc("POST /api/v1/users/{userId}/manual-overrides", api.createManualOverride)
 	mux.HandleFunc("GET /api/v1/people/{userId}/projection", api.getPublicProjection)
 	mux.HandleFunc("GET /api/v1/people", api.listPeople)
+	mux.HandleFunc("GET /api/v1/requests", api.listCoordinationRequests)
 	mux.HandleFunc("POST /api/v1/requests", api.createCoordinationRequest)
 	mux.HandleFunc("OPTIONS /api/v1/{path...}", api.options)
 	return api.middleware(mux)
+}
+
+func (api *API) listCoordinationRequests(response http.ResponseWriter, request *http.Request) {
+	targetUserID := request.Header.Get("X-Demo-User-ID")
+	if targetUserID == "" {
+		writeJSON(response, http.StatusUnauthorized, map[string]string{"error": "request identity is required"})
+		return
+	}
+	values, err := api.requests.ListForTarget(request.Context(), targetUserID)
+	if err != nil {
+		api.logger.Error("list coordination requests", "error", err)
+		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to load requests"})
+		return
+	}
+	if values == nil {
+		values = []coordinationrequest.CoordinationRequest{}
+	}
+	writeJSON(response, http.StatusOK, map[string]any{"requests": values})
 }
 
 type createCoordinationRequestInput struct {

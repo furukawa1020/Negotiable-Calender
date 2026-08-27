@@ -4,10 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"time"
 )
 
 type Store interface {
 	Create(context.Context, CoordinationRequest) error
+	ListForTarget(context.Context, string) ([]CoordinationRequest, error)
 }
 
 type PostgresStore struct {
@@ -95,6 +97,95 @@ INSERT INTO coordination_request_options (
 		return fmt.Errorf("commit coordination request: %w", err)
 	}
 	return nil
+}
+
+func (store *PostgresStore) ListForTarget(ctx context.Context, targetUserID string) ([]CoordinationRequest, error) {
+	rows, err := store.database.QueryContext(ctx, `
+SELECT id, organization_id, requester_user_id, target_user_id, type, title,
+       duration_minutes, deadline_at, sync_preference, priority, status,
+       created_at, updated_at
+FROM coordination_requests
+WHERE target_user_id = $1
+ORDER BY created_at DESC, id DESC
+`, targetUserID)
+	if err != nil {
+		return nil, fmt.Errorf("list coordination requests: %w", err)
+	}
+	defer rows.Close()
+	values := make([]CoordinationRequest, 0)
+	for rows.Next() {
+		var value CoordinationRequest
+		if err := rows.Scan(
+			&value.ID, &value.OrganizationID, &value.RequesterUserID, &value.TargetUserID,
+			&value.Type, &value.Title, &value.DurationMinutes, &value.DeadlineAt,
+			&value.SyncPreference, &value.Priority, &value.Status,
+			&value.CreatedAt, &value.UpdatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan coordination request: %w", err)
+		}
+		value.DeadlineAt = value.DeadlineAt.UTC()
+		value.CreatedAt = value.CreatedAt.UTC()
+		value.UpdatedAt = value.UpdatedAt.UTC()
+		value.Options = []Option{}
+		values = append(values, value)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate coordination requests: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("close coordination request rows: %w", err)
+	}
+	for index := range values {
+		options, err := store.listOptions(ctx, values[index].ID)
+		if err != nil {
+			return nil, err
+		}
+		values[index].Options = options
+	}
+	return values, nil
+}
+
+func (store *PostgresStore) listOptions(ctx context.Context, requestID string) ([]Option, error) {
+	rows, err := store.database.QueryContext(ctx, `
+SELECT id, request_id, type, start_at, end_at, response_by, delegate_user_id, created_at
+FROM coordination_request_options
+WHERE request_id = $1
+ORDER BY created_at, id
+`, requestID)
+	if err != nil {
+		return nil, fmt.Errorf("list coordination options: %w", err)
+	}
+	defer rows.Close()
+	options := make([]Option, 0)
+	for rows.Next() {
+		var option Option
+		var startAt, endAt, responseBy sql.NullTime
+		var delegateUserID sql.NullString
+		if err := rows.Scan(
+			&option.ID, &option.RequestID, &option.Type, &startAt, &endAt,
+			&responseBy, &delegateUserID, &option.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan coordination option: %w", err)
+		}
+		option.StartAt = utcPointer(startAt)
+		option.EndAt = utcPointer(endAt)
+		option.ResponseBy = utcPointer(responseBy)
+		option.DelegateUserID = delegateUserID.String
+		option.CreatedAt = option.CreatedAt.UTC()
+		options = append(options, option)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate coordination options: %w", err)
+	}
+	return options, nil
+}
+
+func utcPointer(value sql.NullTime) *time.Time {
+	if !value.Valid {
+		return nil
+	}
+	normalized := value.Time.UTC()
+	return &normalized
 }
 
 func nullableString(value string) any {

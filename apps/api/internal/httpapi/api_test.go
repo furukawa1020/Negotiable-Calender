@@ -45,13 +45,20 @@ type stubOrganizationStore struct {
 }
 
 type stubRequestStore struct {
-	value coordinationrequest.CoordinationRequest
-	err   error
+	value  coordinationrequest.CoordinationRequest
+	values []coordinationrequest.CoordinationRequest
+	target string
+	err    error
 }
 
 func (store *stubRequestStore) Create(_ context.Context, value coordinationrequest.CoordinationRequest) error {
 	store.value = value
 	return store.err
+}
+
+func (store *stubRequestStore) ListForTarget(_ context.Context, targetUserID string) ([]coordinationrequest.CoordinationRequest, error) {
+	store.target = targetUserID
+	return store.values, store.err
 }
 
 func (store *stubOrganizationStore) ListPeople(context.Context, string) ([]organization.Person, error) {
@@ -384,6 +391,56 @@ func TestCoordinationRequestRequiresIdentity(t *testing.T) {
 	t.Parallel()
 	handler := New(stubDatabase{}, &stubPolicyStore{}, &stubProjectionStore{}, &stubOrganizationStore{}, &stubRequestStore{}, "", testLogger())
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/requests", strings.NewReader("{}"))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", response.Code)
+	}
+}
+
+func TestCoordinationRequestInboxUsesAuthenticatedTargetAndSafeFields(t *testing.T) {
+	t.Parallel()
+	now := time.Now().UTC()
+	startAt := now.Add(time.Hour)
+	endAt := startAt.Add(15 * time.Minute)
+	requests := &stubRequestStore{values: []coordinationrequest.CoordinationRequest{{
+		ID: "request-1", OrganizationID: "org-1", RequesterUserID: "member-1", TargetUserID: "manager-1",
+		Type: coordinationrequest.Review, Title: "API review", DurationMinutes: 15,
+		DeadlineAt: now.Add(4 * time.Hour), SyncPreference: coordinationrequest.Either,
+		Priority: coordinationrequest.PriorityNormal, Status: coordinationrequest.Suggested,
+		Options: []coordinationrequest.Option{{
+			ID: "option-1", RequestID: "request-1", Type: coordinationrequest.OptionMeeting,
+			StartAt: &startAt, EndAt: &endAt, CreatedAt: now,
+		}}, CreatedAt: now, UpdatedAt: now,
+	}}}
+	handler := New(stubDatabase{}, &stubPolicyStore{}, &stubProjectionStore{}, &stubOrganizationStore{}, requests, "", testLogger())
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/requests", nil)
+	request.Header.Set("X-Demo-User-ID", "manager-1")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", response.Code, response.Body)
+	}
+	if requests.target != "manager-1" {
+		t.Fatalf("authenticated target not used: %q", requests.target)
+	}
+	encoded := response.Body.String()
+	for _, expected := range []string{"requests", "API review", "option-1", "meeting"} {
+		if !strings.Contains(encoded, expected) {
+			t.Fatalf("inbox response missing %q: %s", expected, encoded)
+		}
+	}
+	for _, forbidden := range []string{"privateEvent", "attendees", "location", "calendar", "score"} {
+		if strings.Contains(encoded, forbidden) {
+			t.Fatalf("private field %q leaked: %s", forbidden, encoded)
+		}
+	}
+}
+
+func TestCoordinationRequestInboxRequiresIdentity(t *testing.T) {
+	t.Parallel()
+	handler := New(stubDatabase{}, &stubPolicyStore{}, &stubProjectionStore{}, &stubOrganizationStore{}, &stubRequestStore{}, "", testLogger())
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/requests", nil)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusUnauthorized {

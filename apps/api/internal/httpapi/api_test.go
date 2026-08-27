@@ -45,10 +45,20 @@ type stubOrganizationStore struct {
 }
 
 type stubRequestStore struct {
-	value  coordinationrequest.CoordinationRequest
-	values []coordinationrequest.CoordinationRequest
-	target string
-	err    error
+	value         coordinationrequest.CoordinationRequest
+	values        []coordinationrequest.CoordinationRequest
+	target        string
+	respondID     string
+	respondTarget string
+	respondStatus coordinationrequest.Status
+	respondOption string
+	err           error
+}
+
+func (store *stubRequestStore) Respond(_ context.Context, requestID, targetUserID string, status coordinationrequest.Status, optionID string) error {
+	store.respondID, store.respondTarget = requestID, targetUserID
+	store.respondStatus, store.respondOption = status, optionID
+	return store.err
 }
 
 func (store *stubRequestStore) Create(_ context.Context, value coordinationrequest.CoordinationRequest) error {
@@ -445,6 +455,35 @@ func TestCoordinationRequestInboxRequiresIdentity(t *testing.T) {
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d", response.Code)
+	}
+}
+
+func TestCoordinationRequestAcceptsSelectedOptionAsTarget(t *testing.T) {
+	t.Parallel()
+	store := &stubRequestStore{}
+	handler := New(stubDatabase{}, &stubPolicyStore{}, &stubProjectionStore{}, &stubOrganizationStore{}, store, "", testLogger())
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/requests/request-1/accept", strings.NewReader(`{"optionId":"option-1"}`))
+	request.Header.Set("X-Demo-User-ID", "manager-1")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", response.Code, response.Body)
+	}
+	if store.respondID != "request-1" || store.respondTarget != "manager-1" || store.respondStatus != coordinationrequest.Accepted || store.respondOption != "option-1" {
+		t.Fatalf("unexpected accept call: %#v", store)
+	}
+}
+
+func TestCoordinationRequestDeclinesAsTarget(t *testing.T) {
+	t.Parallel()
+	store := &stubRequestStore{}
+	handler := New(stubDatabase{}, &stubPolicyStore{}, &stubProjectionStore{}, &stubOrganizationStore{}, store, "", testLogger())
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/requests/request-1/decline", nil)
+	request.Header.Set("X-Demo-User-ID", "manager-1")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || store.respondStatus != coordinationrequest.Declined {
+		t.Fatalf("decline failed: status=%d store=%#v", response.Code, store)
 	}
 }
 

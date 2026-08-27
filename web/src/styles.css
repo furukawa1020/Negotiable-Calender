@@ -942,6 +942,42 @@ footer {
   background: #f2f8f4;
 }
 
+.option-row button {
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 6px;
+  color: white;
+  background: var(--green);
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.option-row button:disabled,
+.decline-button:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.decline-button {
+  justify-self: end;
+  border: 0;
+  color: #8a3e2c;
+  background: transparent;
+  font-size: 11px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.response-complete {
+  margin: 2px 0 0;
+  color: var(--green);
+  font-size: 11px;
+  font-weight: 700;
+  text-align: right;
+  text-transform: uppercase;
+}
+
 .option-row span {
   color: var(--green);
   font-size: 9px;
@@ -994,6 +1030,11 @@ footer {
   .request-summary {
     border-right: 0;
     border-bottom: 1px solid var(--line);
+  }
+
+  .option-row {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .person-profile {

@@ -7,9 +7,12 @@ import (
 	"time"
 )
 
+var ErrNotFound = fmt.Errorf("coordination request not found")
+
 type Store interface {
 	Create(context.Context, CoordinationRequest) error
 	ListForTarget(context.Context, string) ([]CoordinationRequest, error)
+	Respond(context.Context, string, string, Status, string) error
 }
 
 type PostgresStore struct {
@@ -53,6 +56,7 @@ CREATE TABLE IF NOT EXISTS coordination_request_options (
 );
 CREATE INDEX IF NOT EXISTS coordination_request_options_request_idx
     ON coordination_request_options(request_id, created_at, id);
+ALTER TABLE coordination_requests ADD COLUMN IF NOT EXISTS accepted_option_id text;
 `
 	if _, err := database.ExecContext(ctx, schema); err != nil {
 		return fmt.Errorf("create coordination request schema: %w", err)
@@ -103,7 +107,7 @@ func (store *PostgresStore) ListForTarget(ctx context.Context, targetUserID stri
 	rows, err := store.database.QueryContext(ctx, `
 SELECT id, organization_id, requester_user_id, target_user_id, type, title,
        duration_minutes, deadline_at, sync_preference, priority, status,
-       created_at, updated_at
+       created_at, updated_at, accepted_option_id
 FROM coordination_requests
 WHERE target_user_id = $1
 ORDER BY created_at DESC, id DESC
@@ -115,17 +119,19 @@ ORDER BY created_at DESC, id DESC
 	values := make([]CoordinationRequest, 0)
 	for rows.Next() {
 		var value CoordinationRequest
+		var acceptedOptionID sql.NullString
 		if err := rows.Scan(
 			&value.ID, &value.OrganizationID, &value.RequesterUserID, &value.TargetUserID,
 			&value.Type, &value.Title, &value.DurationMinutes, &value.DeadlineAt,
 			&value.SyncPreference, &value.Priority, &value.Status,
-			&value.CreatedAt, &value.UpdatedAt,
+			&value.CreatedAt, &value.UpdatedAt, &acceptedOptionID,
 		); err != nil {
 			return nil, fmt.Errorf("scan coordination request: %w", err)
 		}
 		value.DeadlineAt = value.DeadlineAt.UTC()
 		value.CreatedAt = value.CreatedAt.UTC()
 		value.UpdatedAt = value.UpdatedAt.UTC()
+		value.AcceptedOptionID = acceptedOptionID.String
 		value.Options = []Option{}
 		values = append(values, value)
 	}
@@ -143,6 +149,42 @@ ORDER BY created_at DESC, id DESC
 		values[index].Options = options
 	}
 	return values, nil
+}
+
+func (store *PostgresStore) Respond(ctx context.Context, requestID, targetUserID string, status Status, optionID string) error {
+	if status != Accepted && status != Declined {
+		return fmt.Errorf("unsupported response status")
+	}
+	var result sql.Result
+	var err error
+	if status == Accepted {
+		result, err = store.database.ExecContext(ctx, `
+UPDATE coordination_requests
+SET status = $1, accepted_option_id = $2, updated_at = $3
+WHERE id = $4 AND target_user_id = $5 AND status = $6
+  AND EXISTS (
+    SELECT 1 FROM coordination_request_options
+    WHERE id = $2 AND request_id = coordination_requests.id
+  )
+`, status, optionID, time.Now().UTC(), requestID, targetUserID, Suggested)
+	} else {
+		result, err = store.database.ExecContext(ctx, `
+UPDATE coordination_requests
+SET status = $1, accepted_option_id = NULL, updated_at = $2
+WHERE id = $3 AND target_user_id = $4 AND status = $5
+`, status, time.Now().UTC(), requestID, targetUserID, Suggested)
+	}
+	if err != nil {
+		return fmt.Errorf("respond to coordination request: %w", err)
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("count coordination request response: %w", err)
+	}
+	if updated == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (store *PostgresStore) listOptions(ctx context.Context, requestID string) ([]Option, error) {

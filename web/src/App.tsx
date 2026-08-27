@@ -84,6 +84,7 @@ function App() {
   const [inboxRequests, setInboxRequests] = useState<CoordinationRequest[]>([])
   const [inboxLoading, setInboxLoading] = useState(false)
   const [inboxError, setInboxError] = useState('')
+  const [respondingRequestID, setRespondingRequestID] = useState('')
   const [overrideSaving, setOverrideSaving] = useState(false)
   const visibleDate = useMemo(() => {
     const value = new Date()
@@ -289,6 +290,31 @@ function App() {
     month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false,
   }).format(new Date(value))
 
+  const respondToRequest = async (requestID: string, action: 'accept' | 'decline', optionID?: string) => {
+    setRespondingRequestID(requestID)
+    try {
+      const response = await fetch(`${apiURL}/api/v1/requests/${requestID}/${action}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Demo-User-ID': 'demo-manager',
+        },
+        body: action === 'accept' ? JSON.stringify({ optionId: optionID }) : undefined,
+      })
+      if (!response.ok) {
+        throw new Error('response failed')
+      }
+      setInboxRequests((current) => current.map((item) => item.id === requestID
+        ? { ...item, status: action === 'accept' ? 'accepted' : 'declined' }
+        : item))
+      setNotice(action === 'accept' ? '候補を承認しました。' : '依頼を辞退しました。')
+    } catch {
+      setNotice('依頼を更新できませんでした。最新状態を確認してください。')
+    } finally {
+      setRespondingRequestID('')
+    }
+  }
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -473,8 +499,14 @@ function App() {
                         <strong>{option.startAt && option.endAt
                           ? `${formatDateTime(option.startAt)} — ${new Intl.DateTimeFormat('ja-JP', { hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(option.endAt))}`
                           : '非同期で回答'}</strong>
+                        {item.status === 'suggested' ? (
+                          <button type="button" disabled={respondingRequestID === item.id} onClick={() => respondToRequest(item.id, 'accept', option.id)}>この候補を承認</button>
+                        ) : null}
                       </div>
                     ))}
+                    {item.status === 'suggested' ? (
+                      <button className="decline-button" type="button" disabled={respondingRequestID === item.id} onClick={() => respondToRequest(item.id, 'decline')}>今回は辞退</button>
+                    ) : <p className="response-complete">回答済み · {item.status}</p>}
                   </div>
                 </article>
               ))}

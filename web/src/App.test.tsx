@@ -113,10 +113,16 @@ describe('App', () => {
     expect(await screen.findByRole('heading', { name: '届いた依頼を、余白から選ぶ。' })).toBeInTheDocument()
     expect(await screen.findByRole('heading', { name: '新API設計レビュー' })).toBeInTheDocument()
     expect(screen.getByText('MEETING')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'この候補を承認' }))
+    expect(await screen.findByText('候補を承認しました。')).toBeInTheDocument()
     expect(screen.queryByText('Product Review')).not.toBeInTheDocument()
     expect(globalThis.fetch).toHaveBeenCalledWith(
       expect.stringContaining('/api/v1/requests'),
       expect.objectContaining({ headers: { 'X-Demo-User-ID': 'demo-manager' } }),
+    )
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/api/v1/requests/request-1/accept'),
+      expect.objectContaining({ method: 'POST' }),
     )
   })
 })

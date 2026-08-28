@@ -315,6 +315,38 @@ function App() {
     }
   }
 
+  const suggestTime = async (event: FormEvent<HTMLFormElement>, requestID: string) => {
+    event.preventDefault()
+    const formElement = event.currentTarget
+    const form = new FormData(formElement)
+    const startAt = new Date(String(form.get('suggestStart')))
+    const endAt = new Date(String(form.get('suggestEnd')))
+    setRespondingRequestID(requestID)
+    try {
+      const response = await fetch(`${apiURL}/api/v1/requests/${requestID}/suggest`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Demo-User-ID': 'demo-manager',
+        },
+        body: JSON.stringify({ startAt: startAt.toISOString(), endAt: endAt.toISOString() }),
+      })
+      if (!response.ok) {
+        throw new Error('suggest failed')
+      }
+      const option = await response.json() as CoordinationOption
+      setInboxRequests((current) => current.map((item) => item.id === requestID
+        ? { ...item, options: [...item.options, option] }
+        : item))
+      setNotice('別の時間候補を追加しました。')
+      formElement.reset()
+    } catch {
+      setNotice('時間候補を追加できませんでした。未来の日時を確認してください。')
+    } finally {
+      setRespondingRequestID('')
+    }
+  }
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -505,7 +537,14 @@ function App() {
                       </div>
                     ))}
                     {item.status === 'suggested' ? (
-                      <button className="decline-button" type="button" disabled={respondingRequestID === item.id} onClick={() => respondToRequest(item.id, 'decline')}>今回は辞退</button>
+                      <>
+                        <form className="suggest-form" onSubmit={(event) => suggestTime(event, item.id)}>
+                          <label>別の開始時間<input name="suggestStart" type="datetime-local" required /></label>
+                          <label>終了時間<input name="suggestEnd" type="datetime-local" required /></label>
+                          <button type="submit" disabled={respondingRequestID === item.id}>別時間を提案</button>
+                        </form>
+                        <button className="decline-button" type="button" disabled={respondingRequestID === item.id} onClick={() => respondToRequest(item.id, 'decline')}>今回は辞退</button>
+                      </>
                     ) : <p className="response-complete">回答済み · {item.status}</p>}
                   </div>
                 </article>

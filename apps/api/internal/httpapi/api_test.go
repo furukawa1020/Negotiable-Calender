@@ -45,14 +45,21 @@ type stubOrganizationStore struct {
 }
 
 type stubRequestStore struct {
-	value         coordinationrequest.CoordinationRequest
-	values        []coordinationrequest.CoordinationRequest
-	target        string
-	respondID     string
-	respondTarget string
-	respondStatus coordinationrequest.Status
-	respondOption string
-	err           error
+	value           coordinationrequest.CoordinationRequest
+	values          []coordinationrequest.CoordinationRequest
+	target          string
+	respondID       string
+	respondTarget   string
+	respondStatus   coordinationrequest.Status
+	respondOption   string
+	suggestedOption coordinationrequest.Option
+	err             error
+}
+
+func (store *stubRequestStore) Suggest(_ context.Context, requestID, targetUserID string, option coordinationrequest.Option) error {
+	store.respondID, store.respondTarget = requestID, targetUserID
+	store.suggestedOption = option
+	return store.err
 }
 
 func (store *stubRequestStore) Respond(_ context.Context, requestID, targetUserID string, status coordinationrequest.Status, optionID string) error {
@@ -484,6 +491,39 @@ func TestCoordinationRequestDeclinesAsTarget(t *testing.T) {
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK || store.respondStatus != coordinationrequest.Declined {
 		t.Fatalf("decline failed: status=%d store=%#v", response.Code, store)
+	}
+}
+
+func TestCoordinationRequestSuggestsMeetingAsTarget(t *testing.T) {
+	t.Parallel()
+	store := &stubRequestStore{}
+	handler := New(stubDatabase{}, &stubPolicyStore{}, &stubProjectionStore{}, &stubOrganizationStore{}, store, "", testLogger())
+	startAt := time.Now().UTC().Add(2 * time.Hour)
+	body, _ := json.Marshal(map[string]any{"startAt": startAt, "endAt": startAt.Add(30 * time.Minute)})
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/requests/request-1/suggest", bytes.NewReader(body))
+	request.Header.Set("X-Demo-User-ID", "manager-1")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", response.Code, response.Body)
+	}
+	if store.respondID != "request-1" || store.respondTarget != "manager-1" || store.suggestedOption.Type != coordinationrequest.OptionMeeting {
+		t.Fatalf("unexpected suggest call: %#v", store)
+	}
+}
+
+func TestCoordinationRequestRejectsPastSuggestion(t *testing.T) {
+	t.Parallel()
+	store := &stubRequestStore{}
+	handler := New(stubDatabase{}, &stubPolicyStore{}, &stubProjectionStore{}, &stubOrganizationStore{}, store, "", testLogger())
+	startAt := time.Now().UTC().Add(-2 * time.Hour)
+	body, _ := json.Marshal(map[string]any{"startAt": startAt, "endAt": startAt.Add(30 * time.Minute)})
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/requests/request-1/suggest", bytes.NewReader(body))
+	request.Header.Set("X-Demo-User-ID", "manager-1")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusUnprocessableEntity || store.suggestedOption.ID != "" {
+		t.Fatalf("past suggestion was accepted: %d %#v", response.Code, store.suggestedOption)
 	}
 }
 

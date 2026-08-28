@@ -978,6 +978,43 @@ footer {
   text-transform: uppercase;
 }
 
+.suggest-form {
+  padding-top: 6px;
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  align-items: end;
+  gap: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.suggest-form label {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.suggest-form input {
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  background: white;
+  font: inherit;
+}
+
+.suggest-form button {
+  padding: 9px 10px;
+  border: 1px solid var(--green);
+  border-radius: 6px;
+  color: var(--green);
+  background: white;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
 .option-row span {
   color: var(--green);
   font-size: 9px;
@@ -1035,6 +1072,10 @@ footer {
   .option-row {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .suggest-form {
+    grid-template-columns: 1fr;
   }
 
   .person-profile {

@@ -13,6 +13,7 @@ type Store interface {
 	Create(context.Context, CoordinationRequest) error
 	ListForTarget(context.Context, string) ([]CoordinationRequest, error)
 	Respond(context.Context, string, string, Status, string) error
+	Suggest(context.Context, string, string, Option) error
 }
 
 type PostgresStore struct {
@@ -183,6 +184,49 @@ WHERE id = $3 AND target_user_id = $4 AND status = $5
 	}
 	if updated == 0 {
 		return ErrNotFound
+	}
+	return nil
+}
+
+func (store *PostgresStore) Suggest(ctx context.Context, requestID, targetUserID string, option Option) error {
+	if option.RequestID != requestID || option.Type != OptionMeeting {
+		return fmt.Errorf("invalid suggested option")
+	}
+	if err := option.Validate(); err != nil {
+		return err
+	}
+	transaction, err := store.database.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin suggested option: %w", err)
+	}
+	defer transaction.Rollback()
+	result, err := transaction.ExecContext(ctx, `
+UPDATE coordination_requests
+SET updated_at = $1
+WHERE id = $2 AND target_user_id = $3 AND status = $4
+`, time.Now().UTC(), requestID, targetUserID, Suggested)
+	if err != nil {
+		return fmt.Errorf("authorize suggested option: %w", err)
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("count suggested option request: %w", err)
+	}
+	if updated == 0 {
+		return ErrNotFound
+	}
+	_, err = transaction.ExecContext(ctx, `
+INSERT INTO coordination_request_options (
+    id, request_id, type, start_at, end_at, response_by,
+    delegate_user_id, created_at
+) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+`, option.ID, option.RequestID, option.Type, option.StartAt, option.EndAt,
+		option.ResponseBy, nullableString(option.DelegateUserID), option.CreatedAt)
+	if err != nil {
+		return fmt.Errorf("create suggested option: %w", err)
+	}
+	if err := transaction.Commit(); err != nil {
+		return fmt.Errorf("commit suggested option: %w", err)
 	}
 	return nil
 }

@@ -46,9 +46,55 @@ func New(database databasePinger, policies policy.Store, projections projection.
 	mux.HandleFunc("GET /api/v1/requests", api.listCoordinationRequests)
 	mux.HandleFunc("POST /api/v1/requests", api.createCoordinationRequest)
 	mux.HandleFunc("POST /api/v1/requests/{requestId}/accept", api.acceptCoordinationRequest)
+	mux.HandleFunc("POST /api/v1/requests/{requestId}/suggest", api.suggestCoordinationRequest)
 	mux.HandleFunc("POST /api/v1/requests/{requestId}/decline", api.declineCoordinationRequest)
 	mux.HandleFunc("OPTIONS /api/v1/{path...}", api.options)
 	return api.middleware(mux)
+}
+
+type suggestCoordinationRequestInput struct {
+	StartAt time.Time `json:"startAt"`
+	EndAt   time.Time `json:"endAt"`
+}
+
+func (api *API) suggestCoordinationRequest(response http.ResponseWriter, request *http.Request) {
+	targetUserID := request.Header.Get("X-Demo-User-ID")
+	if targetUserID == "" {
+		writeJSON(response, http.StatusUnauthorized, map[string]string{"error": "request identity is required"})
+		return
+	}
+	var input suggestCoordinationRequestInput
+	decoder := json.NewDecoder(http.MaxBytesReader(response, request.Body, 1<<20))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&input); err != nil {
+		writeJSON(response, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+		return
+	}
+	now := time.Now().UTC()
+	startAt, endAt := input.StartAt.UTC(), input.EndAt.UTC()
+	option := coordinationrequest.Option{
+		ID: newID("option"), RequestID: request.PathValue("requestId"),
+		Type: coordinationrequest.OptionMeeting, StartAt: &startAt, EndAt: &endAt, CreatedAt: now,
+	}
+	if !startAt.After(now) {
+		writeJSON(response, http.StatusUnprocessableEntity, map[string]string{"error": "suggested time must be in the future"})
+		return
+	}
+	if err := option.Validate(); err != nil {
+		writeJSON(response, http.StatusUnprocessableEntity, map[string]string{"error": fmt.Sprintf("invalid suggested option: %s", err)})
+		return
+	}
+	err := api.requests.Suggest(request.Context(), option.RequestID, targetUserID, option)
+	if errors.Is(err, coordinationrequest.ErrNotFound) {
+		writeJSON(response, http.StatusConflict, map[string]string{"error": "request cannot be updated"})
+		return
+	}
+	if err != nil {
+		api.logger.Error("suggest coordination option", "error", err)
+		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to suggest option"})
+		return
+	}
+	writeJSON(response, http.StatusCreated, option)
 }
 
 type acceptCoordinationRequestInput struct {

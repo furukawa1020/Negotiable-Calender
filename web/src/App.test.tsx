@@ -33,7 +33,7 @@ describe('App', () => {
   })
 
   it('opens sharing rules and loads the member preview from the public API', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
       segments: [{
         startAt: '2026-08-23T00:00:00Z',
         endAt: '2026-08-23T01:00:00Z',
@@ -97,7 +97,7 @@ describe('App', () => {
   })
 
   it('loads the manager request inbox with generated options', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
       requests: [{
         id: 'request-1', requesterUserId: 'demo-member', title: '新API設計レビュー',
         type: 'review', durationMinutes: 15, deadlineAt: '2026-08-27T08:00:00Z',

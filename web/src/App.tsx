@@ -347,6 +347,34 @@ function App() {
     }
   }
 
+  const delegateRequest = async (event: FormEvent<HTMLFormElement>, requestID: string) => {
+    event.preventDefault()
+    const form = new FormData(event.currentTarget)
+    const delegateUserId = String(form.get('delegateUserId'))
+    setRespondingRequestID(requestID)
+    try {
+      const response = await fetch(`${apiURL}/api/v1/requests/${requestID}/delegate`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Demo-User-ID': 'demo-manager',
+        },
+        body: JSON.stringify({ delegateUserId }),
+      })
+      if (!response.ok) {
+        throw new Error('delegate failed')
+      }
+      setInboxRequests((current) => current.map((item) => item.id === requestID
+        ? { ...item, status: 'delegated' }
+        : item))
+      setNotice(`${delegateUserId} に依頼を委譲しました。`)
+    } catch {
+      setNotice('委譲できませんでした。同じ組織のユーザーIDを確認してください。')
+    } finally {
+      setRespondingRequestID('')
+    }
+  }
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -542,6 +570,10 @@ function App() {
                           <label>別の開始時間<input name="suggestStart" type="datetime-local" required /></label>
                           <label>終了時間<input name="suggestEnd" type="datetime-local" required /></label>
                           <button type="submit" disabled={respondingRequestID === item.id}>別時間を提案</button>
+                        </form>
+                        <form className="delegate-form" onSubmit={(event) => delegateRequest(event, item.id)}>
+                          <label>委譲先ユーザー<input name="delegateUserId" defaultValue="demo-member" required /></label>
+                          <button type="submit" disabled={respondingRequestID === item.id}>委譲する</button>
                         </form>
                         <button className="decline-button" type="button" disabled={respondingRequestID === item.id} onClick={() => respondToRequest(item.id, 'decline')}>今回は辞退</button>
                       </>

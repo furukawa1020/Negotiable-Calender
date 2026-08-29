@@ -1015,6 +1015,40 @@ footer {
   cursor: pointer;
 }
 
+.delegate-form {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) auto;
+  align-items: end;
+  gap: 8px;
+}
+
+.delegate-form label {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.delegate-form input {
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  background: white;
+  font: inherit;
+}
+
+.delegate-form button {
+  padding: 9px 12px;
+  border: 1px solid #6a665c;
+  border-radius: 6px;
+  color: #4b4942;
+  background: #f5f2eb;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
 .option-row span {
   color: var(--green);
   font-size: 9px;
@@ -1075,6 +1109,10 @@ footer {
   }
 
   .suggest-form {
+    grid-template-columns: 1fr;
+  }
+
+  .delegate-form {
     grid-template-columns: 1fr;
   }
 

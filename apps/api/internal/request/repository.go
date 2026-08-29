@@ -14,6 +14,7 @@ type Store interface {
 	ListForTarget(context.Context, string) ([]CoordinationRequest, error)
 	Respond(context.Context, string, string, Status, string) error
 	Suggest(context.Context, string, string, Option) error
+	Delegate(context.Context, string, string, Option) error
 }
 
 type PostgresStore struct {
@@ -58,6 +59,7 @@ CREATE TABLE IF NOT EXISTS coordination_request_options (
 CREATE INDEX IF NOT EXISTS coordination_request_options_request_idx
     ON coordination_request_options(request_id, created_at, id);
 ALTER TABLE coordination_requests ADD COLUMN IF NOT EXISTS accepted_option_id text;
+ALTER TABLE coordination_requests ADD COLUMN IF NOT EXISTS delegated_user_id text;
 `
 	if _, err := database.ExecContext(ctx, schema); err != nil {
 		return fmt.Errorf("create coordination request schema: %w", err)
@@ -108,7 +110,7 @@ func (store *PostgresStore) ListForTarget(ctx context.Context, targetUserID stri
 	rows, err := store.database.QueryContext(ctx, `
 SELECT id, organization_id, requester_user_id, target_user_id, type, title,
        duration_minutes, deadline_at, sync_preference, priority, status,
-       created_at, updated_at, accepted_option_id
+       created_at, updated_at, accepted_option_id, delegated_user_id
 FROM coordination_requests
 WHERE target_user_id = $1
 ORDER BY created_at DESC, id DESC
@@ -120,12 +122,12 @@ ORDER BY created_at DESC, id DESC
 	values := make([]CoordinationRequest, 0)
 	for rows.Next() {
 		var value CoordinationRequest
-		var acceptedOptionID sql.NullString
+		var acceptedOptionID, delegatedUserID sql.NullString
 		if err := rows.Scan(
 			&value.ID, &value.OrganizationID, &value.RequesterUserID, &value.TargetUserID,
 			&value.Type, &value.Title, &value.DurationMinutes, &value.DeadlineAt,
 			&value.SyncPreference, &value.Priority, &value.Status,
-			&value.CreatedAt, &value.UpdatedAt, &acceptedOptionID,
+			&value.CreatedAt, &value.UpdatedAt, &acceptedOptionID, &delegatedUserID,
 		); err != nil {
 			return nil, fmt.Errorf("scan coordination request: %w", err)
 		}
@@ -133,6 +135,7 @@ ORDER BY created_at DESC, id DESC
 		value.CreatedAt = value.CreatedAt.UTC()
 		value.UpdatedAt = value.UpdatedAt.UTC()
 		value.AcceptedOptionID = acceptedOptionID.String
+		value.DelegatedUserID = delegatedUserID.String
 		value.Options = []Option{}
 		values = append(values, value)
 	}
@@ -227,6 +230,55 @@ INSERT INTO coordination_request_options (
 	}
 	if err := transaction.Commit(); err != nil {
 		return fmt.Errorf("commit suggested option: %w", err)
+	}
+	return nil
+}
+
+func (store *PostgresStore) Delegate(ctx context.Context, requestID, targetUserID string, option Option) error {
+	if option.RequestID != requestID || option.Type != OptionDelegate {
+		return fmt.Errorf("invalid delegate option")
+	}
+	if err := option.Validate(); err != nil {
+		return err
+	}
+	transaction, err := store.database.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin request delegation: %w", err)
+	}
+	defer transaction.Rollback()
+	result, err := transaction.ExecContext(ctx, `
+UPDATE coordination_requests
+SET status = $1, delegated_user_id = $2, updated_at = $3
+WHERE id = $4 AND target_user_id = $5 AND status = $6
+  AND $2 <> target_user_id
+  AND EXISTS (
+    SELECT 1 FROM memberships
+    WHERE memberships.organization_id = coordination_requests.organization_id
+      AND memberships.user_id = $2
+  )
+`, Delegated, option.DelegateUserID, time.Now().UTC(), requestID, targetUserID, Suggested)
+	if err != nil {
+		return fmt.Errorf("delegate coordination request: %w", err)
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("count delegated request: %w", err)
+	}
+	if updated == 0 {
+		return ErrNotFound
+	}
+	_, err = transaction.ExecContext(ctx, `
+INSERT INTO coordination_request_options (
+    id, request_id, type, start_at, end_at, response_by,
+    delegate_user_id, created_at
+) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+`, option.ID, option.RequestID, option.Type, option.StartAt, option.EndAt,
+		option.ResponseBy, option.DelegateUserID, option.CreatedAt)
+	if err != nil {
+		return fmt.Errorf("create delegate option: %w", err)
+	}
+	if err := transaction.Commit(); err != nil {
+		return fmt.Errorf("commit request delegation: %w", err)
 	}
 	return nil
 }

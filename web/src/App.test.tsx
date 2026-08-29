@@ -160,4 +160,25 @@ describe('App', () => {
       expect.objectContaining({ method: 'POST' }),
     )
   })
+
+  it('loads privacy-safe notifications and marks one read', async () => {
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        notifications: [{
+          id: 'notification-1', type: 'request_received', requestId: 'request-1',
+          message: '新しい調整依頼が届きました。', createdAt: '2026-08-30T01:00:00Z',
+        }],
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: '通知' }))
+    expect(await screen.findByLabelText('通知一覧')).toBeInTheDocument()
+    expect(await screen.findByText('新しい調整依頼が届きました。')).toBeInTheDocument()
+    expect(screen.queryByText('Product Review')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /新しい調整依頼が届きました/ }))
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/api/v1/notifications/notification-1/read'),
+      expect.objectContaining({ method: 'POST' }),
+    )
+  })
 })

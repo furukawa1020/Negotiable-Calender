@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/notification"
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/organization"
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/policy"
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/projection"
@@ -27,12 +28,21 @@ type API struct {
 	projections   projection.Store
 	organizations organization.Store
 	requests      coordinationrequest.Store
+	notifications notification.Store
 	webOrigin     string
 	logger        *slog.Logger
 }
 
 func New(database databasePinger, policies policy.Store, projections projection.Store, organizations organization.Store, requests coordinationrequest.Store, webOrigin string, logger *slog.Logger) http.Handler {
-	api := &API{database: database, policies: policies, projections: projections, organizations: organizations, requests: requests, webOrigin: webOrigin, logger: logger}
+	return newAPI(database, policies, projections, organizations, requests, nil, webOrigin, logger)
+}
+
+func NewWithNotifications(database databasePinger, policies policy.Store, projections projection.Store, organizations organization.Store, requests coordinationrequest.Store, notifications notification.Store, webOrigin string, logger *slog.Logger) http.Handler {
+	return newAPI(database, policies, projections, organizations, requests, notifications, webOrigin, logger)
+}
+
+func newAPI(database databasePinger, policies policy.Store, projections projection.Store, organizations organization.Store, requests coordinationrequest.Store, notifications notification.Store, webOrigin string, logger *slog.Logger) http.Handler {
+	api := &API{database: database, policies: policies, projections: projections, organizations: organizations, requests: requests, notifications: notifications, webOrigin: webOrigin, logger: logger}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", api.health)
 	mux.HandleFunc("GET /readyz", api.ready)
@@ -49,8 +59,65 @@ func New(database databasePinger, policies policy.Store, projections projection.
 	mux.HandleFunc("POST /api/v1/requests/{requestId}/suggest", api.suggestCoordinationRequest)
 	mux.HandleFunc("POST /api/v1/requests/{requestId}/delegate", api.delegateCoordinationRequest)
 	mux.HandleFunc("POST /api/v1/requests/{requestId}/decline", api.declineCoordinationRequest)
+	mux.HandleFunc("GET /api/v1/notifications", api.listNotifications)
+	mux.HandleFunc("POST /api/v1/notifications/{notificationId}/read", api.readNotification)
 	mux.HandleFunc("OPTIONS /api/v1/{path...}", api.options)
 	return api.middleware(mux)
+}
+
+func (api *API) listNotifications(response http.ResponseWriter, request *http.Request) {
+	userID := request.Header.Get("X-Demo-User-ID")
+	if userID == "" {
+		writeJSON(response, http.StatusUnauthorized, map[string]string{"error": "request identity is required"})
+		return
+	}
+	if api.notifications == nil {
+		writeJSON(response, http.StatusOK, map[string]any{"notifications": []notification.Notification{}})
+		return
+	}
+	values, err := api.notifications.List(request.Context(), userID)
+	if err != nil {
+		api.logger.Error("list notifications", "error", err)
+		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to load notifications"})
+		return
+	}
+	writeJSON(response, http.StatusOK, map[string]any{"notifications": values})
+}
+
+func (api *API) readNotification(response http.ResponseWriter, request *http.Request) {
+	userID := request.Header.Get("X-Demo-User-ID")
+	if userID == "" {
+		writeJSON(response, http.StatusUnauthorized, map[string]string{"error": "request identity is required"})
+		return
+	}
+	if api.notifications == nil {
+		writeJSON(response, http.StatusNotFound, map[string]string{"error": "notification not found"})
+		return
+	}
+	updated, err := api.notifications.MarkRead(request.Context(), request.PathValue("notificationId"), userID, time.Now().UTC())
+	if err != nil {
+		api.logger.Error("mark notification read", "error", err)
+		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to update notification"})
+		return
+	}
+	if !updated {
+		writeJSON(response, http.StatusNotFound, map[string]string{"error": "notification not found"})
+		return
+	}
+	response.WriteHeader(http.StatusNoContent)
+}
+
+func (api *API) notify(ctx context.Context, userID string, kind notification.Type, requestID, message string) {
+	if api.notifications == nil {
+		return
+	}
+	err := api.notifications.Create(ctx, notification.Notification{
+		ID: newID("notification"), UserID: userID, Type: kind,
+		RequestID: requestID, Message: message, CreatedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		api.logger.Error("create in-app notification", "type", kind, "error", err)
+	}
 }
 
 type delegateCoordinationRequestInput struct {
@@ -85,6 +152,7 @@ func (api *API) delegateCoordinationRequest(response http.ResponseWriter, reques
 		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to delegate request"})
 		return
 	}
+	api.notify(request.Context(), targetUserID, notification.RequestDelegated, option.RequestID, "依頼を別のメンバーへ委譲しました。")
 	writeJSON(response, http.StatusOK, map[string]any{
 		"id": option.RequestID, "status": coordinationrequest.Delegated,
 		"delegatedUserId": option.DelegateUserID,
@@ -133,6 +201,7 @@ func (api *API) suggestCoordinationRequest(response http.ResponseWriter, request
 		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to suggest option"})
 		return
 	}
+	api.notify(request.Context(), targetUserID, notification.RequestChanged, option.RequestID, "依頼に別の時間候補を追加しました。")
 	writeJSON(response, http.StatusCreated, option)
 }
 
@@ -176,6 +245,11 @@ func (api *API) respondToCoordinationRequest(response http.ResponseWriter, reque
 		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to update request"})
 		return
 	}
+	kind, message := notification.RequestAccepted, "依頼の候補を承認しました。"
+	if status == coordinationrequest.Declined {
+		kind, message = notification.RequestDeclined, "依頼を辞退しました。"
+	}
+	api.notify(request.Context(), targetUserID, kind, request.PathValue("requestId"), message)
 	writeJSON(response, http.StatusOK, map[string]any{"id": request.PathValue("requestId"), "status": status, "acceptedOptionId": optionID})
 }
 
@@ -255,6 +329,7 @@ func (api *API) createCoordinationRequest(response http.ResponseWriter, request 
 		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to create request"})
 		return
 	}
+	api.notify(request.Context(), value.TargetUserID, notification.RequestReceived, value.ID, "新しい調整依頼が届きました。")
 	writeJSON(response, http.StatusCreated, value)
 }
 

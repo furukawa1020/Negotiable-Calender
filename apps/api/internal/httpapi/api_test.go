@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/notification"
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/organization"
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/policy"
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/projection"
@@ -55,6 +56,30 @@ type stubRequestStore struct {
 	suggestedOption coordinationrequest.Option
 	delegatedOption coordinationrequest.Option
 	err             error
+}
+
+type stubNotificationStore struct {
+	values     []notification.Notification
+	listUser   string
+	readID     string
+	readUser   string
+	readResult bool
+	err        error
+}
+
+func (store *stubNotificationStore) Create(_ context.Context, value notification.Notification) error {
+	store.values = append(store.values, value)
+	return store.err
+}
+
+func (store *stubNotificationStore) List(_ context.Context, userID string) ([]notification.Notification, error) {
+	store.listUser = userID
+	return store.values, store.err
+}
+
+func (store *stubNotificationStore) MarkRead(_ context.Context, id, userID string, _ time.Time) (bool, error) {
+	store.readID, store.readUser = id, userID
+	return store.readResult, store.err
 }
 
 func (store *stubRequestStore) Delegate(_ context.Context, requestID, targetUserID string, option coordinationrequest.Option) error {
@@ -419,6 +444,64 @@ func TestCoordinationRequestRequiresIdentity(t *testing.T) {
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d", response.Code)
+	}
+}
+
+func TestNotificationsListAndReadUseAuthenticatedUser(t *testing.T) {
+	t.Parallel()
+	now := time.Now().UTC()
+	store := &stubNotificationStore{
+		values: []notification.Notification{{
+			ID: "notification-1", UserID: "manager-1", Type: notification.RequestReceived,
+			RequestID: "request-1", Message: "新しい調整依頼が届きました。", CreatedAt: now,
+		}},
+		readResult: true,
+	}
+	handler := NewWithNotifications(stubDatabase{}, &stubPolicyStore{}, &stubProjectionStore{}, &stubOrganizationStore{}, &stubRequestStore{}, store, "", testLogger())
+	list := httptest.NewRequest(http.MethodGet, "/api/v1/notifications", nil)
+	list.Header.Set("X-Demo-User-ID", "manager-1")
+	listResponse := httptest.NewRecorder()
+	handler.ServeHTTP(listResponse, list)
+	if listResponse.Code != http.StatusOK || store.listUser != "manager-1" {
+		t.Fatalf("notification list failed: %d user=%q", listResponse.Code, store.listUser)
+	}
+	for _, forbidden := range []string{"privateEvent", "attendees", "location", "calendar"} {
+		if strings.Contains(listResponse.Body.String(), forbidden) {
+			t.Fatalf("private field %q leaked: %s", forbidden, listResponse.Body)
+		}
+	}
+	read := httptest.NewRequest(http.MethodPost, "/api/v1/notifications/notification-1/read", nil)
+	read.Header.Set("X-Demo-User-ID", "manager-1")
+	readResponse := httptest.NewRecorder()
+	handler.ServeHTTP(readResponse, read)
+	if readResponse.Code != http.StatusNoContent || store.readID != "notification-1" || store.readUser != "manager-1" {
+		t.Fatalf("notification read failed: %d id=%q user=%q", readResponse.Code, store.readID, store.readUser)
+	}
+}
+
+func TestRequestCreateEmitsPrivacySafeNotification(t *testing.T) {
+	t.Parallel()
+	notifications := &stubNotificationStore{}
+	handler := NewWithNotifications(stubDatabase{}, &stubPolicyStore{}, &stubProjectionStore{}, &stubOrganizationStore{}, &stubRequestStore{}, notifications, "", testLogger())
+	body, _ := json.Marshal(map[string]any{
+		"targetUserId": "manager-1", "type": "review", "title": "Secret acquisition review",
+		"durationMinutes": 15, "deadlineAt": time.Now().UTC().Add(4 * time.Hour),
+		"syncPreference": "either", "priority": "normal",
+	})
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/requests", bytes.NewReader(body))
+	request.Header.Set("X-Demo-User-ID", "member-1")
+	request.Header.Set("X-Organization-ID", "org-1")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated || len(notifications.values) != 1 {
+		t.Fatalf("request notification missing: status=%d values=%#v", response.Code, notifications.values)
+	}
+	created := notifications.values[0]
+	if created.UserID != "manager-1" || created.Type != notification.RequestReceived {
+		t.Fatalf("unexpected notification: %#v", created)
+	}
+	if strings.Contains(created.Message, "Secret acquisition review") {
+		t.Fatalf("request title leaked into notification: %q", created.Message)
 	}
 }
 

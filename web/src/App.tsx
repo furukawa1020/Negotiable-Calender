@@ -57,6 +57,15 @@ type CoordinationRequest = {
   createdAt: string
 }
 
+type AppNotification = {
+  id: string
+  type: string
+  requestId: string
+  message: string
+  readAt?: string
+  createdAt: string
+}
+
 function ShieldIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -70,6 +79,9 @@ function App() {
   const [activeDialog, setActiveDialog] = useState('')
   const [memberPreview, setMemberPreview] = useState(false)
   const [accountOpen, setAccountOpen] = useState(false)
+  const [notificationsOpen, setNotificationsOpen] = useState(false)
+  const [notifications, setNotifications] = useState<AppNotification[]>([])
+  const [notificationsLoading, setNotificationsLoading] = useState(false)
   const [notice, setNotice] = useState('')
   const [dayOffset, setDayOffset] = useState(0)
   const [calendarLayer, setCalendarLayer] = useState<'both' | 'private' | 'projection'>('both')
@@ -290,6 +302,40 @@ function App() {
     month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false,
   }).format(new Date(value))
 
+  const openNotifications = async () => {
+    const nextOpen = !notificationsOpen
+    setNotificationsOpen(nextOpen)
+    setAccountOpen(false)
+    if (!nextOpen) return
+    setNotificationsLoading(true)
+    try {
+      const response = await fetch(`${apiURL}/api/v1/notifications`, {
+        headers: { 'X-Demo-User-ID': 'demo-manager' },
+      })
+      if (!response.ok) throw new Error('notifications failed')
+      const payload = await response.json() as { notifications: AppNotification[] }
+      setNotifications(payload.notifications)
+    } catch {
+      setNotice('通知を取得できませんでした。')
+    } finally {
+      setNotificationsLoading(false)
+    }
+  }
+
+  const markNotificationRead = async (id: string) => {
+    try {
+      const response = await fetch(`${apiURL}/api/v1/notifications/${id}/read`, {
+        method: 'POST', headers: { 'X-Demo-User-ID': 'demo-manager' },
+      })
+      if (!response.ok) throw new Error('read failed')
+      setNotifications((current) => current.map((item) => item.id === id
+        ? { ...item, readAt: new Date().toISOString() }
+        : item))
+    } catch {
+      setNotice('通知を既読にできませんでした。')
+    }
+  }
+
   const respondToRequest = async (requestID: string, action: 'accept' | 'decline', optionID?: string) => {
     setRespondingRequestID(requestID)
     try {
@@ -389,6 +435,25 @@ function App() {
         </nav>
         <div className="topbar-actions">
           <span className="protected-badge"><ShieldIcon />予定詳細は保護されています</span>
+          <div className="notification-wrap">
+            <button className="notification-button" type="button" aria-label="通知" aria-expanded={notificationsOpen} onClick={openNotifications}>
+              <span aria-hidden="true">●</span>
+              {notifications.filter((item) => !item.readAt).length > 0 ? <b>{notifications.filter((item) => !item.readAt).length}</b> : null}
+            </button>
+            {notificationsOpen ? (
+              <section className="notification-panel" aria-label="通知一覧">
+                <div className="notification-heading"><strong>通知</strong><span>予定詳細は含まれません</span></div>
+                {notificationsLoading ? <p role="status">取得中…</p> : null}
+                {!notificationsLoading && notifications.length === 0 ? <p>新しい通知はありません。</p> : null}
+                {notifications.map((item) => (
+                  <button className={item.readAt ? 'notification-item read' : 'notification-item'} type="button" key={item.id} onClick={() => markNotificationRead(item.id)}>
+                    <span>{item.message}</span>
+                    <time>{formatDateTime(item.createdAt)}</time>
+                  </button>
+                ))}
+              </section>
+            ) : null}
+          </div>
           <div className="account-wrap">
             <button className="avatar" type="button" aria-label="山田太郎のアカウントメニュー" aria-expanded={accountOpen} onClick={() => setAccountOpen(!accountOpen)}>山</button>
             {accountOpen ? (

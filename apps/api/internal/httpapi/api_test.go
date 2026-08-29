@@ -53,7 +53,14 @@ type stubRequestStore struct {
 	respondStatus   coordinationrequest.Status
 	respondOption   string
 	suggestedOption coordinationrequest.Option
+	delegatedOption coordinationrequest.Option
 	err             error
+}
+
+func (store *stubRequestStore) Delegate(_ context.Context, requestID, targetUserID string, option coordinationrequest.Option) error {
+	store.respondID, store.respondTarget = requestID, targetUserID
+	store.delegatedOption = option
+	return store.err
 }
 
 func (store *stubRequestStore) Suggest(_ context.Context, requestID, targetUserID string, option coordinationrequest.Option) error {
@@ -524,6 +531,22 @@ func TestCoordinationRequestRejectsPastSuggestion(t *testing.T) {
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusUnprocessableEntity || store.suggestedOption.ID != "" {
 		t.Fatalf("past suggestion was accepted: %d %#v", response.Code, store.suggestedOption)
+	}
+}
+
+func TestCoordinationRequestDelegatesAsTarget(t *testing.T) {
+	t.Parallel()
+	store := &stubRequestStore{}
+	handler := New(stubDatabase{}, &stubPolicyStore{}, &stubProjectionStore{}, &stubOrganizationStore{}, store, "", testLogger())
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/requests/request-1/delegate", strings.NewReader(`{"delegateUserId":"member-2"}`))
+	request.Header.Set("X-Demo-User-ID", "manager-1")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", response.Code, response.Body)
+	}
+	if store.respondID != "request-1" || store.respondTarget != "manager-1" || store.delegatedOption.DelegateUserID != "member-2" {
+		t.Fatalf("unexpected delegate call: %#v", store)
 	}
 }
 

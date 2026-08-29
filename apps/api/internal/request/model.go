@@ -103,6 +103,7 @@ type CoordinationRequest struct {
 	Priority         Priority       `json:"priority"`
 	Status           Status         `json:"status"`
 	AcceptedOptionID string         `json:"acceptedOptionId,omitempty"`
+	DelegatedUserID  string         `json:"delegatedUserId,omitempty"`
 	Options          []Option       `json:"options"`
 	CreatedAt        time.Time      `json:"createdAt"`
 	UpdatedAt        time.Time      `json:"updatedAt"`

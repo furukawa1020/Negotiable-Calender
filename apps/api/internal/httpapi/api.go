@@ -47,9 +47,48 @@ func New(database databasePinger, policies policy.Store, projections projection.
 	mux.HandleFunc("POST /api/v1/requests", api.createCoordinationRequest)
 	mux.HandleFunc("POST /api/v1/requests/{requestId}/accept", api.acceptCoordinationRequest)
 	mux.HandleFunc("POST /api/v1/requests/{requestId}/suggest", api.suggestCoordinationRequest)
+	mux.HandleFunc("POST /api/v1/requests/{requestId}/delegate", api.delegateCoordinationRequest)
 	mux.HandleFunc("POST /api/v1/requests/{requestId}/decline", api.declineCoordinationRequest)
 	mux.HandleFunc("OPTIONS /api/v1/{path...}", api.options)
 	return api.middleware(mux)
+}
+
+type delegateCoordinationRequestInput struct {
+	DelegateUserID string `json:"delegateUserId"`
+}
+
+func (api *API) delegateCoordinationRequest(response http.ResponseWriter, request *http.Request) {
+	targetUserID := request.Header.Get("X-Demo-User-ID")
+	if targetUserID == "" {
+		writeJSON(response, http.StatusUnauthorized, map[string]string{"error": "request identity is required"})
+		return
+	}
+	var input delegateCoordinationRequestInput
+	decoder := json.NewDecoder(http.MaxBytesReader(response, request.Body, 1<<20))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&input); err != nil || input.DelegateUserID == "" {
+		writeJSON(response, http.StatusBadRequest, map[string]string{"error": "delegateUserId is required"})
+		return
+	}
+	option := coordinationrequest.Option{
+		ID: newID("option"), RequestID: request.PathValue("requestId"),
+		Type: coordinationrequest.OptionDelegate, DelegateUserID: input.DelegateUserID,
+		CreatedAt: time.Now().UTC(),
+	}
+	err := api.requests.Delegate(request.Context(), option.RequestID, targetUserID, option)
+	if errors.Is(err, coordinationrequest.ErrNotFound) {
+		writeJSON(response, http.StatusConflict, map[string]string{"error": "request cannot be delegated"})
+		return
+	}
+	if err != nil {
+		api.logger.Error("delegate coordination request", "error", err)
+		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to delegate request"})
+		return
+	}
+	writeJSON(response, http.StatusOK, map[string]any{
+		"id": option.RequestID, "status": coordinationrequest.Delegated,
+		"delegatedUserId": option.DelegateUserID,
+	})
 }
 
 type suggestCoordinationRequestInput struct {

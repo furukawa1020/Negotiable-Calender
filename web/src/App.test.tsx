@@ -116,6 +116,7 @@ describe('App', () => {
     expect(await screen.findByRole('heading', { name: '届いた依頼を、余白から選ぶ。' })).toBeInTheDocument()
     expect(await screen.findByRole('heading', { name: '新API設計レビュー' })).toBeInTheDocument()
     expect(screen.getByText('MEETING')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '委譲する' })).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('別の開始時間'), { target: { value: '2026-08-28T10:00' } })
     fireEvent.change(screen.getByLabelText('終了時間'), { target: { value: '2026-08-28T10:15' } })
     fireEvent.click(screen.getByRole('button', { name: '別時間を提案' }))
@@ -133,6 +134,29 @@ describe('App', () => {
     )
     expect(globalThis.fetch).toHaveBeenCalledWith(
       expect.stringContaining('/api/v1/requests/request-1/accept'),
+      expect.objectContaining({ method: 'POST' }),
+    )
+  })
+
+  it('delegates an inbox request to an organization member', async () => {
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        requests: [{
+          id: 'request-2', requesterUserId: 'requester-1', title: '承認フロー確認',
+          type: 'approval', durationMinutes: 5, deadlineAt: '2026-08-29T08:00:00Z',
+          priority: 'normal', status: 'suggested', createdAt: '2026-08-28T00:00:00Z',
+          options: [{ id: 'option-1', type: 'async' }],
+        }],
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ status: 'delegated' }), { status: 200 }))
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: '依頼' }))
+    expect(await screen.findByRole('heading', { name: '承認フロー確認' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '委譲する' }))
+    expect(await screen.findByText('demo-member に依頼を委譲しました。')).toBeInTheDocument()
+    expect(screen.getByText('回答済み · delegated')).toBeInTheDocument()
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/api/v1/requests/request-2/delegate'),
       expect.objectContaining({ method: 'POST' }),
     )
   })

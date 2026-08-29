@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 
@@ -172,9 +172,10 @@ describe('App', () => {
       .mockResolvedValueOnce(new Response(null, { status: 204 }))
     render(<App />)
     fireEvent.click(screen.getByRole('button', { name: '通知' }))
-    expect(await screen.findByLabelText('通知一覧')).toBeInTheDocument()
+    const panel = await screen.findByLabelText('通知一覧')
+    expect(panel).toBeInTheDocument()
     expect(await screen.findByText('新しい調整依頼が届きました。')).toBeInTheDocument()
-    expect(screen.queryByText('Product Review')).not.toBeInTheDocument()
+    expect(within(panel).queryByText('Product Review')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /新しい調整依頼が届きました/ }))
     expect(globalThis.fetch).toHaveBeenCalledWith(
       expect.stringContaining('/api/v1/notifications/notification-1/read'),

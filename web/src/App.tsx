@@ -66,6 +66,16 @@ type AppNotification = {
   createdAt: string
 }
 
+type AuditEvent = {
+  id: string
+  organizationId: string
+  actorUserId: string
+  action: string
+  resourceType: string
+  resourceId: string
+  createdAt: string
+}
+
 function ShieldIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -88,7 +98,7 @@ function App() {
   const [projections, setProjections] = useState(initialProjections)
   const [memberProjections, setMemberProjections] = useState<ProjectionRow[]>([])
   const [previewLoading, setPreviewLoading] = useState(false)
-  const [currentView, setCurrentView] = useState<'calendar' | 'people' | 'inbox'>('calendar')
+  const [currentView, setCurrentView] = useState<'calendar' | 'people' | 'inbox' | 'audit'>('calendar')
   const [people, setPeople] = useState<PersonCard[]>([])
   const [peopleLoading, setPeopleLoading] = useState(false)
   const [peopleError, setPeopleError] = useState('')
@@ -97,6 +107,9 @@ function App() {
   const [inboxLoading, setInboxLoading] = useState(false)
   const [inboxError, setInboxError] = useState('')
   const [respondingRequestID, setRespondingRequestID] = useState('')
+  const [auditLogs, setAuditLogs] = useState<AuditEvent[]>([])
+  const [auditLoading, setAuditLoading] = useState(false)
+  const [auditError, setAuditError] = useState('')
   const [overrideSaving, setOverrideSaving] = useState(false)
   const visibleDate = useMemo(() => {
     const value = new Date()
@@ -336,6 +349,27 @@ function App() {
     }
   }
 
+  const openAudit = async () => {
+    setCurrentView('audit')
+    setAuditLoading(true)
+    setAuditError('')
+    try {
+      const response = await fetch(`${apiURL}/api/v1/audit-logs`, {
+        headers: {
+          'X-Demo-User-ID': 'demo-manager',
+          'X-Organization-ID': 'demo-org',
+        },
+      })
+      if (!response.ok) throw new Error('audit failed')
+      const payload = await response.json() as { auditLogs: AuditEvent[] }
+      setAuditLogs(payload.auditLogs)
+    } catch {
+      setAuditError('監査ログを取得できませんでした。')
+    } finally {
+      setAuditLoading(false)
+    }
+  }
+
   const respondToRequest = async (requestID: string, action: 'accept' | 'decline', optionID?: string) => {
     setRespondingRequestID(requestID)
     try {
@@ -432,6 +466,7 @@ function App() {
           <button className={currentView === 'calendar' ? 'active' : ''} type="button" onClick={() => setCurrentView('calendar')}>マイカレンダー</button>
           <button className={currentView === 'people' ? 'active' : ''} type="button" onClick={openPeopleView}>組織</button>
           <button className={currentView === 'inbox' ? 'active' : ''} type="button" onClick={openInbox}>依頼</button>
+          <button className={currentView === 'audit' ? 'active' : ''} type="button" onClick={openAudit}>監査</button>
         </nav>
         <div className="topbar-actions">
           <span className="protected-badge"><ShieldIcon />予定詳細は保護されています</span>
@@ -591,7 +626,7 @@ function App() {
               ))}
             </div>
           </section>
-        ) : (
+        ) : currentView === 'inbox' ? (
           <section className="inbox-view" aria-labelledby="inbox-title">
             <div className="people-heading">
               <div>
@@ -644,6 +679,32 @@ function App() {
                       </>
                     ) : <p className="response-complete">回答済み · {item.status}</p>}
                   </div>
+                </article>
+              ))}
+            </div>
+          </section>
+        ) : (
+          <section className="audit-view" aria-labelledby="audit-title">
+            <div className="people-heading">
+              <div>
+                <p className="eyebrow">PRIVACY · AUDIT LOG</p>
+                <h1 id="audit-title">共有した事実だけを、記録する。</h1>
+                <p className="hero-copy">操作主体・操作種別・依頼ID・時刻のみ。予定内容や依頼タイトルは記録されません。</p>
+              </div>
+              <button className="secondary-button" type="button" onClick={openAudit}>更新</button>
+            </div>
+            {auditLoading ? <p className="people-status" role="status">監査ログを取得しています…</p> : null}
+            {auditError ? <p className="people-status error" role="alert">{auditError}</p> : null}
+            {!auditLoading && !auditError && auditLogs.length === 0 ? <p className="people-status">監査ログはありません。</p> : null}
+            <div className="audit-list">
+              {auditLogs.map((event) => (
+                <article className="audit-row" key={event.id}>
+                  <time>{formatDateTime(event.createdAt)}</time>
+                  <div>
+                    <strong>{event.action.replaceAll('_', ' ')}</strong>
+                    <span>{event.actorUserId} · {event.resourceType} · {event.resourceId}</span>
+                  </div>
+                  <span className="audit-safe"><ShieldIcon />予定詳細なし</span>
                 </article>
               ))}
             </div>

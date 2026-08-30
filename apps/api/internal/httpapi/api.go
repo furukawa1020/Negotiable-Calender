@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/audit"
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/notification"
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/organization"
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/policy"
@@ -29,20 +30,25 @@ type API struct {
 	organizations organization.Store
 	requests      coordinationrequest.Store
 	notifications notification.Store
+	audits        audit.Store
 	webOrigin     string
 	logger        *slog.Logger
 }
 
 func New(database databasePinger, policies policy.Store, projections projection.Store, organizations organization.Store, requests coordinationrequest.Store, webOrigin string, logger *slog.Logger) http.Handler {
-	return newAPI(database, policies, projections, organizations, requests, nil, webOrigin, logger)
+	return newAPI(database, policies, projections, organizations, requests, nil, nil, webOrigin, logger)
 }
 
 func NewWithNotifications(database databasePinger, policies policy.Store, projections projection.Store, organizations organization.Store, requests coordinationrequest.Store, notifications notification.Store, webOrigin string, logger *slog.Logger) http.Handler {
-	return newAPI(database, policies, projections, organizations, requests, notifications, webOrigin, logger)
+	return newAPI(database, policies, projections, organizations, requests, notifications, nil, webOrigin, logger)
 }
 
-func newAPI(database databasePinger, policies policy.Store, projections projection.Store, organizations organization.Store, requests coordinationrequest.Store, notifications notification.Store, webOrigin string, logger *slog.Logger) http.Handler {
-	api := &API{database: database, policies: policies, projections: projections, organizations: organizations, requests: requests, notifications: notifications, webOrigin: webOrigin, logger: logger}
+func NewWithStores(database databasePinger, policies policy.Store, projections projection.Store, organizations organization.Store, requests coordinationrequest.Store, notifications notification.Store, audits audit.Store, webOrigin string, logger *slog.Logger) http.Handler {
+	return newAPI(database, policies, projections, organizations, requests, notifications, audits, webOrigin, logger)
+}
+
+func newAPI(database databasePinger, policies policy.Store, projections projection.Store, organizations organization.Store, requests coordinationrequest.Store, notifications notification.Store, audits audit.Store, webOrigin string, logger *slog.Logger) http.Handler {
+	api := &API{database: database, policies: policies, projections: projections, organizations: organizations, requests: requests, notifications: notifications, audits: audits, webOrigin: webOrigin, logger: logger}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", api.health)
 	mux.HandleFunc("GET /readyz", api.ready)
@@ -61,8 +67,42 @@ func newAPI(database databasePinger, policies policy.Store, projections projecti
 	mux.HandleFunc("POST /api/v1/requests/{requestId}/decline", api.declineCoordinationRequest)
 	mux.HandleFunc("GET /api/v1/notifications", api.listNotifications)
 	mux.HandleFunc("POST /api/v1/notifications/{notificationId}/read", api.readNotification)
+	mux.HandleFunc("GET /api/v1/audit-logs", api.listAuditLogs)
 	mux.HandleFunc("OPTIONS /api/v1/{path...}", api.options)
 	return api.middleware(mux)
+}
+
+func (api *API) listAuditLogs(response http.ResponseWriter, request *http.Request) {
+	userID := request.Header.Get("X-Demo-User-ID")
+	organizationID := request.Header.Get("X-Organization-ID")
+	if userID == "" || organizationID == "" {
+		writeJSON(response, http.StatusUnauthorized, map[string]string{"error": "request identity is required"})
+		return
+	}
+	if api.audits == nil {
+		writeJSON(response, http.StatusOK, map[string]any{"auditLogs": []audit.Event{}})
+		return
+	}
+	values, err := api.audits.List(request.Context(), organizationID)
+	if err != nil {
+		api.logger.Error("list audit logs", "error", err)
+		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to load audit logs"})
+		return
+	}
+	writeJSON(response, http.StatusOK, map[string]any{"auditLogs": values})
+}
+
+func (api *API) recordAudit(ctx context.Context, actorUserID string, action audit.Action, requestID string) {
+	if api.audits == nil {
+		return
+	}
+	err := api.audits.Create(ctx, audit.Event{
+		ID: newID("audit"), ActorUserID: actorUserID, Action: action,
+		ResourceType: "request", ResourceID: requestID, CreatedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		api.logger.Error("create audit event", "action", action, "error", err)
+	}
 }
 
 func (api *API) listNotifications(response http.ResponseWriter, request *http.Request) {
@@ -153,6 +193,7 @@ func (api *API) delegateCoordinationRequest(response http.ResponseWriter, reques
 		return
 	}
 	api.notify(request.Context(), targetUserID, notification.RequestDelegated, option.RequestID, "依頼を別のメンバーへ委譲しました。")
+	api.recordAudit(request.Context(), targetUserID, audit.RequestDelegated, option.RequestID)
 	writeJSON(response, http.StatusOK, map[string]any{
 		"id": option.RequestID, "status": coordinationrequest.Delegated,
 		"delegatedUserId": option.DelegateUserID,
@@ -202,6 +243,7 @@ func (api *API) suggestCoordinationRequest(response http.ResponseWriter, request
 		return
 	}
 	api.notify(request.Context(), targetUserID, notification.RequestChanged, option.RequestID, "依頼に別の時間候補を追加しました。")
+	api.recordAudit(request.Context(), targetUserID, audit.RequestChanged, option.RequestID)
 	writeJSON(response, http.StatusCreated, option)
 }
 
@@ -250,6 +292,11 @@ func (api *API) respondToCoordinationRequest(response http.ResponseWriter, reque
 		kind, message = notification.RequestDeclined, "依頼を辞退しました。"
 	}
 	api.notify(request.Context(), targetUserID, kind, request.PathValue("requestId"), message)
+	auditAction := audit.RequestAccepted
+	if status == coordinationrequest.Declined {
+		auditAction = audit.RequestDeclined
+	}
+	api.recordAudit(request.Context(), targetUserID, auditAction, request.PathValue("requestId"))
 	writeJSON(response, http.StatusOK, map[string]any{"id": request.PathValue("requestId"), "status": status, "acceptedOptionId": optionID})
 }
 
@@ -330,6 +377,7 @@ func (api *API) createCoordinationRequest(response http.ResponseWriter, request 
 		return
 	}
 	api.notify(request.Context(), value.TargetUserID, notification.RequestReceived, value.ID, "新しい調整依頼が届きました。")
+	api.recordAudit(request.Context(), value.RequesterUserID, audit.RequestCreated, value.ID)
 	writeJSON(response, http.StatusCreated, value)
 }
 

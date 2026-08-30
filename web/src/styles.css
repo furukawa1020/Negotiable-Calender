@@ -957,6 +957,63 @@ footer {
   padding: 68px 0 80px;
 }
 
+.audit-view {
+  padding: 68px 0 80px;
+}
+
+.audit-list {
+  display: grid;
+  border-top: 1px solid var(--line);
+}
+
+.audit-row {
+  padding: 18px 14px;
+  display: grid;
+  grid-template-columns: 130px 1fr auto;
+  align-items: center;
+  gap: 20px;
+  border-bottom: 1px solid var(--line);
+  background: var(--paper);
+}
+
+.audit-row > time {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.audit-row > div {
+  display: grid;
+  gap: 5px;
+}
+
+.audit-row strong {
+  color: var(--ink);
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.audit-row div span {
+  color: var(--muted);
+  font-family: monospace;
+  font-size: 10px;
+}
+
+.audit-safe {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--green);
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.audit-safe svg {
+  width: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+}
+
 .request-list {
   display: grid;
   gap: 16px;
@@ -1187,6 +1244,11 @@ footer {
 
   .request-card {
     grid-template-columns: 1fr;
+  }
+
+  .audit-row {
+    grid-template-columns: 1fr;
+    gap: 8px;
   }
 
   .request-summary {

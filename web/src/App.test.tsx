@@ -182,4 +182,26 @@ describe('App', () => {
       expect.objectContaining({ method: 'POST' }),
     )
   })
+
+  it('shows a privacy-safe organization audit log', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      auditLogs: [{
+        id: 'audit-1', organizationId: 'demo-org', actorUserId: 'demo-manager',
+        action: 'request_accepted', resourceType: 'request', resourceId: 'request-1',
+        createdAt: '2026-08-30T02:00:00Z',
+      }],
+    }), { status: 200 }))
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: '監査' }))
+    const heading = await screen.findByRole('heading', { name: '共有した事実だけを、記録する。' })
+    expect(heading).toBeInTheDocument()
+    expect(await screen.findByText('request accepted')).toBeInTheDocument()
+    expect(screen.getByText('予定詳細なし')).toBeInTheDocument()
+    const auditView = heading.closest('.audit-view') as HTMLElement
+    expect(within(auditView).queryByText('Product Review')).not.toBeInTheDocument()
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/api/v1/audit-logs'),
+      expect.objectContaining({ headers: expect.objectContaining({ 'X-Organization-ID': 'demo-org' }) }),
+    )
+  })
 })

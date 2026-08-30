@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/audit"
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/notification"
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/organization"
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/policy"
@@ -65,6 +66,22 @@ type stubNotificationStore struct {
 	readUser   string
 	readResult bool
 	err        error
+}
+
+type stubAuditStore struct {
+	values           []audit.Event
+	listOrganization string
+	err              error
+}
+
+func (store *stubAuditStore) Create(_ context.Context, value audit.Event) error {
+	store.values = append(store.values, value)
+	return store.err
+}
+
+func (store *stubAuditStore) List(_ context.Context, organizationID string) ([]audit.Event, error) {
+	store.listOrganization = organizationID
+	return store.values, store.err
 }
 
 func (store *stubNotificationStore) Create(_ context.Context, value notification.Notification) error {
@@ -502,6 +519,58 @@ func TestRequestCreateEmitsPrivacySafeNotification(t *testing.T) {
 	}
 	if strings.Contains(created.Message, "Secret acquisition review") {
 		t.Fatalf("request title leaked into notification: %q", created.Message)
+	}
+}
+
+func TestAuditLogsUseOrganizationBoundaryAndSafeFields(t *testing.T) {
+	t.Parallel()
+	now := time.Now().UTC()
+	audits := &stubAuditStore{values: []audit.Event{{
+		ID: "audit-1", OrganizationID: "org-1", ActorUserID: "manager-1",
+		Action: audit.RequestAccepted, ResourceType: "request", ResourceID: "request-1", CreatedAt: now,
+	}}}
+	handler := NewWithStores(stubDatabase{}, &stubPolicyStore{}, &stubProjectionStore{}, &stubOrganizationStore{}, &stubRequestStore{}, &stubNotificationStore{}, audits, "", testLogger())
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/audit-logs", nil)
+	request.Header.Set("X-Demo-User-ID", "manager-1")
+	request.Header.Set("X-Organization-ID", "org-1")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || audits.listOrganization != "org-1" {
+		t.Fatalf("audit list failed: %d organization=%q", response.Code, audits.listOrganization)
+	}
+	encoded := response.Body.String()
+	for _, expected := range []string{"auditLogs", "request_accepted", "manager-1", "request-1"} {
+		if !strings.Contains(encoded, expected) {
+			t.Fatalf("audit response missing %q: %s", expected, encoded)
+		}
+	}
+	for _, forbidden := range []string{"title", "privateEvent", "attendees", "location", "calendar"} {
+		if strings.Contains(encoded, forbidden) {
+			t.Fatalf("private field %q leaked: %s", forbidden, encoded)
+		}
+	}
+}
+
+func TestRequestCreateEmitsPrivacySafeAuditEvent(t *testing.T) {
+	t.Parallel()
+	audits := &stubAuditStore{}
+	handler := NewWithStores(stubDatabase{}, &stubPolicyStore{}, &stubProjectionStore{}, &stubOrganizationStore{}, &stubRequestStore{}, &stubNotificationStore{}, audits, "", testLogger())
+	body, _ := json.Marshal(map[string]any{
+		"targetUserId": "manager-1", "type": "review", "title": "Confidential board review",
+		"durationMinutes": 15, "deadlineAt": time.Now().UTC().Add(4 * time.Hour),
+		"syncPreference": "either", "priority": "normal",
+	})
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/requests", bytes.NewReader(body))
+	request.Header.Set("X-Demo-User-ID", "member-1")
+	request.Header.Set("X-Organization-ID", "org-1")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated || len(audits.values) != 1 {
+		t.Fatalf("audit event missing: status=%d values=%#v", response.Code, audits.values)
+	}
+	event := audits.values[0]
+	if event.ActorUserID != "member-1" || event.Action != audit.RequestCreated || event.ResourceType != "request" {
+		t.Fatalf("unexpected audit event: %#v", event)
 	}
 }
 

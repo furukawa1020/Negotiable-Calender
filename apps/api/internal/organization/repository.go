@@ -17,6 +17,20 @@ type Person struct {
 
 type Store interface {
 	ListPeople(context.Context, string) ([]Person, error)
+	IsMember(context.Context, string, string) (bool, error)
+}
+
+func (store *PostgresStore) IsMember(ctx context.Context, organizationID, userID string) (bool, error) {
+	var exists bool
+	err := store.database.QueryRowContext(ctx, `
+SELECT EXISTS (
+    SELECT 1 FROM memberships WHERE organization_id = $1 AND user_id = $2
+)
+`, organizationID, userID).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("check organization membership: %w", err)
+	}
+	return exists, nil
 }
 
 type PostgresStore struct {

@@ -48,7 +48,10 @@ describe('App', () => {
     fireEvent.click(screen.getByRole('button', { name: '閉じる' }))
     fireEvent.click(screen.getByRole('button', { name: /メンバー表示をプレビュー/ }))
     expect(await screen.findByRole('button', { name: /自分の表示に戻る/ })).toBeInTheDocument()
-    expect(globalThis.fetch).toHaveBeenCalledWith(expect.stringContaining('/api/v1/people/demo-manager/projection'))
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/api/v1/people/demo-manager/projection'),
+      expect.objectContaining({ headers: expect.objectContaining({ 'X-Organization-ID': 'demo-org' }) }),
+    )
   })
 
   it('navigates days and switches manager calendar layers', () => {
@@ -93,7 +96,10 @@ describe('App', () => {
     expect(await screen.findByRole('heading', { name: '山田 太郎' })).toBeInTheDocument()
     expect(screen.getByText('緊急のみ')).toBeInTheDocument()
     expect(screen.queryByText('Product Review')).not.toBeInTheDocument()
-    expect(globalThis.fetch).toHaveBeenCalledWith(expect.stringContaining('/api/v1/people?organizationId=demo-org'))
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/api/v1/people?organizationId=demo-org'),
+      expect.objectContaining({ headers: expect.objectContaining({ 'X-Demo-User-ID': 'demo-manager' }) }),
+    )
   })
 
   it('loads the manager request inbox with generated options', async () => {

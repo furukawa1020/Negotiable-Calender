@@ -181,7 +181,7 @@ function App() {
     try {
       const response = await fetch(`${apiURL}/api/v1/users/demo-manager/manual-overrides`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Demo-User-ID': 'demo-manager' },
         body: JSON.stringify({
           startAt: startAt.toISOString(),
           endAt: endAt.toISOString(),
@@ -227,7 +227,9 @@ function App() {
         from: from.toISOString(),
         to: to.toISOString(),
       })
-      const response = await fetch(`${apiURL}/api/v1/people/demo-manager/projection?${query}`)
+      const response = await fetch(`${apiURL}/api/v1/people/demo-manager/projection?${query}`, {
+        headers: { 'X-Demo-User-ID': 'demo-manager', 'X-Organization-ID': 'demo-org' },
+      })
       if (!response.ok) {
         throw new Error('preview failed')
       }
@@ -268,7 +270,9 @@ function App() {
     setPeopleLoading(true)
     setPeopleError('')
     try {
-      const response = await fetch(`${apiURL}/api/v1/people?organizationId=demo-org`)
+      const response = await fetch(`${apiURL}/api/v1/people?organizationId=demo-org`, {
+        headers: { 'X-Demo-User-ID': 'demo-manager', 'X-Organization-ID': 'demo-org' },
+      })
       if (!response.ok) {
         throw new Error('people failed')
       }
@@ -276,6 +280,7 @@ function App() {
       const cards = await Promise.all(directory.people.map(async (person) => {
         const projectionResponse = await fetch(
           `${apiURL}/api/v1/people/${person.id}/projection?timezone=${encodeURIComponent(person.timezone)}`,
+          { headers: { 'X-Demo-User-ID': 'demo-manager', 'X-Organization-ID': 'demo-org' } },
         )
         if (!projectionResponse.ok) {
           throw new Error('projection failed')

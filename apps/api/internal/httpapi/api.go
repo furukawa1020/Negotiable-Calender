@@ -79,6 +79,9 @@ func (api *API) listAuditLogs(response http.ResponseWriter, request *http.Reques
 		writeJSON(response, http.StatusUnauthorized, map[string]string{"error": "request identity is required"})
 		return
 	}
+	if !api.requireMembership(response, request, organizationID, userID) {
+		return
+	}
 	if api.audits == nil {
 		writeJSON(response, http.StatusOK, map[string]any{"auditLogs": []audit.Event{}})
 		return
@@ -90,6 +93,33 @@ func (api *API) listAuditLogs(response http.ResponseWriter, request *http.Reques
 		return
 	}
 	writeJSON(response, http.StatusOK, map[string]any{"auditLogs": values})
+}
+
+func (api *API) requireSelf(response http.ResponseWriter, request *http.Request, userID string) bool {
+	authenticatedUserID := request.Header.Get("X-Demo-User-ID")
+	if authenticatedUserID == "" {
+		writeJSON(response, http.StatusUnauthorized, map[string]string{"error": "request identity is required"})
+		return false
+	}
+	if authenticatedUserID != userID {
+		writeJSON(response, http.StatusForbidden, map[string]string{"error": "access denied"})
+		return false
+	}
+	return true
+}
+
+func (api *API) requireMembership(response http.ResponseWriter, request *http.Request, organizationID, userID string) bool {
+	member, err := api.organizations.IsMember(request.Context(), organizationID, userID)
+	if err != nil {
+		api.logger.Error("check organization membership", "error", err)
+		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to authorize request"})
+		return false
+	}
+	if !member {
+		writeJSON(response, http.StatusForbidden, map[string]string{"error": "access denied"})
+		return false
+	}
+	return true
 }
 
 func (api *API) recordAudit(ctx context.Context, actorUserID string, action audit.Action, requestID string) {
@@ -335,6 +365,9 @@ func (api *API) createCoordinationRequest(response http.ResponseWriter, request 
 		writeJSON(response, http.StatusUnauthorized, map[string]string{"error": "request identity is required"})
 		return
 	}
+	if !api.requireMembership(response, request, organizationID, requesterID) {
+		return
+	}
 	var input createCoordinationRequestInput
 	decoder := json.NewDecoder(http.MaxBytesReader(response, request.Body, 1<<20))
 	decoder.DisallowUnknownFields()
@@ -353,6 +386,9 @@ func (api *API) createCoordinationRequest(response http.ResponseWriter, request 
 	}
 	if err := value.Validate(); err != nil {
 		writeJSON(response, http.StatusUnprocessableEntity, map[string]string{"error": fmt.Sprintf("invalid coordination request: %s", err)})
+		return
+	}
+	if !api.requireMembership(response, request, organizationID, value.TargetUserID) {
 		return
 	}
 	publicProjections, err := api.projections.List(request.Context(), value.TargetUserID, now, value.DeadlineAt)
@@ -387,6 +423,18 @@ func (api *API) listPeople(response http.ResponseWriter, request *http.Request) 
 		writeJSON(response, http.StatusBadRequest, map[string]string{"error": "organizationId is required"})
 		return
 	}
+	actorUserID := request.Header.Get("X-Demo-User-ID")
+	headerOrganizationID := request.Header.Get("X-Organization-ID")
+	if actorUserID == "" || headerOrganizationID == "" {
+		writeJSON(response, http.StatusUnauthorized, map[string]string{"error": "request identity is required"})
+		return
+	}
+	if headerOrganizationID != organizationID || !api.requireMembership(response, request, organizationID, actorUserID) {
+		if headerOrganizationID != organizationID {
+			writeJSON(response, http.StatusForbidden, map[string]string{"error": "access denied"})
+		}
+		return
+	}
 	people, err := api.organizations.ListPeople(request.Context(), organizationID)
 	if err != nil {
 		api.logger.Error("list organization people", "error", err)
@@ -397,6 +445,15 @@ func (api *API) listPeople(response http.ResponseWriter, request *http.Request) 
 }
 
 func (api *API) getPublicProjection(response http.ResponseWriter, request *http.Request) {
+	actorUserID := request.Header.Get("X-Demo-User-ID")
+	organizationID := request.Header.Get("X-Organization-ID")
+	if actorUserID == "" || organizationID == "" {
+		writeJSON(response, http.StatusUnauthorized, map[string]string{"error": "request identity is required"})
+		return
+	}
+	if !api.requireMembership(response, request, organizationID, actorUserID) || !api.requireMembership(response, request, organizationID, request.PathValue("userId")) {
+		return
+	}
 	timezone := request.URL.Query().Get("timezone")
 	if timezone == "" {
 		timezone = "Asia/Tokyo"
@@ -447,6 +504,9 @@ type createOverrideRequest struct {
 }
 
 func (api *API) listManualOverrides(response http.ResponseWriter, request *http.Request) {
+	if !api.requireSelf(response, request, request.PathValue("userId")) {
+		return
+	}
 	values, err := api.policies.ListActiveOverrides(request.Context(), request.PathValue("userId"), time.Now().UTC())
 	if err != nil {
 		api.logger.Error("list manual overrides", "error", err)
@@ -460,6 +520,9 @@ func (api *API) listManualOverrides(response http.ResponseWriter, request *http.
 }
 
 func (api *API) createManualOverride(response http.ResponseWriter, request *http.Request) {
+	if !api.requireSelf(response, request, request.PathValue("userId")) {
+		return
+	}
 	var input createOverrideRequest
 	decoder := json.NewDecoder(http.MaxBytesReader(response, request.Body, 1<<20))
 	decoder.DisallowUnknownFields()
@@ -527,6 +590,9 @@ type updateRuleRequest struct {
 }
 
 func (api *API) getSharingPolicy(response http.ResponseWriter, request *http.Request) {
+	if !api.requireSelf(response, request, request.PathValue("userId")) {
+		return
+	}
 	value, err := api.policies.Get(request.Context(), request.PathValue("userId"))
 	if errors.Is(err, policy.ErrNotFound) {
 		writeJSON(response, http.StatusNotFound, map[string]string{"error": "sharing policy not found"})
@@ -541,6 +607,9 @@ func (api *API) getSharingPolicy(response http.ResponseWriter, request *http.Req
 }
 
 func (api *API) putSharingPolicy(response http.ResponseWriter, request *http.Request) {
+	if !api.requireSelf(response, request, request.PathValue("userId")) {
+		return
+	}
 	var input updatePolicyRequest
 	decoder := json.NewDecoder(http.MaxBytesReader(response, request.Body, 1<<20))
 	decoder.DisallowUnknownFields()

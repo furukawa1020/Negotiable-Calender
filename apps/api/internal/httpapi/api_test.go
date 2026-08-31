@@ -42,8 +42,9 @@ func (store *stubProjectionStore) List(context.Context, string, time.Time, time.
 }
 
 type stubOrganizationStore struct {
-	people []organization.Person
-	err    error
+	people  []organization.Person
+	members map[string]bool
+	err     error
 }
 
 type stubRequestStore struct {
@@ -129,6 +130,16 @@ func (store *stubRequestStore) ListForTarget(_ context.Context, targetUserID str
 
 func (store *stubOrganizationStore) ListPeople(context.Context, string) ([]organization.Person, error) {
 	return store.people, store.err
+}
+
+func (store *stubOrganizationStore) IsMember(_ context.Context, organizationID, userID string) (bool, error) {
+	if store.err != nil {
+		return false, store.err
+	}
+	if store.members == nil {
+		return true, nil
+	}
+	return store.members[organizationID+":"+userID], nil
 }
 
 func (store *stubProjectionStore) GetView(context.Context, string, string, time.Time, time.Time) (projection.View, error) {
@@ -256,6 +267,7 @@ func TestSharingPolicyPutThenGet(t *testing.T) {
   }]
 }`
 	put := httptest.NewRequest(http.MethodPut, "/api/v1/users/manager-1/sharing-policy", strings.NewReader(body))
+	put.Header.Set("X-Demo-User-ID", "manager-1")
 	putResponse := httptest.NewRecorder()
 	handler.ServeHTTP(putResponse, put)
 	if putResponse.Code != http.StatusOK {
@@ -266,6 +278,7 @@ func TestSharingPolicyPutThenGet(t *testing.T) {
 	}
 
 	get := httptest.NewRequest(http.MethodGet, "/api/v1/users/manager-1/sharing-policy", nil)
+	get.Header.Set("X-Demo-User-ID", "manager-1")
 	getResponse := httptest.NewRecorder()
 	handler.ServeHTTP(getResponse, get)
 	if getResponse.Code != http.StatusOK {
@@ -284,6 +297,7 @@ func TestSharingPolicyRejectsInvalidState(t *testing.T) {
 	handler := New(stubDatabase{}, store, &stubProjectionStore{}, &stubOrganizationStore{}, &stubRequestStore{}, "", testLogger())
 	body := `{"default":{"availability":"secret_meeting"},"workingHours":[],"rules":[]}`
 	request := httptest.NewRequest(http.MethodPut, "/api/v1/users/manager-1/sharing-policy", strings.NewReader(body))
+	request.Header.Set("X-Demo-User-ID", "manager-1")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusUnprocessableEntity {
@@ -295,6 +309,7 @@ func TestSharingPolicyGetReturnsNotFound(t *testing.T) {
 	t.Parallel()
 	handler := New(stubDatabase{}, &stubPolicyStore{err: policy.ErrNotFound}, &stubProjectionStore{}, &stubOrganizationStore{}, &stubRequestStore{}, "", testLogger())
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/users/missing/sharing-policy", nil)
+	request.Header.Set("X-Demo-User-ID", "missing")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusNotFound {
@@ -322,6 +337,7 @@ func TestManualOverrideCreateThenList(t *testing.T) {
 		t.Fatalf("encode request: %v", err)
 	}
 	post := httptest.NewRequest(http.MethodPost, "/api/v1/users/manager-1/manual-overrides", bytes.NewReader(body))
+	post.Header.Set("X-Demo-User-ID", "manager-1")
 	postResponse := httptest.NewRecorder()
 	handler.ServeHTTP(postResponse, post)
 	if postResponse.Code != http.StatusCreated {
@@ -335,6 +351,7 @@ func TestManualOverrideCreateThenList(t *testing.T) {
 	}
 
 	get := httptest.NewRequest(http.MethodGet, "/api/v1/users/manager-1/manual-overrides", nil)
+	get.Header.Set("X-Demo-User-ID", "manager-1")
 	getResponse := httptest.NewRecorder()
 	handler.ServeHTTP(getResponse, get)
 	if getResponse.Code != http.StatusOK {
@@ -359,6 +376,8 @@ func TestPublicProjectionContainsOnlySafeFields(t *testing.T) {
 	}}
 	handler := New(stubDatabase{}, &stubPolicyStore{}, projectionStore, &stubOrganizationStore{}, &stubRequestStore{}, "", testLogger())
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/people/manager-1/projection?timezone=Asia%2FTokyo", nil)
+	request.Header.Set("X-Demo-User-ID", "member-1")
+	request.Header.Set("X-Organization-ID", "org-1")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
@@ -384,6 +403,8 @@ func TestPeopleResponseOmitsEmailAndCalendarDetails(t *testing.T) {
 	}}}
 	handler := New(stubDatabase{}, &stubPolicyStore{}, &stubProjectionStore{}, organizations, &stubRequestStore{}, "", testLogger())
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/people?organizationId=org-1", nil)
+	request.Header.Set("X-Demo-User-ID", "member-1")
+	request.Header.Set("X-Organization-ID", "org-1")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
@@ -621,6 +642,86 @@ func TestCoordinationRequestInboxRequiresIdentity(t *testing.T) {
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d", response.Code)
+	}
+}
+
+func TestSharingPolicyRejectsIDOR(t *testing.T) {
+	t.Parallel()
+	handler := New(stubDatabase{}, &stubPolicyStore{}, &stubProjectionStore{}, &stubOrganizationStore{}, &stubRequestStore{}, "", testLogger())
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/users/manager-1/sharing-policy", nil)
+	request.Header.Set("X-Demo-User-ID", "attacker-1")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for policy IDOR, got %d", response.Code)
+	}
+}
+
+func TestPeopleRejectsOrganizationSpoofing(t *testing.T) {
+	t.Parallel()
+	handler := New(stubDatabase{}, &stubPolicyStore{}, &stubProjectionStore{}, &stubOrganizationStore{}, &stubRequestStore{}, "", testLogger())
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/people?organizationId=org-1", nil)
+	request.Header.Set("X-Demo-User-ID", "member-1")
+	request.Header.Set("X-Organization-ID", "other-org")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for organization spoofing, got %d", response.Code)
+	}
+}
+
+func TestAuditLogsRejectNonMember(t *testing.T) {
+	t.Parallel()
+	organizations := &stubOrganizationStore{members: map[string]bool{"org-1:member-1": false}}
+	audits := &stubAuditStore{}
+	handler := NewWithStores(stubDatabase{}, &stubPolicyStore{}, &stubProjectionStore{}, organizations, &stubRequestStore{}, &stubNotificationStore{}, audits, "", testLogger())
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/audit-logs", nil)
+	request.Header.Set("X-Demo-User-ID", "member-1")
+	request.Header.Set("X-Organization-ID", "org-1")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusForbidden || audits.listOrganization != "" {
+		t.Fatalf("non-member reached audit store: status=%d organization=%q", response.Code, audits.listOrganization)
+	}
+}
+
+func TestRequestCreateRejectsTargetOutsideOrganization(t *testing.T) {
+	t.Parallel()
+	organizations := &stubOrganizationStore{members: map[string]bool{
+		"org-1:member-1":  true,
+		"org-1:manager-2": false,
+	}}
+	requests := &stubRequestStore{}
+	handler := New(stubDatabase{}, &stubPolicyStore{}, &stubProjectionStore{}, organizations, requests, "", testLogger())
+	body, _ := json.Marshal(map[string]any{
+		"targetUserId": "manager-2", "type": "review", "title": "Cross-org probe",
+		"durationMinutes": 15, "deadlineAt": time.Now().UTC().Add(4 * time.Hour),
+		"syncPreference": "either", "priority": "normal",
+	})
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/requests", bytes.NewReader(body))
+	request.Header.Set("X-Demo-User-ID", "member-1")
+	request.Header.Set("X-Organization-ID", "org-1")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusForbidden || requests.value.ID != "" {
+		t.Fatalf("cross-org request persisted: status=%d value=%#v", response.Code, requests.value)
+	}
+}
+
+func TestProjectionRejectsTargetOutsideOrganization(t *testing.T) {
+	t.Parallel()
+	organizations := &stubOrganizationStore{members: map[string]bool{
+		"org-1:member-1":  true,
+		"org-1:manager-2": false,
+	}}
+	handler := New(stubDatabase{}, &stubPolicyStore{}, &stubProjectionStore{}, organizations, &stubRequestStore{}, "", testLogger())
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/people/manager-2/projection", nil)
+	request.Header.Set("X-Demo-User-ID", "member-1")
+	request.Header.Set("X-Organization-ID", "org-1")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for cross-org projection, got %d", response.Code)
 	}
 }
 

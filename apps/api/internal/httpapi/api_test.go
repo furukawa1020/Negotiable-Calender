@@ -41,6 +41,10 @@ func (store *stubProjectionStore) List(context.Context, string, time.Time, time.
 	return store.values, store.err
 }
 
+func (store *stubProjectionStore) ListForUser(context.Context, string) ([]projection.ScheduleProjection, error) {
+	return store.values, store.err
+}
+
 type stubOrganizationStore struct {
 	people  []organization.Person
 	members map[string]bool
@@ -125,6 +129,11 @@ func (store *stubRequestStore) Create(_ context.Context, value coordinationreque
 
 func (store *stubRequestStore) ListForTarget(_ context.Context, targetUserID string) ([]coordinationrequest.CoordinationRequest, error) {
 	store.target = targetUserID
+	return store.values, store.err
+}
+
+func (store *stubRequestStore) ListForUser(_ context.Context, userID string) ([]coordinationrequest.CoordinationRequest, error) {
+	store.target = userID
 	return store.values, store.err
 }
 
@@ -722,6 +731,58 @@ func TestProjectionRejectsTargetOutsideOrganization(t *testing.T) {
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusForbidden {
 		t.Fatalf("expected 403 for cross-org projection, got %d", response.Code)
+	}
+}
+
+func TestUserDataExportReturnsOnlySelfServiceData(t *testing.T) {
+	t.Parallel()
+	now := time.Now().UTC()
+	requests := &stubRequestStore{values: []coordinationrequest.CoordinationRequest{{
+		ID: "request-1", RequesterUserID: "manager-1", TargetUserID: "member-1", Title: "Review",
+	}}}
+	projections := &stubProjectionStore{values: []projection.ScheduleProjection{{
+		ID: "projection-1", UserID: "manager-1", StartAt: now, EndAt: now.Add(time.Hour),
+	}}}
+	policies := &stubPolicyStore{value: policy.SharingPolicy{ID: "policy-1", UserID: "manager-1"}}
+	handler := New(stubDatabase{}, policies, projections, &stubOrganizationStore{}, requests, "", testLogger())
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/users/manager-1/export", nil)
+	request.Header.Set("X-Demo-User-ID", "manager-1")
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected export success, got %d: %s", response.Code, response.Body.String())
+	}
+	if requests.target != "manager-1" {
+		t.Fatalf("export queried wrong user: %q", requests.target)
+	}
+	if disposition := response.Header().Get("Content-Disposition"); !strings.Contains(disposition, "negotiable-calendar-manager-1.json") {
+		t.Fatalf("unexpected content disposition: %q", disposition)
+	}
+	body := response.Body.String()
+	for _, expected := range []string{`"userId":"manager-1"`, `"requests"`, `"policy"`, `"projections"`, `"generatedAt"`} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("export omitted %s: %s", expected, body)
+		}
+	}
+	if strings.Contains(body, "privateEvents") {
+		t.Fatalf("export leaked private event structure: %s", body)
+	}
+}
+
+func TestUserDataExportRejectsIDOR(t *testing.T) {
+	t.Parallel()
+	requests := &stubRequestStore{}
+	handler := New(stubDatabase{}, &stubPolicyStore{}, &stubProjectionStore{}, &stubOrganizationStore{}, requests, "", testLogger())
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/users/manager-1/export", nil)
+	request.Header.Set("X-Demo-User-ID", "attacker-1")
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusForbidden || requests.target != "" {
+		t.Fatalf("IDOR reached export store: status=%d user=%q", response.Code, requests.target)
 	}
 }
 

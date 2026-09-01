@@ -15,6 +15,28 @@ describe('App', () => {
     expect(screen.getByText('15分相談可能')).toBeInTheDocument()
   })
 
+  it('downloads the authenticated self-service data export', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
+      userId: 'demo-manager', requests: [], policy: null, projections: [],
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    const objectURL = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:export')
+    const revokeObjectURL = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined)
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+    render(<App />)
+
+    fireEvent.click(screen.getByRole('button', { name: '山田太郎のアカウントメニュー' }))
+    fireEvent.click(screen.getByRole('button', { name: '本人データをエクスポート' }))
+
+    expect(await screen.findByRole('status')).toHaveTextContent('本人データを安全にエクスポートしました。')
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/api/v1/users/demo-manager/export'),
+      { headers: { 'X-Demo-User-ID': 'demo-manager' } },
+    )
+    expect(objectURL).toHaveBeenCalled()
+    expect(click).toHaveBeenCalled()
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:export')
+  })
+
   it('creates a coordination request from the dialog', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
       status: 'suggested',

@@ -12,6 +12,7 @@ var ErrNotFound = fmt.Errorf("coordination request not found")
 type Store interface {
 	Create(context.Context, CoordinationRequest) error
 	ListForTarget(context.Context, string) ([]CoordinationRequest, error)
+	ListForUser(context.Context, string) ([]CoordinationRequest, error)
 	Respond(context.Context, string, string, Status, string) error
 	Suggest(context.Context, string, string, Option) error
 	Delegate(context.Context, string, string, Option) error
@@ -107,14 +108,22 @@ INSERT INTO coordination_request_options (
 }
 
 func (store *PostgresStore) ListForTarget(ctx context.Context, targetUserID string) ([]CoordinationRequest, error) {
+	return store.listForUser(ctx, targetUserID, false)
+}
+
+func (store *PostgresStore) ListForUser(ctx context.Context, userID string) ([]CoordinationRequest, error) {
+	return store.listForUser(ctx, userID, true)
+}
+
+func (store *PostgresStore) listForUser(ctx context.Context, userID string, includeRequested bool) ([]CoordinationRequest, error) {
 	rows, err := store.database.QueryContext(ctx, `
 SELECT id, organization_id, requester_user_id, target_user_id, type, title,
        duration_minutes, deadline_at, sync_preference, priority, status,
        created_at, updated_at, accepted_option_id, delegated_user_id
 FROM coordination_requests
-WHERE target_user_id = $1
+WHERE target_user_id = $1 OR ($2 AND requester_user_id = $1)
 ORDER BY created_at DESC, id DESC
-`, targetUserID)
+`, userID, includeRequested)
 	if err != nil {
 		return nil, fmt.Errorf("list coordination requests: %w", err)
 	}

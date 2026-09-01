@@ -111,6 +111,7 @@ function App() {
   const [auditLoading, setAuditLoading] = useState(false)
   const [auditError, setAuditError] = useState('')
   const [overrideSaving, setOverrideSaving] = useState(false)
+  const [exporting, setExporting] = useState(false)
   const visibleDate = useMemo(() => {
     const value = new Date()
     value.setDate(value.getDate() + dayOffset)
@@ -460,6 +461,31 @@ function App() {
     }
   }
 
+  const exportUserData = async () => {
+    setExporting(true)
+    try {
+      const response = await fetch(`${apiURL}/api/v1/users/demo-manager/export`, {
+        headers: { 'X-Demo-User-ID': 'demo-manager' },
+      })
+      if (!response.ok) throw new Error('export failed')
+      const blob = await response.blob()
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `negotiable-calendar-demo-manager-${new Date().toISOString().slice(0, 10)}.json`
+      document.body.append(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(url)
+      setAccountOpen(false)
+      setNotice('本人データを安全にエクスポートしました。')
+    } catch {
+      setNotice('データをエクスポートできませんでした。')
+    } finally {
+      setExporting(false)
+    }
+  }
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -500,7 +526,7 @@ function App() {
               <div className="account-menu">
                 <strong>山田 太郎</strong>
                 <span>Manager · Asia/Tokyo</span>
-                <button type="button" onClick={() => setNotice('設定画面は次の実装ステップです。')}>アカウント設定</button>
+                <button type="button" onClick={exportUserData} disabled={exporting}>{exporting ? '準備中…' : '本人データをエクスポート'}</button>
               </div>
             ) : null}
           </div>

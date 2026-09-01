@@ -12,6 +12,7 @@ import (
 type Store interface {
 	GetView(context.Context, string, string, time.Time, time.Time) (View, error)
 	List(context.Context, string, time.Time, time.Time) ([]ScheduleProjection, error)
+	ListForUser(context.Context, string) ([]ScheduleProjection, error)
 }
 
 type PostgresStore struct {
@@ -55,14 +56,22 @@ func (store *PostgresStore) GetView(ctx context.Context, userID, timezone string
 }
 
 func (store *PostgresStore) List(ctx context.Context, userID string, from, to time.Time) ([]ScheduleProjection, error) {
+	return store.list(ctx, userID, from, to, false)
+}
+
+func (store *PostgresStore) ListForUser(ctx context.Context, userID string) ([]ScheduleProjection, error) {
+	return store.list(ctx, userID, time.Time{}, time.Time{}, true)
+}
+
+func (store *PostgresStore) list(ctx context.Context, userID string, from, to time.Time, includeAll bool) ([]ScheduleProjection, error) {
 	rows, err := store.database.QueryContext(ctx, `
 SELECT id, user_id, start_at, end_at, availability, interruptibility,
        requestability, reschedulability, expected_response_bucket,
        generated_at, expires_at
 FROM schedule_projections
-WHERE user_id = $1 AND start_at < $3 AND end_at > $2 AND expires_at > NOW()
+WHERE user_id = $1 AND ($4 OR (start_at < $3 AND end_at > $2)) AND expires_at > NOW()
 ORDER BY start_at, id
-`, userID, from, to)
+`, userID, from, to, includeAll)
 	if err != nil {
 		return nil, fmt.Errorf("list schedule projections: %w", err)
 	}

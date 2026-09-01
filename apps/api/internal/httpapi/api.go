@@ -57,6 +57,7 @@ func newAPI(database databasePinger, policies policy.Store, projections projecti
 	mux.HandleFunc("PUT /api/v1/users/{userId}/sharing-policy", api.putSharingPolicy)
 	mux.HandleFunc("GET /api/v1/users/{userId}/manual-overrides", api.listManualOverrides)
 	mux.HandleFunc("POST /api/v1/users/{userId}/manual-overrides", api.createManualOverride)
+	mux.HandleFunc("GET /api/v1/users/{userId}/export", api.exportUserData)
 	mux.HandleFunc("GET /api/v1/people/{userId}/projection", api.getPublicProjection)
 	mux.HandleFunc("GET /api/v1/people", api.listPeople)
 	mux.HandleFunc("GET /api/v1/requests", api.listCoordinationRequests)
@@ -70,6 +71,45 @@ func newAPI(database databasePinger, policies policy.Store, projections projecti
 	mux.HandleFunc("GET /api/v1/audit-logs", api.listAuditLogs)
 	mux.HandleFunc("OPTIONS /api/v1/{path...}", api.options)
 	return api.middleware(mux)
+}
+
+func (api *API) exportUserData(response http.ResponseWriter, request *http.Request) {
+	userID := request.PathValue("userId")
+	if !api.requireSelf(response, request, userID) {
+		return
+	}
+
+	requests, err := api.requests.ListForUser(request.Context(), userID)
+	if err != nil {
+		api.logger.Error("export coordination requests", "error", err)
+		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to export user data"})
+		return
+	}
+	projections, err := api.projections.ListForUser(request.Context(), userID)
+	if err != nil {
+		api.logger.Error("export projections", "error", err)
+		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to export user data"})
+		return
+	}
+
+	var sharingPolicy *policy.SharingPolicy
+	value, err := api.policies.Get(request.Context(), userID)
+	if err == nil {
+		sharingPolicy = &value
+	} else if !errors.Is(err, policy.ErrNotFound) {
+		api.logger.Error("export sharing policy", "error", err)
+		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to export user data"})
+		return
+	}
+
+	response.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="negotiable-calendar-%s.json"`, userID))
+	writeJSON(response, http.StatusOK, map[string]any{
+		"generatedAt": time.Now().UTC(),
+		"userId":      userID,
+		"requests":    requests,
+		"policy":      sharingPolicy,
+		"projections": projections,
+	})
 }
 
 func (api *API) listAuditLogs(response http.ResponseWriter, request *http.Request) {

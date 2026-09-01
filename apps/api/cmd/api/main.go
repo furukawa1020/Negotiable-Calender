@@ -15,6 +15,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/audit"
+	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/auth"
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/httpapi"
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/notification"
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/organization"
@@ -57,6 +58,10 @@ func main() {
 		logger.Error("migrate organization database", "error", err)
 		os.Exit(1)
 	}
+	if err := auth.EnsureSchema(migrationContext, db); err != nil {
+		logger.Error("migrate authentication database", "error", err)
+		os.Exit(1)
+	}
 	if err := projection.EnsureSchema(migrationContext, db); err != nil {
 		logger.Error("migrate projection database", "error", err)
 		os.Exit(1)
@@ -89,9 +94,20 @@ func main() {
 		port = defaultPort
 	}
 
+	demoMode := os.Getenv("DEMO_MODE") == "true"
+	secureCookies := os.Getenv("COOKIE_SECURE") != "false"
+	googleProvider := auth.NewGoogleProvider(auth.GoogleConfig{
+		ClientID: os.Getenv("GOOGLE_CLIENT_ID"), ClientSecret: os.Getenv("GOOGLE_CLIENT_SECRET"),
+		RedirectURL: os.Getenv("GOOGLE_REDIRECT_URL"),
+	}, &http.Client{Timeout: 10 * time.Second})
+	apiHandler := httpapi.NewWithStores(db, policy.NewPostgresStore(db), projection.NewPostgresStore(db), organization.NewPostgresStore(db), coordinationrequest.NewPostgresStore(db), notification.NewPostgresStore(db), audit.NewPostgresStore(db), os.Getenv("WEB_ORIGIN"), logger)
+	handler := auth.NewHandler(apiHandler, auth.NewPostgresStore(db), googleProvider, auth.HandlerConfig{
+		WebOrigin: os.Getenv("WEB_ORIGIN"), DemoMode: demoMode, SecureCookies: secureCookies,
+	}, logger)
+
 	server := &http.Server{
 		Addr:              ":" + port,
-		Handler:           httpapi.NewWithStores(db, policy.NewPostgresStore(db), projection.NewPostgresStore(db), organization.NewPostgresStore(db), coordinationrequest.NewPostgresStore(db), notification.NewPostgresStore(db), audit.NewPostgresStore(db), os.Getenv("WEB_ORIGIN"), logger),
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      10 * time.Second,

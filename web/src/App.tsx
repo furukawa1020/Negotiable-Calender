@@ -1,4 +1,4 @@
-import { type FormEvent, useMemo, useState } from 'react'
+import { type FormEvent, useEffect, useMemo, useState } from 'react'
 
 const privateEvents = [
   { time: '09:00', label: 'Product Review', size: 'short' },
@@ -16,6 +16,7 @@ const initialProjections = [
 ]
 
 const apiURL = import.meta.env.VITE_API_URL || 'http://localhost:8080'
+const apiFetch = (input: RequestInfo | URL, init?: RequestInit) => fetch(input, { ...init, credentials: 'include' })
 
 type ProjectionRow = (typeof initialProjections)[number]
 
@@ -75,6 +76,15 @@ type AuditEvent = {
   resourceType: string
   resourceId: string
   createdAt: string
+}
+
+type AuthUser = {
+  userId: string
+  organizationId: string
+  email: string
+  displayName: string
+  avatarUrl?: string
+  role: string
 }
 
 type InteractionState = {
@@ -160,6 +170,7 @@ function App() {
   const [policyLoading, setPolicyLoading] = useState(false)
   const [policySaving, setPolicySaving] = useState(false)
   const [sharingPolicy, setSharingPolicy] = useState<SharingPolicyDraft>(defaultSharingPolicy)
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null)
   const visibleDate = useMemo(() => {
     const value = new Date()
     value.setDate(value.getDate() + dayOffset)
@@ -169,6 +180,29 @@ function App() {
     month: 'long', day: 'numeric', weekday: 'short',
   }).format(visibleDate)
   const displayedProjections = memberPreview ? memberProjections : projections
+  const activeUserID = authUser?.userId ?? 'demo-manager'
+  const activeOrganizationID = authUser?.organizationId ?? 'demo-org'
+  const requesterUserID = authUser?.userId ?? 'demo-member'
+
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('auth') !== 'success') return
+    const loadSession = async () => {
+      try {
+        const response = await apiFetch(`${apiURL}/api/v1/auth/session`)
+        if (!response.ok) throw new Error('session failed')
+        const payload = await response.json() as { authenticated: boolean; user?: AuthUser }
+        if (payload.authenticated && payload.user) {
+          setAuthUser(payload.user)
+          setNotice('Googleアカウントでログインしました。')
+        }
+      } catch {
+        setNotice('ログイン状態を確認できませんでした。')
+      } finally {
+        window.history.replaceState({}, '', window.location.pathname)
+      }
+    }
+    void loadSession()
+  }, [])
 
   const submitRequest = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -181,15 +215,15 @@ function App() {
     }
     setRequestSaving(true)
     try {
-      const response = await fetch(`${apiURL}/api/v1/requests`, {
+      const response = await apiFetch(`${apiURL}/api/v1/requests`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-Demo-User-ID': 'demo-member',
-          'X-Organization-ID': 'demo-org',
+          'X-Demo-User-ID': requesterUserID,
+          'X-Organization-ID': activeOrganizationID,
         },
         body: JSON.stringify({
-          targetUserId: 'demo-manager',
+          targetUserId: authUser ? activeUserID : 'demo-manager',
           type: 'review',
           title: String(form.get('title')),
           durationMinutes: Number(form.get('duration')),
@@ -229,9 +263,9 @@ function App() {
     endAt.setHours(endHour, endMinute, 0, 0)
     setOverrideSaving(true)
     try {
-      const response = await fetch(`${apiURL}/api/v1/users/demo-manager/manual-overrides`, {
+      const response = await apiFetch(`${apiURL}/api/v1/users/${activeUserID}/manual-overrides`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Demo-User-ID': 'demo-manager' },
+        headers: { 'Content-Type': 'application/json', 'X-Demo-User-ID': activeUserID },
         body: JSON.stringify({
           startAt: startAt.toISOString(),
           endAt: endAt.toISOString(),
@@ -277,8 +311,8 @@ function App() {
         from: from.toISOString(),
         to: to.toISOString(),
       })
-      const response = await fetch(`${apiURL}/api/v1/people/demo-manager/projection?${query}`, {
-        headers: { 'X-Demo-User-ID': 'demo-manager', 'X-Organization-ID': 'demo-org' },
+      const response = await apiFetch(`${apiURL}/api/v1/people/${activeUserID}/projection?${query}`, {
+        headers: { 'X-Demo-User-ID': activeUserID, 'X-Organization-ID': activeOrganizationID },
       })
       if (!response.ok) {
         throw new Error('preview failed')
@@ -320,17 +354,17 @@ function App() {
     setPeopleLoading(true)
     setPeopleError('')
     try {
-      const response = await fetch(`${apiURL}/api/v1/people?organizationId=demo-org`, {
-        headers: { 'X-Demo-User-ID': 'demo-manager', 'X-Organization-ID': 'demo-org' },
+      const response = await apiFetch(`${apiURL}/api/v1/people?organizationId=${activeOrganizationID}`, {
+        headers: { 'X-Demo-User-ID': activeUserID, 'X-Organization-ID': activeOrganizationID },
       })
       if (!response.ok) {
         throw new Error('people failed')
       }
       const directory = await response.json() as { people: Array<Omit<PersonCard, 'segments'>> }
       const cards = await Promise.all(directory.people.map(async (person) => {
-        const projectionResponse = await fetch(
+        const projectionResponse = await apiFetch(
           `${apiURL}/api/v1/people/${person.id}/projection?timezone=${encodeURIComponent(person.timezone)}`,
-          { headers: { 'X-Demo-User-ID': 'demo-manager', 'X-Organization-ID': 'demo-org' } },
+          { headers: { 'X-Demo-User-ID': activeUserID, 'X-Organization-ID': activeOrganizationID } },
         )
         if (!projectionResponse.ok) {
           throw new Error('projection failed')
@@ -351,8 +385,8 @@ function App() {
     setInboxLoading(true)
     setInboxError('')
     try {
-      const response = await fetch(`${apiURL}/api/v1/requests`, {
-        headers: { 'X-Demo-User-ID': 'demo-manager' },
+      const response = await apiFetch(`${apiURL}/api/v1/requests`, {
+        headers: { 'X-Demo-User-ID': activeUserID },
       })
       if (!response.ok) {
         throw new Error('inbox failed')
@@ -371,8 +405,8 @@ function App() {
     setSentLoading(true)
     setSentError('')
     try {
-      const response = await fetch(`${apiURL}/api/v1/requests?scope=sent`, {
-        headers: { 'X-Demo-User-ID': 'demo-member' },
+      const response = await apiFetch(`${apiURL}/api/v1/requests?scope=sent`, {
+        headers: { 'X-Demo-User-ID': requesterUserID },
       })
       if (!response.ok) throw new Error('sent requests failed')
       const payload = await response.json() as { requests: CoordinationRequest[] }
@@ -387,8 +421,8 @@ function App() {
   const cancelSentRequest = async (requestID: string) => {
     setRespondingRequestID(requestID)
     try {
-      const response = await fetch(`${apiURL}/api/v1/requests/${requestID}/cancel`, {
-        method: 'POST', headers: { 'X-Demo-User-ID': 'demo-member' },
+      const response = await apiFetch(`${apiURL}/api/v1/requests/${requestID}/cancel`, {
+        method: 'POST', headers: { 'X-Demo-User-ID': requesterUserID },
       })
       if (!response.ok) throw new Error('request cancellation failed')
       setSentRequests((current) => current.map((item) => item.id === requestID
@@ -413,8 +447,8 @@ function App() {
     if (!nextOpen) return
     setNotificationsLoading(true)
     try {
-      const response = await fetch(`${apiURL}/api/v1/notifications`, {
-        headers: { 'X-Demo-User-ID': 'demo-manager' },
+      const response = await apiFetch(`${apiURL}/api/v1/notifications`, {
+        headers: { 'X-Demo-User-ID': activeUserID },
       })
       if (!response.ok) throw new Error('notifications failed')
       const payload = await response.json() as { notifications: AppNotification[] }
@@ -428,8 +462,8 @@ function App() {
 
   const markNotificationRead = async (id: string) => {
     try {
-      const response = await fetch(`${apiURL}/api/v1/notifications/${id}/read`, {
-        method: 'POST', headers: { 'X-Demo-User-ID': 'demo-manager' },
+      const response = await apiFetch(`${apiURL}/api/v1/notifications/${id}/read`, {
+        method: 'POST', headers: { 'X-Demo-User-ID': activeUserID },
       })
       if (!response.ok) throw new Error('read failed')
       setNotifications((current) => current.map((item) => item.id === id
@@ -445,10 +479,10 @@ function App() {
     setAuditLoading(true)
     setAuditError('')
     try {
-      const response = await fetch(`${apiURL}/api/v1/audit-logs`, {
+      const response = await apiFetch(`${apiURL}/api/v1/audit-logs`, {
         headers: {
-          'X-Demo-User-ID': 'demo-manager',
-          'X-Organization-ID': 'demo-org',
+          'X-Demo-User-ID': activeUserID,
+          'X-Organization-ID': activeOrganizationID,
         },
       })
       if (!response.ok) throw new Error('audit failed')
@@ -464,11 +498,11 @@ function App() {
   const respondToRequest = async (requestID: string, action: 'accept' | 'decline', optionID?: string) => {
     setRespondingRequestID(requestID)
     try {
-      const response = await fetch(`${apiURL}/api/v1/requests/${requestID}/${action}`, {
+      const response = await apiFetch(`${apiURL}/api/v1/requests/${requestID}/${action}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-Demo-User-ID': 'demo-manager',
+          'X-Demo-User-ID': activeUserID,
         },
         body: action === 'accept' ? JSON.stringify({ optionId: optionID }) : undefined,
       })
@@ -494,11 +528,11 @@ function App() {
     const endAt = new Date(String(form.get('suggestEnd')))
     setRespondingRequestID(requestID)
     try {
-      const response = await fetch(`${apiURL}/api/v1/requests/${requestID}/suggest`, {
+      const response = await apiFetch(`${apiURL}/api/v1/requests/${requestID}/suggest`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-Demo-User-ID': 'demo-manager',
+          'X-Demo-User-ID': activeUserID,
         },
         body: JSON.stringify({ startAt: startAt.toISOString(), endAt: endAt.toISOString() }),
       })
@@ -524,11 +558,11 @@ function App() {
     const delegateUserId = String(form.get('delegateUserId'))
     setRespondingRequestID(requestID)
     try {
-      const response = await fetch(`${apiURL}/api/v1/requests/${requestID}/delegate`, {
+      const response = await apiFetch(`${apiURL}/api/v1/requests/${requestID}/delegate`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-Demo-User-ID': 'demo-manager',
+          'X-Demo-User-ID': activeUserID,
         },
         body: JSON.stringify({ delegateUserId }),
       })
@@ -549,15 +583,15 @@ function App() {
   const exportUserData = async () => {
     setExporting(true)
     try {
-      const response = await fetch(`${apiURL}/api/v1/users/demo-manager/export`, {
-        headers: { 'X-Demo-User-ID': 'demo-manager' },
+      const response = await apiFetch(`${apiURL}/api/v1/users/${activeUserID}/export`, {
+        headers: { 'X-Demo-User-ID': activeUserID },
       })
       if (!response.ok) throw new Error('export failed')
       const blob = await response.blob()
       const url = URL.createObjectURL(blob)
       const link = document.createElement('a')
       link.href = url
-      link.download = `negotiable-calendar-demo-manager-${new Date().toISOString().slice(0, 10)}.json`
+      link.download = `negotiable-calendar-${activeUserID}-${new Date().toISOString().slice(0, 10)}.json`
       document.body.append(link)
       link.click()
       link.remove()
@@ -575,8 +609,8 @@ function App() {
     setActiveDialog('rules')
     setPolicyLoading(true)
     try {
-      const response = await fetch(`${apiURL}/api/v1/users/demo-manager/sharing-policy`, {
-        headers: { 'X-Demo-User-ID': 'demo-manager' },
+      const response = await apiFetch(`${apiURL}/api/v1/users/${activeUserID}/sharing-policy`, {
+        headers: { 'X-Demo-User-ID': activeUserID },
       })
       if (response.status === 404) {
         setSharingPolicy(defaultSharingPolicy)
@@ -601,9 +635,9 @@ function App() {
   const saveSharingRules = async () => {
     setPolicySaving(true)
     try {
-      const response = await fetch(`${apiURL}/api/v1/users/demo-manager/sharing-policy`, {
+      const response = await apiFetch(`${apiURL}/api/v1/users/${activeUserID}/sharing-policy`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'X-Demo-User-ID': 'demo-manager' },
+        headers: { 'Content-Type': 'application/json', 'X-Demo-User-ID': activeUserID },
         body: JSON.stringify(sharingPolicy),
       })
       if (!response.ok) throw new Error('policy save failed')
@@ -621,6 +655,20 @@ function App() {
       setNotice('共有ルールを保存できませんでした。入力内容を確認してください。')
     } finally {
       setPolicySaving(false)
+    }
+  }
+
+  const logout = async () => {
+    try {
+      const response = await apiFetch(`${apiURL}/api/v1/auth/logout`, {
+        method: 'POST',
+      })
+      if (!response.ok) throw new Error('logout failed')
+      setAuthUser(null)
+      setAccountOpen(false)
+      setNotice('ログアウトしました。')
+    } catch {
+      setNotice('ログアウトできませんでした。')
     }
   }
 
@@ -663,8 +711,13 @@ function App() {
             <button className="avatar" type="button" aria-label="山田太郎のアカウントメニュー" aria-expanded={accountOpen} onClick={() => setAccountOpen(!accountOpen)}>山</button>
             {accountOpen ? (
               <div className="account-menu">
-                <strong>山田 太郎</strong>
-                <span>Manager · Asia/Tokyo</span>
+                <strong>{authUser?.displayName ?? '山田 太郎'}</strong>
+                <span>{authUser ? `${authUser.role} · ${authUser.email}` : 'Manager · Demo mode'}</span>
+                {authUser ? (
+                  <button type="button" onClick={logout}>ログアウト</button>
+                ) : (
+                  <a href={`${apiURL}/api/v1/auth/google/login`}>Googleでログイン</a>
+                )}
                 <button type="button" onClick={exportUserData} disabled={exporting}>{exporting ? '準備中…' : '本人データをエクスポート'}</button>
               </div>
             ) : null}

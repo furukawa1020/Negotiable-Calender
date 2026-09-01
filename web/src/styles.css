@@ -261,7 +261,8 @@ a:focus-visible {
   font-size: 11px;
 }
 
-.account-menu button {
+.account-menu button,
+.account-menu a {
   margin-top: 5px;
   padding: 9px;
   border: 1px solid var(--line);
@@ -269,6 +270,8 @@ a:focus-visible {
   color: var(--ink);
   background: transparent;
   cursor: pointer;
+  text-align: center;
+  text-decoration: none;
 }
 
 .rule-list select {

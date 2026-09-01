@@ -3,6 +3,7 @@ package request
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -12,7 +13,10 @@ var ErrNotFound = fmt.Errorf("coordination request not found")
 type Store interface {
 	Create(context.Context, CoordinationRequest) error
 	ListForTarget(context.Context, string) ([]CoordinationRequest, error)
+	ListForRequester(context.Context, string) ([]CoordinationRequest, error)
 	ListForUser(context.Context, string) ([]CoordinationRequest, error)
+	GetForUser(context.Context, string, string) (CoordinationRequest, error)
+	Cancel(context.Context, string, string) error
 	Respond(context.Context, string, string, Status, string) error
 	Suggest(context.Context, string, string, Option) error
 	Delegate(context.Context, string, string, Option) error
@@ -108,22 +112,26 @@ INSERT INTO coordination_request_options (
 }
 
 func (store *PostgresStore) ListForTarget(ctx context.Context, targetUserID string) ([]CoordinationRequest, error) {
-	return store.listForUser(ctx, targetUserID, false)
+	return store.listForUser(ctx, targetUserID, true, false)
+}
+
+func (store *PostgresStore) ListForRequester(ctx context.Context, requesterUserID string) ([]CoordinationRequest, error) {
+	return store.listForUser(ctx, requesterUserID, false, true)
 }
 
 func (store *PostgresStore) ListForUser(ctx context.Context, userID string) ([]CoordinationRequest, error) {
-	return store.listForUser(ctx, userID, true)
+	return store.listForUser(ctx, userID, true, true)
 }
 
-func (store *PostgresStore) listForUser(ctx context.Context, userID string, includeRequested bool) ([]CoordinationRequest, error) {
+func (store *PostgresStore) listForUser(ctx context.Context, userID string, includeTarget, includeRequested bool) ([]CoordinationRequest, error) {
 	rows, err := store.database.QueryContext(ctx, `
 SELECT id, organization_id, requester_user_id, target_user_id, type, title,
        duration_minutes, deadline_at, sync_preference, priority, status,
        created_at, updated_at, accepted_option_id, delegated_user_id
 FROM coordination_requests
-WHERE target_user_id = $1 OR ($2 AND requester_user_id = $1)
+WHERE ($2 AND target_user_id = $1) OR ($3 AND requester_user_id = $1)
 ORDER BY created_at DESC, id DESC
-`, userID, includeRequested)
+`, userID, includeTarget, includeRequested)
 	if err != nil {
 		return nil, fmt.Errorf("list coordination requests: %w", err)
 	}
@@ -162,6 +170,58 @@ ORDER BY created_at DESC, id DESC
 		values[index].Options = options
 	}
 	return values, nil
+}
+
+func (store *PostgresStore) GetForUser(ctx context.Context, requestID, userID string) (CoordinationRequest, error) {
+	var value CoordinationRequest
+	var acceptedOptionID, delegatedUserID sql.NullString
+	err := store.database.QueryRowContext(ctx, `
+SELECT id, organization_id, requester_user_id, target_user_id, type, title,
+       duration_minutes, deadline_at, sync_preference, priority, status,
+       created_at, updated_at, accepted_option_id, delegated_user_id
+FROM coordination_requests
+WHERE id = $1 AND (requester_user_id = $2 OR target_user_id = $2)
+`, requestID, userID).Scan(
+		&value.ID, &value.OrganizationID, &value.RequesterUserID, &value.TargetUserID,
+		&value.Type, &value.Title, &value.DurationMinutes, &value.DeadlineAt,
+		&value.SyncPreference, &value.Priority, &value.Status,
+		&value.CreatedAt, &value.UpdatedAt, &acceptedOptionID, &delegatedUserID,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return CoordinationRequest{}, ErrNotFound
+	}
+	if err != nil {
+		return CoordinationRequest{}, fmt.Errorf("get coordination request: %w", err)
+	}
+	value.DeadlineAt = value.DeadlineAt.UTC()
+	value.CreatedAt = value.CreatedAt.UTC()
+	value.UpdatedAt = value.UpdatedAt.UTC()
+	value.AcceptedOptionID = acceptedOptionID.String
+	value.DelegatedUserID = delegatedUserID.String
+	value.Options, err = store.listOptions(ctx, value.ID)
+	if err != nil {
+		return CoordinationRequest{}, err
+	}
+	return value, nil
+}
+
+func (store *PostgresStore) Cancel(ctx context.Context, requestID, requesterUserID string) error {
+	result, err := store.database.ExecContext(ctx, `
+UPDATE coordination_requests
+SET status = $1, accepted_option_id = NULL, updated_at = $2
+WHERE id = $3 AND requester_user_id = $4 AND status IN ($5, $6, $7)
+`, Cancelled, time.Now().UTC(), requestID, requesterUserID, Pending, Suggested, Delegated)
+	if err != nil {
+		return fmt.Errorf("cancel coordination request: %w", err)
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("count cancelled coordination request: %w", err)
+	}
+	if updated == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (store *PostgresStore) Respond(ctx context.Context, requestID, targetUserID string, status Status, optionID string) error {

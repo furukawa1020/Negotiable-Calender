@@ -1,6 +1,15 @@
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
+
+const defaultPolicy = () => ({
+  default: {
+    availability: 'available', interruptibility: 'normal',
+    requestability: 'open', reschedulability: 'medium',
+  },
+  workingHours: [1, 2, 3, 4, 5].map((weekday) => ({ weekday, startMinute: 540, endMinute: 1080 })),
+  rules: [],
+})
 
 describe('App', () => {
   afterEach(() => {
@@ -55,18 +64,21 @@ describe('App', () => {
   })
 
   it('opens sharing rules and loads the member preview from the public API', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify(defaultPolicy()), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
       segments: [{
         startAt: '2026-08-23T00:00:00Z',
         endAt: '2026-08-23T01:00:00Z',
         availability: 'available',
         interruptibility: 'open',
       }],
-    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
     render(<App />)
 
     fireEvent.click(screen.getByRole('button', { name: '共有ルールを確認' }))
     expect(screen.getByRole('dialog', { name: '共有ルール' })).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByLabelText('基本の公開状態')).not.toBeDisabled())
     fireEvent.click(screen.getByRole('button', { name: '閉じる' }))
     fireEvent.click(screen.getByRole('button', { name: /メンバー表示をプレビュー/ }))
     expect(await screen.findByRole('button', { name: /自分の表示に戻る/ })).toBeInTheDocument()
@@ -74,6 +86,32 @@ describe('App', () => {
       expect.stringContaining('/api/v1/people/demo-manager/projection'),
       expect.objectContaining({ headers: expect.objectContaining({ 'X-Organization-ID': 'demo-org' }) }),
     )
+  })
+
+  it('loads and persists sharing policy changes through the API', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify(defaultPolicy()), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        ...defaultPolicy(), default: { ...defaultPolicy().default, availability: 'limited' },
+      }), { status: 200 }))
+    render(<App />)
+
+    fireEvent.click(screen.getByRole('button', { name: '共有ルールを確認' }))
+    const availability = screen.getByLabelText('基本の公開状態')
+    await waitFor(() => expect(availability).not.toBeDisabled())
+    fireEvent.change(availability, { target: { value: 'limited' } })
+    fireEvent.click(screen.getByRole('button', { name: 'このルールを保存' }))
+
+    expect(await screen.findByRole('status')).toHaveTextContent('共有ルールを保存しました。')
+    const [, options] = fetchMock.mock.calls[1]
+    expect(options).toEqual(expect.objectContaining({
+      method: 'PUT',
+      headers: expect.objectContaining({ 'X-Demo-User-ID': 'demo-manager' }),
+    }))
+    expect(JSON.parse(String(options?.body))).toEqual(expect.objectContaining({
+      default: expect.objectContaining({ availability: 'limited' }),
+      workingHours: expect.arrayContaining([expect.objectContaining({ weekday: 1, startMinute: 540, endMinute: 1080 })]),
+    }))
   })
 
   it('navigates days and switches manager calendar layers', () => {

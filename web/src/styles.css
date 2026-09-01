@@ -271,6 +271,15 @@ a:focus-visible {
   cursor: pointer;
 }
 
+.rule-list select {
+  min-width: 128px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  background: var(--paper);
+}
+
 main {
   width: min(1180px, calc(100% - 48px));
   margin: 0 auto;

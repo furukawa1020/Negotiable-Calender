@@ -204,6 +204,35 @@ describe('App', () => {
     )
   })
 
+  it('loads sent requests and lets the requester cancel an active request', async () => {
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        requests: [{
+          id: 'request-1', requesterUserId: 'demo-member', targetUserId: 'demo-manager',
+          title: '新API設計レビュー', type: 'review', durationMinutes: 15,
+          deadlineAt: '2026-09-02T08:00:00Z', priority: 'normal', status: 'suggested',
+          createdAt: '2026-09-01T00:00:00Z', options: [{ id: 'option-1', type: 'meeting' }],
+        }],
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: 'request-1', status: 'cancelled' }), { status: 200 }))
+    render(<App />)
+
+    fireEvent.click(screen.getByRole('button', { name: '送信済み' }))
+    expect(await screen.findByRole('heading', { name: '新API設計レビュー' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '依頼をキャンセル' }))
+
+    expect(await screen.findByRole('status')).toHaveTextContent('依頼をキャンセルしました。相手にも通知しました。')
+    expect(screen.getByText('更新済み · cancelled')).toBeInTheDocument()
+    expect(globalThis.fetch).toHaveBeenNthCalledWith(1,
+      expect.stringContaining('/api/v1/requests?scope=sent'),
+      { headers: { 'X-Demo-User-ID': 'demo-member' } },
+    )
+    expect(globalThis.fetch).toHaveBeenNthCalledWith(2,
+      expect.stringContaining('/api/v1/requests/request-1/cancel'),
+      { method: 'POST', headers: { 'X-Demo-User-ID': 'demo-member' } },
+    )
+  })
+
   it('delegates an inbox request to an organization member', async () => {
     vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(new Response(JSON.stringify({

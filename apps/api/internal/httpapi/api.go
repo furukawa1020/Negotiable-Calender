@@ -62,10 +62,12 @@ func newAPI(database databasePinger, policies policy.Store, projections projecti
 	mux.HandleFunc("GET /api/v1/people", api.listPeople)
 	mux.HandleFunc("GET /api/v1/requests", api.listCoordinationRequests)
 	mux.HandleFunc("POST /api/v1/requests", api.createCoordinationRequest)
+	mux.HandleFunc("GET /api/v1/requests/{requestId}", api.getCoordinationRequest)
 	mux.HandleFunc("POST /api/v1/requests/{requestId}/accept", api.acceptCoordinationRequest)
 	mux.HandleFunc("POST /api/v1/requests/{requestId}/suggest", api.suggestCoordinationRequest)
 	mux.HandleFunc("POST /api/v1/requests/{requestId}/delegate", api.delegateCoordinationRequest)
 	mux.HandleFunc("POST /api/v1/requests/{requestId}/decline", api.declineCoordinationRequest)
+	mux.HandleFunc("POST /api/v1/requests/{requestId}/cancel", api.cancelCoordinationRequest)
 	mux.HandleFunc("GET /api/v1/notifications", api.listNotifications)
 	mux.HandleFunc("POST /api/v1/notifications/{notificationId}/read", api.readNotification)
 	mux.HandleFunc("GET /api/v1/audit-logs", api.listAuditLogs)
@@ -371,12 +373,22 @@ func (api *API) respondToCoordinationRequest(response http.ResponseWriter, reque
 }
 
 func (api *API) listCoordinationRequests(response http.ResponseWriter, request *http.Request) {
-	targetUserID := request.Header.Get("X-Demo-User-ID")
-	if targetUserID == "" {
+	userID := request.Header.Get("X-Demo-User-ID")
+	if userID == "" {
 		writeJSON(response, http.StatusUnauthorized, map[string]string{"error": "request identity is required"})
 		return
 	}
-	values, err := api.requests.ListForTarget(request.Context(), targetUserID)
+	var values []coordinationrequest.CoordinationRequest
+	var err error
+	switch request.URL.Query().Get("scope") {
+	case "", "inbox":
+		values, err = api.requests.ListForTarget(request.Context(), userID)
+	case "sent":
+		values, err = api.requests.ListForRequester(request.Context(), userID)
+	default:
+		writeJSON(response, http.StatusBadRequest, map[string]string{"error": "invalid request scope"})
+		return
+	}
 	if err != nil {
 		api.logger.Error("list coordination requests", "error", err)
 		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to load requests"})
@@ -386,6 +398,59 @@ func (api *API) listCoordinationRequests(response http.ResponseWriter, request *
 		values = []coordinationrequest.CoordinationRequest{}
 	}
 	writeJSON(response, http.StatusOK, map[string]any{"requests": values})
+}
+
+func (api *API) getCoordinationRequest(response http.ResponseWriter, request *http.Request) {
+	userID := request.Header.Get("X-Demo-User-ID")
+	if userID == "" {
+		writeJSON(response, http.StatusUnauthorized, map[string]string{"error": "request identity is required"})
+		return
+	}
+	value, err := api.requests.GetForUser(request.Context(), request.PathValue("requestId"), userID)
+	if errors.Is(err, coordinationrequest.ErrNotFound) {
+		writeJSON(response, http.StatusNotFound, map[string]string{"error": "coordination request not found"})
+		return
+	}
+	if err != nil {
+		api.logger.Error("get coordination request", "error", err)
+		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to load request"})
+		return
+	}
+	writeJSON(response, http.StatusOK, value)
+}
+
+func (api *API) cancelCoordinationRequest(response http.ResponseWriter, request *http.Request) {
+	userID := request.Header.Get("X-Demo-User-ID")
+	if userID == "" {
+		writeJSON(response, http.StatusUnauthorized, map[string]string{"error": "request identity is required"})
+		return
+	}
+	requestID := request.PathValue("requestId")
+	value, err := api.requests.GetForUser(request.Context(), requestID, userID)
+	if errors.Is(err, coordinationrequest.ErrNotFound) {
+		writeJSON(response, http.StatusNotFound, map[string]string{"error": "coordination request not found"})
+		return
+	}
+	if err != nil {
+		api.logger.Error("load coordination request before cancellation", "error", err)
+		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to cancel request"})
+		return
+	}
+	if value.RequesterUserID != userID {
+		writeJSON(response, http.StatusForbidden, map[string]string{"error": "only the requester can cancel this request"})
+		return
+	}
+	if err := api.requests.Cancel(request.Context(), requestID, userID); errors.Is(err, coordinationrequest.ErrNotFound) {
+		writeJSON(response, http.StatusConflict, map[string]string{"error": "request is no longer cancellable"})
+		return
+	} else if err != nil {
+		api.logger.Error("cancel coordination request", "error", err)
+		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to cancel request"})
+		return
+	}
+	api.notify(request.Context(), value.TargetUserID, notification.RequestCancelled, requestID, "調整依頼がキャンセルされました。")
+	api.recordAudit(request.Context(), userID, audit.RequestCancelled, requestID)
+	writeJSON(response, http.StatusOK, map[string]any{"id": requestID, "status": coordinationrequest.Cancelled})
 }
 
 type createCoordinationRequestInput struct {

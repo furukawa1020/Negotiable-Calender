@@ -59,6 +59,11 @@ type stubRequestStore struct {
 	respondTarget   string
 	respondStatus   coordinationrequest.Status
 	respondOption   string
+	getUser         string
+	cancelledID     string
+	cancelledUser   string
+	getErr          error
+	cancelErr       error
 	suggestedOption coordinationrequest.Option
 	delegatedOption coordinationrequest.Option
 	err             error
@@ -132,9 +137,30 @@ func (store *stubRequestStore) ListForTarget(_ context.Context, targetUserID str
 	return store.values, store.err
 }
 
+func (store *stubRequestStore) ListForRequester(_ context.Context, requesterUserID string) ([]coordinationrequest.CoordinationRequest, error) {
+	store.target = requesterUserID
+	return store.values, store.err
+}
+
 func (store *stubRequestStore) ListForUser(_ context.Context, userID string) ([]coordinationrequest.CoordinationRequest, error) {
 	store.target = userID
 	return store.values, store.err
+}
+
+func (store *stubRequestStore) GetForUser(_ context.Context, _ string, userID string) (coordinationrequest.CoordinationRequest, error) {
+	store.getUser = userID
+	if store.getErr != nil {
+		return coordinationrequest.CoordinationRequest{}, store.getErr
+	}
+	return store.value, store.err
+}
+
+func (store *stubRequestStore) Cancel(_ context.Context, requestID, requesterUserID string) error {
+	store.cancelledID, store.cancelledUser = requestID, requesterUserID
+	if store.cancelErr != nil {
+		return store.cancelErr
+	}
+	return store.err
 }
 
 func (store *stubOrganizationStore) ListPeople(context.Context, string) ([]organization.Person, error) {
@@ -783,6 +809,103 @@ func TestUserDataExportRejectsIDOR(t *testing.T) {
 
 	if response.Code != http.StatusForbidden || requests.target != "" {
 		t.Fatalf("IDOR reached export store: status=%d user=%q", response.Code, requests.target)
+	}
+}
+
+func TestRequestListSupportsRequesterSentScope(t *testing.T) {
+	t.Parallel()
+	store := &stubRequestStore{values: []coordinationrequest.CoordinationRequest{{ID: "request-1", RequesterUserID: "member-1"}}}
+	handler := New(stubDatabase{}, &stubPolicyStore{}, &stubProjectionStore{}, &stubOrganizationStore{}, store, "", testLogger())
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/requests?scope=sent", nil)
+	request.Header.Set("X-Demo-User-ID", "member-1")
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK || store.target != "member-1" {
+		t.Fatalf("sent scope failed: status=%d requester=%q", response.Code, store.target)
+	}
+	if !strings.Contains(response.Body.String(), `"id":"request-1"`) {
+		t.Fatalf("sent request missing: %s", response.Body.String())
+	}
+}
+
+func TestRequestDetailIsLoadedForParticipant(t *testing.T) {
+	t.Parallel()
+	store := &stubRequestStore{value: coordinationrequest.CoordinationRequest{
+		ID: "request-1", RequesterUserID: "member-1", TargetUserID: "manager-1",
+	}}
+	handler := New(stubDatabase{}, &stubPolicyStore{}, &stubProjectionStore{}, &stubOrganizationStore{}, store, "", testLogger())
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/requests/request-1", nil)
+	request.Header.Set("X-Demo-User-ID", "manager-1")
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK || store.getUser != "manager-1" {
+		t.Fatalf("participant detail failed: status=%d user=%q", response.Code, store.getUser)
+	}
+}
+
+func TestRequesterCanCancelActiveRequest(t *testing.T) {
+	t.Parallel()
+	store := &stubRequestStore{value: coordinationrequest.CoordinationRequest{
+		ID: "request-1", RequesterUserID: "member-1", TargetUserID: "manager-1", Status: coordinationrequest.Suggested,
+	}}
+	notifications := &stubNotificationStore{}
+	audits := &stubAuditStore{}
+	handler := NewWithStores(stubDatabase{}, &stubPolicyStore{}, &stubProjectionStore{}, &stubOrganizationStore{}, store, notifications, audits, "", testLogger())
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/requests/request-1/cancel", nil)
+	request.Header.Set("X-Demo-User-ID", "member-1")
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK || store.cancelledID != "request-1" || store.cancelledUser != "member-1" {
+		t.Fatalf("request was not cancelled: status=%d id=%q user=%q", response.Code, store.cancelledID, store.cancelledUser)
+	}
+	if len(notifications.values) != 1 || notifications.values[0].UserID != "manager-1" || notifications.values[0].Type != notification.RequestCancelled {
+		t.Fatalf("target cancellation notification missing: %#v", notifications.values)
+	}
+	if len(audits.values) != 1 || audits.values[0].Action != audit.RequestCancelled || audits.values[0].ResourceID != "request-1" {
+		t.Fatalf("cancellation audit missing: %#v", audits.values)
+	}
+}
+
+func TestRequestTargetCannotCancel(t *testing.T) {
+	t.Parallel()
+	store := &stubRequestStore{value: coordinationrequest.CoordinationRequest{
+		ID: "request-1", RequesterUserID: "member-1", TargetUserID: "manager-1", Status: coordinationrequest.Suggested,
+	}}
+	handler := New(stubDatabase{}, &stubPolicyStore{}, &stubProjectionStore{}, &stubOrganizationStore{}, store, "", testLogger())
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/requests/request-1/cancel", nil)
+	request.Header.Set("X-Demo-User-ID", "manager-1")
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusForbidden || store.cancelledID != "" {
+		t.Fatalf("target reached cancellation: status=%d id=%q", response.Code, store.cancelledID)
+	}
+}
+
+func TestTerminalRequestCannotBeCancelled(t *testing.T) {
+	t.Parallel()
+	store := &stubRequestStore{
+		value: coordinationrequest.CoordinationRequest{
+			ID: "request-1", RequesterUserID: "member-1", TargetUserID: "manager-1", Status: coordinationrequest.Accepted,
+		},
+		cancelErr: coordinationrequest.ErrNotFound,
+	}
+	handler := New(stubDatabase{}, &stubPolicyStore{}, &stubProjectionStore{}, &stubOrganizationStore{}, store, "", testLogger())
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/requests/request-1/cancel", nil)
+	request.Header.Set("X-Demo-User-ID", "member-1")
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusConflict {
+		t.Fatalf("expected terminal conflict, got %d: %s", response.Code, response.Body.String())
 	}
 }
 

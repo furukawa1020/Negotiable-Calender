@@ -10,6 +10,7 @@ const (
 	RequestChanged   Action = "request_changed"
 	RequestDeclined  Action = "request_declined"
 	RequestDelegated Action = "request_delegated"
+	RequestCancelled Action = "request_cancelled"
 )
 
 type Event struct {

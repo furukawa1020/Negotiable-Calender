@@ -10,6 +10,7 @@ const (
 	RequestChanged   Type = "request_changed"
 	RequestDeclined  Type = "request_declined"
 	RequestDelegated Type = "request_delegated"
+	RequestCancelled Type = "request_cancelled"
 )
 
 type Notification struct {

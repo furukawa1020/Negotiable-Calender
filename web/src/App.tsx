@@ -47,6 +47,7 @@ type CoordinationOption = {
 type CoordinationRequest = {
   id: string
   requesterUserId: string
+  targetUserId: string
   title: string
   type: string
   durationMinutes: number
@@ -139,7 +140,7 @@ function App() {
   const [projections, setProjections] = useState(initialProjections)
   const [memberProjections, setMemberProjections] = useState<ProjectionRow[]>([])
   const [previewLoading, setPreviewLoading] = useState(false)
-  const [currentView, setCurrentView] = useState<'calendar' | 'people' | 'inbox' | 'audit'>('calendar')
+  const [currentView, setCurrentView] = useState<'calendar' | 'people' | 'inbox' | 'sent' | 'audit'>('calendar')
   const [people, setPeople] = useState<PersonCard[]>([])
   const [peopleLoading, setPeopleLoading] = useState(false)
   const [peopleError, setPeopleError] = useState('')
@@ -147,6 +148,9 @@ function App() {
   const [inboxRequests, setInboxRequests] = useState<CoordinationRequest[]>([])
   const [inboxLoading, setInboxLoading] = useState(false)
   const [inboxError, setInboxError] = useState('')
+  const [sentRequests, setSentRequests] = useState<CoordinationRequest[]>([])
+  const [sentLoading, setSentLoading] = useState(false)
+  const [sentError, setSentError] = useState('')
   const [respondingRequestID, setRespondingRequestID] = useState('')
   const [auditLogs, setAuditLogs] = useState<AuditEvent[]>([])
   const [auditLoading, setAuditLoading] = useState(false)
@@ -197,8 +201,9 @@ function App() {
       if (!response.ok) {
         throw new Error('request failed')
       }
-      const created = await response.json() as { options?: unknown[] }
+      const created = await response.json() as CoordinationRequest
       const optionCount = Array.isArray(created.options) ? created.options.length : 0
+      setSentRequests((current) => [created, ...current.filter((item) => item.id !== created.id)])
       setActiveDialog('')
       setNotice(optionCount > 0
         ? `レビュー依頼を送信し、${optionCount}件の候補を生成しました。`
@@ -358,6 +363,42 @@ function App() {
       setInboxError('依頼を取得できませんでした。')
     } finally {
       setInboxLoading(false)
+    }
+  }
+
+  const openSentRequests = async () => {
+    setCurrentView('sent')
+    setSentLoading(true)
+    setSentError('')
+    try {
+      const response = await fetch(`${apiURL}/api/v1/requests?scope=sent`, {
+        headers: { 'X-Demo-User-ID': 'demo-member' },
+      })
+      if (!response.ok) throw new Error('sent requests failed')
+      const payload = await response.json() as { requests: CoordinationRequest[] }
+      setSentRequests(payload.requests)
+    } catch {
+      setSentError('送信済み依頼を取得できませんでした。')
+    } finally {
+      setSentLoading(false)
+    }
+  }
+
+  const cancelSentRequest = async (requestID: string) => {
+    setRespondingRequestID(requestID)
+    try {
+      const response = await fetch(`${apiURL}/api/v1/requests/${requestID}/cancel`, {
+        method: 'POST', headers: { 'X-Demo-User-ID': 'demo-member' },
+      })
+      if (!response.ok) throw new Error('request cancellation failed')
+      setSentRequests((current) => current.map((item) => item.id === requestID
+        ? { ...item, status: 'cancelled' }
+        : item))
+      setNotice('依頼をキャンセルしました。相手にも通知しました。')
+    } catch {
+      setNotice('依頼をキャンセルできませんでした。最新状態を確認してください。')
+    } finally {
+      setRespondingRequestID('')
     }
   }
 
@@ -594,6 +635,7 @@ function App() {
           <button className={currentView === 'calendar' ? 'active' : ''} type="button" onClick={() => setCurrentView('calendar')}>マイカレンダー</button>
           <button className={currentView === 'people' ? 'active' : ''} type="button" onClick={openPeopleView}>組織</button>
           <button className={currentView === 'inbox' ? 'active' : ''} type="button" onClick={openInbox}>依頼</button>
+          <button className={currentView === 'sent' ? 'active' : ''} type="button" onClick={openSentRequests}>送信済み</button>
           <button className={currentView === 'audit' ? 'active' : ''} type="button" onClick={openAudit}>監査</button>
         </nav>
         <div className="topbar-actions">
@@ -809,6 +851,45 @@ function App() {
                   </div>
                 </article>
               ))}
+            </div>
+          </section>
+        ) : currentView === 'sent' ? (
+          <section className="inbox-view" aria-labelledby="sent-title">
+            <div className="people-heading">
+              <div>
+                <p className="eyebrow">COORDINATION · SENT</p>
+                <h1 id="sent-title">送った依頼を、最後まで管理する。</h1>
+                <p className="hero-copy">依頼者本人だけが送信状況を確認し、回答前の依頼をキャンセルできます。</p>
+              </div>
+              <button className="secondary-button" type="button" onClick={openSentRequests}>更新</button>
+            </div>
+            {sentLoading ? <p className="people-status" role="status">送信済み依頼を取得しています…</p> : null}
+            {sentError ? <p className="people-status error" role="alert">{sentError}</p> : null}
+            {!sentLoading && !sentError && sentRequests.length === 0 ? <p className="people-status">送信済み依頼はありません。</p> : null}
+            <div className="request-list">
+              {sentRequests.map((item) => {
+                const cancellable = ['pending', 'suggested', 'delegated'].includes(item.status)
+                return (
+                  <article className="request-card" key={item.id}>
+                    <div className="request-summary">
+                      <div className="request-meta">
+                        <span className={`priority priority-${item.priority}`}>{item.priority}</span>
+                        <span>{item.status}</span>
+                      </div>
+                      <h2>{item.title}</h2>
+                      <p>{item.targetUserId} 宛 · {item.durationMinutes}分 · 期限 {formatDateTime(item.deadlineAt)}</p>
+                    </div>
+                    <div className="option-list">
+                      <strong>{item.options.length}件の調整候補</strong>
+                      {cancellable ? (
+                        <button className="decline-button" type="button" disabled={respondingRequestID === item.id} onClick={() => cancelSentRequest(item.id)}>
+                          {respondingRequestID === item.id ? 'キャンセル中…' : '依頼をキャンセル'}
+                        </button>
+                      ) : <p className="response-complete">更新済み · {item.status}</p>}
+                    </div>
+                  </article>
+                )
+              })}
             </div>
           </section>
         ) : (

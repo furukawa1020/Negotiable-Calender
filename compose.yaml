@@ -26,6 +26,10 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER:-negotiable}:${POSTGRES_PASSWORD:-negotiable_local}@postgres:5432/${POSTGRES_DB:-negotiable_calendar}?sslmode=disable
       WEB_ORIGIN: http://localhost:${WEB_PORT:-3000}
       DEMO_MODE: "true"
+      COOKIE_SECURE: "false"
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_REDIRECT_URL: ${GOOGLE_REDIRECT_URL:-http://localhost:8080/api/v1/auth/google/callback}
     ports:
       - "${API_PORT:-8080}:8080"
     depends_on:

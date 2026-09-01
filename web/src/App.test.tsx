@@ -14,6 +14,28 @@ const defaultPolicy = () => ({
 describe('App', () => {
   afterEach(() => {
     vi.restoreAllMocks()
+    window.history.replaceState({}, '', '/')
+  })
+
+  it('loads the Google session after callback and logs out', async () => {
+    window.history.replaceState({}, '', '/?auth=success')
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        authenticated: true,
+        user: { userId: 'user-1', organizationId: 'org-1', email: 'person@example.com', displayName: 'Person', role: 'OWNER' },
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+    render(<App />)
+
+    expect(await screen.findByRole('status')).toHaveTextContent('Googleアカウントでログインしました。')
+    fireEvent.click(screen.getByRole('button', { name: '山田太郎のアカウントメニュー' }))
+    expect(screen.getByText('Person')).toBeInTheDocument()
+    expect(screen.getByText('OWNER · person@example.com')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'ログアウト' }))
+
+    expect(await screen.findByRole('status')).toHaveTextContent('ログアウトしました。')
+    expect(globalThis.fetch).toHaveBeenNthCalledWith(1, expect.stringContaining('/api/v1/auth/session'), { credentials: 'include' })
+    expect(globalThis.fetch).toHaveBeenNthCalledWith(2, expect.stringContaining('/api/v1/auth/logout'), { method: 'POST', credentials: 'include' })
   })
   it('explains the privacy projection without exposing sample details as shared data', () => {
     render(<App />)
@@ -39,7 +61,7 @@ describe('App', () => {
     expect(await screen.findByRole('status')).toHaveTextContent('本人データを安全にエクスポートしました。')
     expect(globalThis.fetch).toHaveBeenCalledWith(
       expect.stringContaining('/api/v1/users/demo-manager/export'),
-      { headers: { 'X-Demo-User-ID': 'demo-manager' } },
+      expect.objectContaining({ headers: { 'X-Demo-User-ID': 'demo-manager' }, credentials: 'include' }),
     )
     expect(objectURL).toHaveBeenCalled()
     expect(click).toHaveBeenCalled()
@@ -225,11 +247,11 @@ describe('App', () => {
     expect(screen.getByText('更新済み · cancelled')).toBeInTheDocument()
     expect(globalThis.fetch).toHaveBeenNthCalledWith(1,
       expect.stringContaining('/api/v1/requests?scope=sent'),
-      { headers: { 'X-Demo-User-ID': 'demo-member' } },
+      expect.objectContaining({ headers: { 'X-Demo-User-ID': 'demo-member' }, credentials: 'include' }),
     )
     expect(globalThis.fetch).toHaveBeenNthCalledWith(2,
       expect.stringContaining('/api/v1/requests/request-1/cancel'),
-      { method: 'POST', headers: { 'X-Demo-User-ID': 'demo-member' } },
+      expect.objectContaining({ method: 'POST', headers: { 'X-Demo-User-ID': 'demo-member' }, credentials: 'include' }),
     )
   })
 

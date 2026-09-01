@@ -76,6 +76,47 @@ type AuditEvent = {
   createdAt: string
 }
 
+type InteractionState = {
+  availability: 'available' | 'limited' | 'unavailable' | 'unknown'
+  interruptibility: 'open' | 'normal' | 'urgent_only' | 'do_not_interrupt'
+  requestability: 'open' | 'async_only' | 'later' | 'closed'
+  reschedulability: 'high' | 'medium' | 'low' | 'fixed'
+}
+
+type SharingPolicyDraft = {
+  default: InteractionState
+  workingHours: Array<{ weekday: number; startMinute: number; endMinute: number }>
+  rules: Array<{
+    conditionType: string
+    condition: unknown
+    state: InteractionState
+    priority: number
+    enabled: boolean
+  }>
+}
+
+const defaultSharingPolicy: SharingPolicyDraft = {
+  default: {
+    availability: 'available', interruptibility: 'normal',
+    requestability: 'open', reschedulability: 'medium',
+  },
+  workingHours: [1, 2, 3, 4, 5].map((weekday) => ({ weekday, startMinute: 9 * 60, endMinute: 18 * 60 })),
+  rules: [],
+}
+
+const stateForAvailability = (availability: InteractionState['availability']): InteractionState => {
+  if (availability === 'available') {
+    return { availability, interruptibility: 'normal', requestability: 'open', reschedulability: 'medium' }
+  }
+  if (availability === 'limited') {
+    return { availability, interruptibility: 'urgent_only', requestability: 'later', reschedulability: 'low' }
+  }
+  if (availability === 'unavailable') {
+    return { availability, interruptibility: 'do_not_interrupt', requestability: 'closed', reschedulability: 'fixed' }
+  }
+  return { availability, interruptibility: 'normal', requestability: 'later', reschedulability: 'low' }
+}
+
 function ShieldIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -112,6 +153,9 @@ function App() {
   const [auditError, setAuditError] = useState('')
   const [overrideSaving, setOverrideSaving] = useState(false)
   const [exporting, setExporting] = useState(false)
+  const [policyLoading, setPolicyLoading] = useState(false)
+  const [policySaving, setPolicySaving] = useState(false)
+  const [sharingPolicy, setSharingPolicy] = useState<SharingPolicyDraft>(defaultSharingPolicy)
   const visibleDate = useMemo(() => {
     const value = new Date()
     value.setDate(value.getDate() + dayOffset)
@@ -486,6 +530,59 @@ function App() {
     }
   }
 
+  const openSharingRules = async () => {
+    setActiveDialog('rules')
+    setPolicyLoading(true)
+    try {
+      const response = await fetch(`${apiURL}/api/v1/users/demo-manager/sharing-policy`, {
+        headers: { 'X-Demo-User-ID': 'demo-manager' },
+      })
+      if (response.status === 404) {
+        setSharingPolicy(defaultSharingPolicy)
+        return
+      }
+      if (!response.ok) throw new Error('policy load failed')
+      const value = await response.json() as SharingPolicyDraft
+      setSharingPolicy({
+        default: value.default ?? defaultSharingPolicy.default,
+        workingHours: value.workingHours?.length ? value.workingHours : defaultSharingPolicy.workingHours,
+        rules: (value.rules ?? []).map(({ conditionType, condition, state, priority, enabled }) => ({
+          conditionType, condition, state, priority, enabled,
+        })),
+      })
+    } catch {
+      setNotice('共有ルールを取得できませんでした。')
+    } finally {
+      setPolicyLoading(false)
+    }
+  }
+
+  const saveSharingRules = async () => {
+    setPolicySaving(true)
+    try {
+      const response = await fetch(`${apiURL}/api/v1/users/demo-manager/sharing-policy`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-Demo-User-ID': 'demo-manager' },
+        body: JSON.stringify(sharingPolicy),
+      })
+      if (!response.ok) throw new Error('policy save failed')
+      const value = await response.json() as SharingPolicyDraft
+      setSharingPolicy({
+        default: value.default,
+        workingHours: value.workingHours,
+        rules: value.rules.map(({ conditionType, condition, state, priority, enabled }) => ({
+          conditionType, condition, state, priority, enabled,
+        })),
+      })
+      setActiveDialog('')
+      setNotice('共有ルールを保存しました。')
+    } catch {
+      setNotice('共有ルールを保存できませんでした。入力内容を確認してください。')
+    } finally {
+      setPolicySaving(false)
+    }
+  }
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -553,7 +650,7 @@ function App() {
             <strong>Privacy Projection is active</strong>
             <span>イベント名・参加者・場所は組織に共有されません</span>
           </div>
-          <button type="button" onClick={() => setActiveDialog('rules')}>共有ルールを確認</button>
+          <button type="button" onClick={openSharingRules}>共有ルールを確認</button>
         </section>
 
         <section className="calendar-toolbar" aria-label="カレンダー操作">
@@ -809,13 +906,30 @@ function App() {
             </div>
             <p className="modal-copy">予定の内容ではなく、関わりやすさだけに変換して共有します。</p>
             <div className="rule-list">
+              <div>
+                <label htmlFor="default-availability">基本の公開状態</label>
+                <select
+                  id="default-availability"
+                  value={sharingPolicy.default.availability}
+                  disabled={policyLoading || policySaving}
+                  onChange={(event) => setSharingPolicy((current) => ({
+                    ...current,
+                    default: stateForAvailability(event.target.value as InteractionState['availability']),
+                  }))}
+                >
+                  <option value="available">相談可能</option>
+                  <option value="limited">緊急のみ</option>
+                  <option value="unavailable">対応不可</option>
+                  <option value="unknown">要確認</option>
+                </select>
+              </div>
               <div><span>勤務時間</span><strong>平日 09:00 — 18:00</strong></div>
               <div><span>予定中</span><strong>緊急のみ</strong></div>
               <div><span>集中時間</span><strong>割り込み非推奨</strong></div>
               <div><span>空き時間</span><strong>相談可能</strong></div>
               <div><span>勤務時間外</span><strong>対応不可</strong></div>
             </div>
-            <button className="primary-button full-button" type="button" onClick={() => { setActiveDialog(''); setNotice('共有ルールを保存しました。') }}>このルールを保存</button>
+            <button className="primary-button full-button" type="button" onClick={saveSharingRules} disabled={policyLoading || policySaving}>{policyLoading ? '読み込み中…' : policySaving ? '保存中…' : 'このルールを保存'}</button>
           </section>
         </div>
       ) : null}

@@ -41,45 +41,73 @@ describe('App', () => {
     expect(globalThis.fetch).toHaveBeenNthCalledWith(4, expect.stringContaining('/api/v1/auth/logout'), { method: 'POST', credentials: 'include' })
   })
 
-  it('shows a connected Calendar and manually syncs privacy-safe busy spans', async () => {
+  it('loads the owners real calendar across day week and month views', async () => {
     window.history.replaceState({}, '', '/?calendar=connected')
-    vi.spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        authenticated: true,
-        user: { userId: 'user-1', organizationId: 'org-1', email: 'person@example.com', displayName: 'Person', role: 'OWNER' },
-      }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        connected: true,
-        connection: {
-          grantedScopes: ['https://www.googleapis.com/auth/calendar.readonly'],
-          connectedAt: '2026-09-02T00:00:00Z', reconnectRequired: false,
-          lastErrorCode: 'timeout', nextAttemptAt: '2026-09-02T00:15:00Z',
-        },
-      }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ activeWorkspaceId: 'org-1', workspaces: [{ id: 'org-1', name: 'Person Workspace', role: 'OWNER' }] }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        synced: true, busySpanCount: 3, lastSyncedAt: '2026-09-02T01:00:00Z',
-      }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        userId: 'user-1', timezone: 'Asia/Tokyo', generatedAt: '2026-09-02T01:00:00Z',
-        segments: [{
-          startAt: '2026-09-02T02:00:00Z', endAt: '2026-09-02T03:00:00Z',
-          availability: 'unavailable', interruptibility: 'do_not_interrupt',
-          requestability: 'closed', reschedulability: 'fixed',
-        }],
-      }), { status: 200 }))
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = String(input)
+      if (url.includes('/api/v1/auth/session')) {
+        return new Response(JSON.stringify({
+          authenticated: true,
+          user: { userId: 'user-1', organizationId: 'org-1', email: 'person@example.com', displayName: 'Person', role: 'OWNER' },
+        }), { status: 200 })
+      }
+      if (url.includes('/api/v1/calendar/connection')) {
+        return new Response(JSON.stringify({
+          connected: true,
+          connection: {
+            grantedScopes: ['https://www.googleapis.com/auth/calendar.readonly'],
+            connectedAt: '2026-09-02T00:00:00Z', reconnectRequired: false,
+            lastErrorCode: 'timeout', nextAttemptAt: '2026-09-02T00:15:00Z',
+          },
+        }), { status: 200 })
+      }
+      if (url.includes('/api/v1/workspaces')) {
+        return new Response(JSON.stringify({
+          activeWorkspaceId: 'org-1', workspaces: [{ id: 'org-1', name: 'Person Workspace', role: 'OWNER' }],
+        }), { status: 200 })
+      }
+      if (url.includes('/api/v1/me/private-events')) {
+        return new Response(JSON.stringify({
+          timezone: 'Asia/Tokyo',
+          events: [{
+            id: 'private-1', title: 'Confidential board meeting', location: 'Secret room',
+            attendees: ['Partner'], startAt: '2026-09-03T00:00:00Z', endAt: '2026-09-03T01:00:00Z', allDay: false,
+          }],
+        }), { status: 200 })
+      }
+      if (url.includes('/api/v1/people/user-1/projection')) {
+        return new Response(JSON.stringify({
+          userId: 'user-1', timezone: 'Asia/Tokyo', generatedAt: '2026-09-02T01:00:00Z',
+          segments: [{
+            startAt: '2026-09-03T02:00:00Z', endAt: '2026-09-03T03:00:00Z',
+            availability: 'unavailable', interruptibility: 'do_not_interrupt',
+            requestability: 'closed', reschedulability: 'fixed',
+          }],
+        }), { status: 200 })
+      }
+      if (url.includes('/api/v1/calendar/sync')) {
+        return new Response(JSON.stringify({ synced: true, busySpanCount: 3, lastSyncedAt: '2026-09-02T01:00:00Z' }), { status: 200 })
+      }
+      return new Response('{}', { status: 404 })
+    })
     render(<App />)
 
-    expect(await screen.findByRole('status')).toHaveTextContent('Google Calendarを接続しました')
+    expect(await screen.findByText('Confidential board meeting')).toBeInTheDocument()
+    expect(screen.queryByText('Product Review')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Confidential board meeting/ }))
+    expect(screen.getByText(/Secret room · Partner/)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '週' }))
+    expect(screen.getByRole('button', { name: '次の週' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '月' }))
+    expect(screen.getByRole('button', { name: '次の月' })).toBeInTheDocument()
+
     fireEvent.click(screen.getByRole('button', { name: '山田太郎のアカウントメニュー' }))
     expect(screen.getByText(/前回の自動同期に失敗しました（timeout）/)).toBeInTheDocument()
     fireEvent.click(await screen.findByRole('button', { name: 'busy時間を同期' }))
-
     expect(await screen.findByText('Google Calendarから3件のbusy時間を同期しました。予定名は保存していません。')).toBeInTheDocument()
-    expect(globalThis.fetch).toHaveBeenNthCalledWith(4, expect.stringContaining('/api/v1/calendar/sync'), { method: 'POST', credentials: 'include' })
-    expect(globalThis.fetch).toHaveBeenNthCalledWith(
-      5,
-      expect.stringContaining('/api/v1/people/user-1/projection'),
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/v1/me/private-events?'),
       expect.objectContaining({ credentials: 'include' }),
     )
   })

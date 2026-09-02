@@ -215,6 +215,19 @@ const privateEventRow = (event: PrivateCalendarEvent, view: CalendarView) => {
 }
 
 
+const mapPublicSegments = (view: PublicProjection): ProjectionRow[] => {
+  const formatter = new Intl.DateTimeFormat('ja-JP', { hour: '2-digit', minute: '2-digit', hour12: false })
+  return view.segments.map((segment) => ({
+    time: `${formatter.format(new Date(segment.startAt))} — ${formatter.format(new Date(segment.endAt))}`,
+    label: segment.availability === 'available'
+      ? '相談可能'
+      : segment.interruptibility === 'urgent_only' ? '緊急のみ' : '対応困難',
+    tone: segment.availability === 'available'
+      ? 'available'
+      : segment.availability === 'limited' ? 'urgent' : 'unavailable',
+  }))
+}
+
 function ShieldIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -360,7 +373,7 @@ function App() {
     }
     void load()
     return () => { cancelled = true }
-  }, [authUser, calendarConnection?.connectedAt, currentView, visibleRange])
+  }, [authUser, calendarConnection, currentView, visibleRange])
 
   const moveCalendar = (direction: -1 | 1) => {
     setCalendarAnchor((current) => {
@@ -504,19 +517,6 @@ function App() {
     } finally {
       setPreviewLoading(false)
     }
-  }
-
-  const mapPublicSegments = (view: PublicProjection): ProjectionRow[] => {
-    const formatter = new Intl.DateTimeFormat('ja-JP', { hour: '2-digit', minute: '2-digit', hour12: false })
-    return view.segments.map((segment) => ({
-      time: `${formatter.format(new Date(segment.startAt))} — ${formatter.format(new Date(segment.endAt))}`,
-      label: segment.availability === 'available'
-        ? '相談可能'
-        : segment.interruptibility === 'urgent_only' ? '緊急のみ' : '対応困難',
-      tone: segment.availability === 'available'
-        ? 'available'
-        : segment.availability === 'limited' ? 'urgent' : 'unavailable',
-    }))
   }
 
   const openPeopleView = async () => {

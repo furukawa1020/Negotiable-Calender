@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"strings"
 	"time"
 
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/auth"
@@ -143,4 +144,76 @@ func testCipher(t *testing.T) *TokenCipher {
 		t.Fatal(err)
 	}
 	return value
+}
+
+
+type privateEventStubProvider struct {
+	stubProvider
+	events []PrivateEventView
+}
+
+func (provider *privateEventStubProvider) ListPrivateEvents(context.Context, string, time.Time, time.Time) ([]PrivateEventView, error) {
+	return provider.events, nil
+}
+
+func TestPrivateEventsEndpointReturnsOnlyAuthenticatedOwnersCalendar(t *testing.T) {
+	t.Parallel()
+	cipher := testCipher(t)
+	encrypted, err := cipher.Encrypt("refresh-secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := &stubStore{connection: Connection{UserID: "owner-1", RefreshTokenCipher: encrypted}}
+	provider := &privateEventStubProvider{events: []PrivateEventView{{
+		ID: "event-1", Title: "Confidential board meeting", Location: "Secret room",
+	}}}
+	handler := NewHandler(http.NotFoundHandler(), store, provider, cipher, &stubProjector{}, HandlerConfig{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	url := "/api/v1/me/private-events?from=2026-09-01T00:00:00Z&to=2026-09-02T00:00:00Z"
+
+	unauthorized := httptest.NewRecorder()
+	handler.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, url, nil))
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthorized status = %d", unauthorized.Code)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, url, nil)
+	request.Header.Set(auth.AuthenticatedUserHeader, "owner-1")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", response.Code, response.Body.String())
+	}
+	body := response.Body.String()
+	for _, expected := range []string{"owner-1", "Confidential board meeting", "Secret room"} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("missing %q: %s", expected, body)
+		}
+	}
+	for _, forbidden := range []string{"refresh-secret", "RefreshTokenCipher", "syncToken"} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("response leaked %q", forbidden)
+		}
+	}
+	if response.Header().Get("Cache-Control") != "no-store" {
+		t.Fatal("private response may be cached")
+	}
+}
+
+func TestPrivateEventsEndpointBoundsRangesBeforeProviderAccess(t *testing.T) {
+	t.Parallel()
+	handler := NewHandler(http.NotFoundHandler(), &stubStore{}, &privateEventStubProvider{}, testCipher(t), &stubProjector{}, HandlerConfig{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	for _, url := range []string{
+		"/api/v1/me/private-events",
+		"/api/v1/me/private-events?from=invalid&to=2026-09-02T00:00:00Z",
+		"/api/v1/me/private-events?from=2026-09-02T00:00:00Z&to=2026-09-01T00:00:00Z",
+		"/api/v1/me/private-events?from=2026-01-01T00:00:00Z&to=2026-03-01T00:00:00Z",
+	} {
+		request := httptest.NewRequest(http.MethodGet, url, nil)
+		request.Header.Set(auth.AuthenticatedUserHeader, "owner-1")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusBadRequest && response.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("%s status = %d", url, response.Code)
+		}
+	}
 }

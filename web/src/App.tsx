@@ -1,10 +1,10 @@
 import { type FormEvent, useEffect, useMemo, useState } from 'react'
 
-const privateEvents = [
-  { time: '09:00', label: 'Product Review', size: 'short' },
-  { time: '10:00', label: 'Customer Meeting', size: 'medium' },
-  { time: '11:30', label: 'Focus', size: 'large' },
-  { time: '13:00', label: 'Recruiting Interview', size: 'large' },
+const demoPrivateEvents = [
+  { id: 'demo-1', time: '09:00', label: 'Product Review', size: 'short', details: [] as string[] },
+  { id: 'demo-2', time: '10:00', label: 'Customer Meeting', size: 'medium', details: [] as string[] },
+  { id: 'demo-3', time: '11:30', label: 'Focus', size: 'large', details: [] as string[] },
+  { id: 'demo-4', time: '13:00', label: 'Recruiting Interview', size: 'large', details: [] as string[] },
 ]
 
 const initialProjections = [
@@ -19,6 +19,27 @@ const apiURL = import.meta.env.VITE_API_URL || 'http://localhost:8080'
 const apiFetch = (input: RequestInfo | URL, init?: RequestInit) => fetch(input, { ...init, credentials: 'include' })
 
 type ProjectionRow = (typeof initialProjections)[number]
+
+type CalendarView = 'day' | 'week' | 'month'
+
+type PrivateCalendarEvent = {
+  id: string
+  title: string
+  description?: string
+  location?: string
+  attendees?: string[]
+  conferenceUrl?: string
+  startAt?: string
+  endAt?: string
+  startDate?: string
+  endDate?: string
+  allDay: boolean
+}
+
+type PrivateCalendarResponse = {
+  timezone: string
+  events: PrivateCalendarEvent[]
+}
 
 type PublicProjection = {
   segments: Array<{
@@ -147,6 +168,66 @@ const stateForAvailability = (availability: InteractionState['availability']): I
   return { availability, interruptibility: 'normal', requestability: 'later', reschedulability: 'low' }
 }
 
+
+const calendarRange = (anchor: Date, view: CalendarView) => {
+  const from = new Date(anchor)
+  from.setHours(0, 0, 0, 0)
+  if (view === 'week') {
+    const weekday = (from.getDay() + 6) % 7
+    from.setDate(from.getDate() - weekday)
+  } else if (view === 'month') {
+    from.setDate(1)
+  }
+  const to = new Date(from)
+  if (view === 'day') to.setDate(to.getDate() + 1)
+  else if (view === 'week') to.setDate(to.getDate() + 7)
+  else to.setMonth(to.getMonth() + 1)
+  return { from, to }
+}
+
+const calendarRangeLabel = (from: Date, to: Date, view: CalendarView) => {
+  if (view === 'day') {
+    return new Intl.DateTimeFormat('ja-JP', { month: 'long', day: 'numeric', weekday: 'short' }).format(from)
+  }
+  if (view === 'month') {
+    return new Intl.DateTimeFormat('ja-JP', { year: 'numeric', month: 'long' }).format(from)
+  }
+  const end = new Date(to)
+  end.setDate(end.getDate() - 1)
+  const formatter = new Intl.DateTimeFormat('ja-JP', { month: 'numeric', day: 'numeric' })
+  return `${formatter.format(from)} — ${formatter.format(end)}`
+}
+
+const privateEventRow = (event: PrivateCalendarEvent, view: CalendarView) => {
+  const start = event.startAt ? new Date(event.startAt) : null
+  const end = event.endAt ? new Date(event.endAt) : null
+  const timeFormatter = new Intl.DateTimeFormat('ja-JP', { hour: '2-digit', minute: '2-digit', hour12: false })
+  const dateFormatter = new Intl.DateTimeFormat('ja-JP', { month: 'numeric', day: 'numeric' })
+  const prefix = view === 'day' || !start ? '' : `${dateFormatter.format(start)} `
+  const time = event.allDay ? `${event.startDate ?? ''} 終日` : start ? `${prefix}${timeFormatter.format(start)}` : '時刻未定'
+  const minutes = start && end ? (end.getTime() - start.getTime()) / 60000 : 60
+  const details = [event.location, ...(event.attendees ?? []), event.description, event.conferenceUrl].filter(Boolean) as string[]
+  return {
+    id: event.id, time, label: event.title || '(タイトルなし)',
+    size: minutes >= 90 ? 'large' : minutes >= 45 ? 'medium' : 'short',
+    details,
+  }
+}
+
+
+const mapPublicSegments = (view: PublicProjection): ProjectionRow[] => {
+  const formatter = new Intl.DateTimeFormat('ja-JP', { hour: '2-digit', minute: '2-digit', hour12: false })
+  return view.segments.map((segment) => ({
+    time: `${formatter.format(new Date(segment.startAt))} — ${formatter.format(new Date(segment.endAt))}`,
+    label: segment.availability === 'available'
+      ? '相談可能'
+      : segment.interruptibility === 'urgent_only' ? '緊急のみ' : '対応困難',
+    tone: segment.availability === 'available'
+      ? 'available'
+      : segment.availability === 'limited' ? 'urgent' : 'unavailable',
+  }))
+}
+
 function ShieldIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -164,8 +245,13 @@ function App() {
   const [notifications, setNotifications] = useState<AppNotification[]>([])
   const [notificationsLoading, setNotificationsLoading] = useState(false)
   const [notice, setNotice] = useState('')
-  const [dayOffset, setDayOffset] = useState(0)
+  const [calendarAnchor, setCalendarAnchor] = useState(() => new Date())
+  const [calendarView, setCalendarView] = useState<CalendarView>('day')
   const [calendarLayer, setCalendarLayer] = useState<'both' | 'private' | 'projection'>('both')
+  const [privateCalendarEvents, setPrivateCalendarEvents] = useState<PrivateCalendarEvent[]>([])
+  const [privateEventsLoading, setPrivateEventsLoading] = useState(false)
+  const [privateEventsError, setPrivateEventsError] = useState('')
+  const [selectedPrivateEventID, setSelectedPrivateEventID] = useState('')
   const [projections, setProjections] = useState(initialProjections)
   const [memberProjections, setMemberProjections] = useState<ProjectionRow[]>([])
   const [previewLoading, setPreviewLoading] = useState(false)
@@ -190,6 +276,7 @@ function App() {
   const [policySaving, setPolicySaving] = useState(false)
   const [sharingPolicy, setSharingPolicy] = useState<SharingPolicyDraft>(defaultSharingPolicy)
   const [authUser, setAuthUser] = useState<AuthUser | null>(null)
+  const [demoMode, setDemoMode] = useState(import.meta.env.DEV)
   const [calendarConnection, setCalendarConnection] = useState<CalendarConnection | null>(null)
   const [calendarBusy, setCalendarBusy] = useState(false)
   const [workspaces, setWorkspaces] = useState<Workspace[]>([])
@@ -198,14 +285,9 @@ function App() {
   const [inviteRole, setInviteRole] = useState('MEMBER')
   const [inviteURL, setInviteURL] = useState('')
   const [workspaceBusy, setWorkspaceBusy] = useState(false)
-  const visibleDate = useMemo(() => {
-    const value = new Date()
-    value.setDate(value.getDate() + dayOffset)
-    return value
-  }, [dayOffset])
-  const dateLabel = new Intl.DateTimeFormat('ja-JP', {
-    month: 'long', day: 'numeric', weekday: 'short',
-  }).format(visibleDate)
+  const visibleRange = useMemo(() => calendarRange(calendarAnchor, calendarView), [calendarAnchor, calendarView])
+  const visibleDate = calendarAnchor
+  const dateLabel = calendarRangeLabel(visibleRange.from, visibleRange.to, calendarView)
   const displayedProjections = memberPreview ? memberProjections : projections
   const activeUserID = authUser?.userId ?? 'demo-manager'
   const activeOrganizationID = authUser?.organizationId ?? 'demo-org'
@@ -216,12 +298,13 @@ function App() {
     const authCompleted = params.get('auth') === 'success'
     const calendarCompleted = params.get('calendar') === 'connected'
     const incomingInvitation = params.get('invite') ?? ''
-    if (!authCompleted && !calendarCompleted && !incomingInvitation) return
+    if (!authCompleted && !calendarCompleted && !incomingInvitation && import.meta.env.DEV) return
     const loadSession = async () => {
       try {
         const response = await apiFetch(`${apiURL}/api/v1/auth/session`)
         if (!response.ok) throw new Error('session failed')
-        const payload = await response.json() as { authenticated: boolean; user?: AuthUser }
+        const payload = await response.json() as { authenticated: boolean; demoMode?: boolean; user?: AuthUser }
+        setDemoMode(payload.demoMode === true)
         if (payload.authenticated && payload.user) {
           setAuthUser(payload.user)
           if (authCompleted) setNotice('Googleアカウントでログインしました。')
@@ -254,6 +337,59 @@ function App() {
     }
     void loadSession()
   }, [])
+
+
+  useEffect(() => {
+    if (!authUser || !calendarConnection || currentView !== 'calendar') return
+    let cancelled = false
+    const load = async () => {
+      setPrivateEventsLoading(true)
+      setPrivateEventsError('')
+      const query = new URLSearchParams({ from: visibleRange.from.toISOString(), to: visibleRange.to.toISOString() })
+      try {
+        const [privateResponse, projectionResponse] = await Promise.all([
+          apiFetch(`${apiURL}/api/v1/me/private-events?${query}`),
+          apiFetch(`${apiURL}/api/v1/people/${authUser.userId}/projection?timezone=Asia%2FTokyo&${query}`, {
+            headers: { 'X-Demo-User-ID': authUser.userId, 'X-Organization-ID': authUser.organizationId },
+          }),
+        ])
+        if (!privateResponse.ok) {
+          throw new Error(privateResponse.status === 409 ? 'reconnect' : 'private')
+        }
+        const privatePayload = await privateResponse.json() as PrivateCalendarResponse
+        if (!cancelled) setPrivateCalendarEvents(privatePayload.events ?? [])
+        if (projectionResponse.ok) {
+          const projectionPayload = await projectionResponse.json() as PublicProjection
+          if (!cancelled) setProjections(mapPublicSegments(projectionPayload))
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setPrivateCalendarEvents([])
+          setPrivateEventsError(error instanceof Error && error.message === 'reconnect'
+            ? 'Google Calendarの再接続が必要です。'
+            : '本人用カレンダーを取得できませんでした。')
+        }
+      } finally {
+        if (!cancelled) setPrivateEventsLoading(false)
+      }
+    }
+    void load()
+    return () => { cancelled = true }
+  }, [authUser, calendarConnection, currentView, visibleRange])
+
+  const moveCalendar = (direction: -1 | 1) => {
+    setCalendarAnchor((current) => {
+      const next = new Date(current)
+      if (calendarView === 'month') next.setMonth(next.getMonth() + direction)
+      else next.setDate(next.getDate() + direction * (calendarView === 'week' ? 7 : 1))
+      return next
+    })
+    setSelectedPrivateEventID('')
+  }
+
+  const privateRows = authUser
+    ? privateCalendarEvents.map((event) => privateEventRow(event, calendarView))
+    : demoMode ? demoPrivateEvents : []
 
   const submitRequest = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -385,19 +521,6 @@ function App() {
     } finally {
       setPreviewLoading(false)
     }
-  }
-
-  const mapPublicSegments = (view: PublicProjection): ProjectionRow[] => {
-    const formatter = new Intl.DateTimeFormat('ja-JP', { hour: '2-digit', minute: '2-digit', hour12: false })
-    return view.segments.map((segment) => ({
-      time: `${formatter.format(new Date(segment.startAt))} — ${formatter.format(new Date(segment.endAt))}`,
-      label: segment.availability === 'available'
-        ? '相談可能'
-        : segment.interruptibility === 'urgent_only' ? '緊急のみ' : '対応困難',
-      tone: segment.availability === 'available'
-        ? 'available'
-        : segment.availability === 'limited' ? 'urgent' : 'unavailable',
-    }))
   }
 
   const openPeopleView = async () => {
@@ -826,6 +949,21 @@ function App() {
     finally { setWorkspaceBusy(false) }
   }
 
+  if (!authUser && !demoMode) {
+    return (
+      <div className="app-shell">
+        <main className="signin-gate">
+          <span className="brand-mark" aria-hidden="true">N</span>
+          <p className="eyebrow">NEGOTIABLE CALENDAR</p>
+          <h1>予定を見せずに、予定を共有する。</h1>
+          <p className="hero-copy">本人確認後に、あなたのカレンダーと組織の調整状態を表示します。</p>
+          {notice ? <p role="status">{notice}</p> : null}
+          <a className="primary-button" href={`${apiURL}/api/v1/auth/google/login`}>Googleでログイン</a>
+        </main>
+      </div>
+    )
+  }
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -948,9 +1086,16 @@ function App() {
 
         <section className="calendar-toolbar" aria-label="カレンダー操作">
           <div className="date-controls">
-            <button type="button" aria-label="前の日" onClick={() => setDayOffset((value) => value - 1)}>←</button>
-            <button type="button" onClick={() => setDayOffset(0)}>今日</button>
-            <button type="button" aria-label="次の日" onClick={() => setDayOffset((value) => value + 1)}>→</button>
+            <button type="button" aria-label={calendarView === 'day' ? '前の日' : calendarView === 'week' ? '前の週' : '前の月'} onClick={() => moveCalendar(-1)}>←</button>
+            <button type="button" onClick={() => setCalendarAnchor(new Date())}>今日</button>
+            <button type="button" aria-label={calendarView === 'day' ? '次の日' : calendarView === 'week' ? '次の週' : '次の月'} onClick={() => moveCalendar(1)}>→</button>
+          </div>
+          <div className="calendar-view-controls" aria-label="表示期間">
+            {(['day', 'week', 'month'] as CalendarView[]).map((view) => (
+              <button className={calendarView === view ? 'active' : ''} type="button" key={view} onClick={() => setCalendarView(view)}>
+                {view === 'day' ? '日' : view === 'week' ? '週' : '月'}
+              </button>
+            ))}
           </div>
           <div className="layer-controls" aria-label="表示レイヤー">
             <button className={calendarLayer === 'both' ? 'active' : ''} type="button" onClick={() => setCalendarLayer('both')}>両方</button>
@@ -970,13 +1115,19 @@ function App() {
               <span className="private-label">PRIVATE</span>
             </div>
             <div className="private-list">
-              {privateEvents.map((event) => (
-                <div className="private-row" key={`${event.time}-${event.label}`}>
+              {privateEventsLoading ? <p className="empty-state" role="status">本人用カレンダーを取得中…</p> : null}
+              {privateEventsError ? <p className="empty-state error" role="alert">{privateEventsError}</p> : null}
+              {!privateEventsLoading && !privateEventsError && privateRows.length === 0 ? <p className="empty-state">この期間の予定はありません。</p> : null}
+              {privateRows.map((event) => (
+                <div className="private-row" key={event.id ?? `${event.time}-${event.label}`}>
                   <time>{event.time}</time>
-                  <div className={`private-event ${event.size}`}>
+                  <button className={`private-event ${event.size}`} type="button" aria-expanded={selectedPrivateEventID === event.id} onClick={() => setSelectedPrivateEventID((current) => current === event.id ? '' : event.id)}>
                     <strong>{event.label}</strong>
-                    <span>非公開の予定</span>
-                  </div>
+                    <span>本人だけに表示 · 組織には非公開</span>
+                    {selectedPrivateEventID === event.id && event.details?.length ? (
+                      <span className="private-event-details">{event.details.join(' · ')}</span>
+                    ) : null}
+                  </button>
                 </div>
               ))}
             </div>

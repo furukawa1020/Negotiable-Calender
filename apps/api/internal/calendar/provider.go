@@ -211,3 +211,100 @@ func googleTime(dateTime, date string) (time.Time, error) {
 	value, err := time.Parse("2006-01-02", date)
 	return value.UTC(), err
 }
+
+
+func (provider *GoogleProvider) ListPrivateEvents(ctx context.Context, accessToken string, from, to time.Time) ([]PrivateEventView, error) {
+	query := url.Values{
+		"timeMin": {from.UTC().Format(time.RFC3339)}, "timeMax": {to.UTC().Format(time.RFC3339)},
+		"singleEvents": {"true"}, "showDeleted": {"false"}, "maxResults": {"250"},
+		"fields": {"items(id,summary,description,location,attendees(displayName,email,self),start,end,status,htmlLink,hangoutLink),nextPageToken"},
+	}
+	nextPage := ""
+	result := []PrivateEventView{}
+	for {
+		if nextPage != "" {
+			query.Set("pageToken", nextPage)
+		}
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet, provider.eventsURL+"?"+query.Encode(), nil)
+		if err != nil {
+			return nil, fmt.Errorf("create private events request: %w", err)
+		}
+		request.Header.Set("Authorization", "Bearer "+accessToken)
+		response, err := provider.client.Do(request)
+		if err != nil {
+			return nil, fmt.Errorf("list private calendar events: %w", err)
+		}
+		if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden {
+			response.Body.Close()
+			return nil, ErrReconnectRequired
+		}
+		if response.StatusCode != http.StatusOK {
+			status := response.StatusCode
+			response.Body.Close()
+			return nil, providerStatusError{service: "private calendar events", status: status}
+		}
+		var body struct {
+			NextPageToken string `json:"nextPageToken"`
+			Items []struct {
+				ID, Summary, Description, Location, Status, HTMLLink, HangoutLink string
+				Attendees []struct {
+					DisplayName string `json:"displayName"`
+					Email       string `json:"email"`
+					Self        bool   `json:"self"`
+				} `json:"attendees"`
+				Start, End struct {
+					DateTime string `json:"dateTime"`
+					Date     string `json:"date"`
+				}
+			} `json:"items"`
+		}
+		err = json.NewDecoder(response.Body).Decode(&body)
+		response.Body.Close()
+		if err != nil {
+			return nil, fmt.Errorf("decode private calendar events: %w", err)
+		}
+		for _, item := range body.Items {
+			if item.Status == "cancelled" || item.ID == "" {
+				continue
+			}
+			value := PrivateEventView{
+				ID: item.ID, Title: item.Summary, Description: item.Description,
+				Location: item.Location, ConferenceURL: item.HangoutLink,
+				Attendees: []string{},
+			}
+			if value.Title == "" {
+				value.Title = "(タイトルなし)"
+			}
+			for _, attendee := range item.Attendees {
+				if attendee.Self {
+					continue
+				}
+				label := attendee.DisplayName
+				if label == "" {
+					label = attendee.Email
+				}
+				if label != "" {
+					value.Attendees = append(value.Attendees, label)
+				}
+			}
+			if item.Start.Date != "" {
+				value.AllDay, value.StartDate, value.EndDate = true, item.Start.Date, item.End.Date
+			} else {
+				start, startErr := googleTime(item.Start.DateTime, "")
+				end, endErr := googleTime(item.End.DateTime, "")
+				if startErr != nil || endErr != nil || !end.After(start) {
+					continue
+				}
+				value.StartAt, value.EndAt = &start, &end
+			}
+			result = append(result, value)
+			if len(result) > 1000 {
+				return nil, fmt.Errorf("private calendar event limit exceeded")
+			}
+		}
+		if body.NextPageToken == "" {
+			return result, nil
+		}
+		nextPage = body.NextPageToken
+	}
+}

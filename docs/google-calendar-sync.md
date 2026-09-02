@@ -55,3 +55,21 @@ The connection API exposes only sanitized health fields:
 Refresh tokens remain AES-GCM encrypted. Access tokens, refresh tokens, sync
 cursors, raw Google responses, event titles, attendees, locations, and
 descriptions are never returned or logged.
+
+
+## Manager private calendar view
+
+Authenticated managers can load day, week, or month ranges from
+`GET /api/v1/me/private-events?from=...&to=...`. The route has no user ID
+parameter: the server derives the owner exclusively from the verified session.
+Ranges must be RFC 3339, ordered, and no longer than 45 days.
+
+For this self-only response, the API refreshes a short-lived Google access token
+and streams the requested event details to the owner with `Cache-Control:
+no-store`. Details are not written to PostgreSQL. Organization, projection,
+coordination, audit, and notification APIs continue to use only privacy-safe
+projection data and cannot import this DTO.
+
+The production Web client restores an existing server session on startup.
+Unauthenticated production visitors see only the Google sign-in gate. Fixed
+sample events are rendered only by the explicit development demo mode.

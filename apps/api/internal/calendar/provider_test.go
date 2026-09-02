@@ -142,3 +142,46 @@ func TestCalendarRefreshClassifiesRevokedGrant(t *testing.T) {
 		t.Fatalf("error = %v", err)
 	}
 }
+
+
+func TestPrivateCalendarProviderReturnsOwnerDetailsWithoutPersistingThem(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		fields := request.URL.Query().Get("fields")
+		for _, required := range []string{"summary", "description", "location", "attendees"} {
+			if !strings.Contains(fields, required) {
+				t.Errorf("owner field %q was not requested", required)
+			}
+		}
+		_ = json.NewEncoder(response).Encode(map[string]any{"items": []map[string]any{
+			{
+				"id": "timed-1", "summary": "役員会議", "description": "confidential",
+				"location": "Tokyo", "hangoutLink": "https://meet.google.com/example",
+				"attendees": []map[string]any{{"email": "self@example.com", "self": true}, {"displayName": "Partner", "email": "partner@example.com"}},
+				"start": map[string]string{"dateTime": "2026-09-03T09:00:00+09:00"},
+				"end": map[string]string{"dateTime": "2026-09-03T10:00:00+09:00"},
+			},
+			{
+				"id": "all-day-1", "summary": "休暇",
+				"start": map[string]string{"date": "2026-09-04"},
+				"end": map[string]string{"date": "2026-09-05"},
+			},
+		}})
+	}))
+	defer server.Close()
+	provider := NewGoogleProvider(GoogleConfig{ClientID: "client", RedirectURL: "https://app.example/callback"}, server.Client())
+	provider.eventsURL = server.URL
+	events, err := provider.ListPrivateEvents(context.Background(), "access", time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 2 || events[0].Title != "役員会議" || events[0].StartAt == nil || events[0].StartAt.Location() != time.UTC {
+		t.Fatalf("timed event = %#v", events)
+	}
+	if len(events[0].Attendees) != 1 || events[0].Attendees[0] != "Partner" {
+		t.Fatalf("attendees = %#v", events[0].Attendees)
+	}
+	if !events[1].AllDay || events[1].StartDate != "2026-09-04" || events[1].StartAt != nil {
+		t.Fatalf("all-day event = %#v", events[1])
+	}
+}

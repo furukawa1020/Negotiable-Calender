@@ -60,6 +60,8 @@ func (handler *Handler) ServeHTTP(response http.ResponseWriter, request *http.Re
 		handler.connect(response, request)
 	case http.MethodGet + " /api/v1/calendar/google/callback":
 		handler.callback(response, request)
+	case http.MethodGet + " /api/v1/me/private-events":
+		handler.privateEvents(response, request)
 	case http.MethodGet + " /api/v1/calendar/connection":
 		handler.status(response, request)
 	case http.MethodPost + " /api/v1/calendar/sync":

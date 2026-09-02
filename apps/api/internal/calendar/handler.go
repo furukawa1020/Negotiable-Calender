@@ -41,7 +41,7 @@ type Projector interface {
 	Rebuild(context.Context, string, time.Time, time.Time, time.Time) error
 }
 
-func NewHandler(next http.Handler, store Store, provider Provider, cipher *TokenCipher, projector Projector, config HandlerConfig, logger *slog.Logger) http.Handler {
+func NewHandler(next http.Handler, store Store, provider Provider, cipher *TokenCipher, projector Projector, config HandlerConfig, logger *slog.Logger) *Handler {
 	if config.FlowTTL == 0 {
 		config.FlowTTL = 10 * time.Minute
 	}
@@ -176,64 +176,21 @@ func (handler *Handler) sync(response http.ResponseWriter, request *http.Request
 	if !ok {
 		return
 	}
-	if !handler.provider.Configured() || handler.cipher == nil {
-		writeJSON(response, http.StatusServiceUnavailable, map[string]string{"error": "google calendar is not configured"})
-		return
-	}
-	value, err := handler.store.GetConnection(request.Context(), userID)
-	if errors.Is(err, ErrNotFound) {
-		writeJSON(response, 409, map[string]string{"error": "calendar connection required"})
-		return
-	}
+	result, err := handler.SyncUser(request.Context(), userID)
 	if err != nil {
-		handler.logger.Error("get calendar connection for sync", "error", err)
-		writeJSON(response, 500, map[string]string{"error": "unable to sync calendar"})
-		return
-	}
-	refresh, err := handler.cipher.Decrypt(value.RefreshTokenCipher)
-	if err != nil {
-		handler.logger.Error("decrypt calendar token", "error", err)
-		writeJSON(response, 500, map[string]string{"error": "unable to sync calendar"})
-		return
-	}
-	tokens, err := handler.provider.Refresh(request.Context(), refresh)
-	if err != nil {
-		handler.logger.Warn("refresh calendar access rejected", "error", err)
-		if markErr := handler.store.MarkReconnectRequired(request.Context(), userID); markErr != nil {
-			handler.logger.Error("mark calendar reconnect required", "error", markErr)
+		var failure *SyncFailure
+		if errors.As(err, &failure) {
+			handler.logger.Warn("manual calendar sync incomplete", "failure_code", failure.Code)
+			writeJSON(response, failure.Status, map[string]string{"error": failure.PublicText})
+			return
 		}
-		writeJSON(response, 409, map[string]string{"error": "calendar reconnect required"})
+		handler.logger.Error("manual calendar sync failed", "failure_code", "unexpected")
+		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to sync calendar"})
 		return
 	}
-	now := handler.now().UTC()
-	from, to := now.Add(-handler.config.SyncPast), now.Add(handler.config.SyncFuture)
-	spans, err := handler.provider.ListBusy(request.Context(), tokens.AccessToken, from, to)
-	if err != nil {
-		handler.logger.Warn("list calendar busy spans", "error", err)
-		writeJSON(response, 502, map[string]string{"error": "unable to read calendar"})
-		return
-	}
-	if err := handler.store.ReplaceBusySpans(request.Context(), userID, spans, from, to, now); err != nil {
-		handler.logger.Error("replace calendar busy spans", "error", err)
-		writeJSON(response, 500, map[string]string{"error": "unable to store calendar sync"})
-		return
-	}
-	if handler.projector == nil {
-		handler.logger.Error("calendar projection rebuilder is not configured")
-		writeJSON(response, 500, map[string]string{"error": "unable to rebuild public availability"})
-		return
-	}
-	if err := handler.projector.Rebuild(request.Context(), userID, from, to, now); err != nil {
-		handler.logger.Error("rebuild public availability", "error", err)
-		writeJSON(response, 500, map[string]string{"error": "unable to rebuild public availability"})
-		return
-	}
-	if err := handler.store.MarkSynced(request.Context(), userID, now); err != nil {
-		handler.logger.Error("mark calendar sync complete", "error", err)
-		writeJSON(response, 500, map[string]string{"error": "unable to complete calendar sync"})
-		return
-	}
-	writeJSON(response, 200, map[string]any{"synced": true, "busySpanCount": len(spans), "lastSyncedAt": now})
+	writeJSON(response, http.StatusOK, map[string]any{
+		"synced": true, "busySpanCount": result.BusySpanCount, "lastSyncedAt": result.LastSyncedAt,
+	})
 }
 
 func (handler *Handler) disconnect(response http.ResponseWriter, request *http.Request) {

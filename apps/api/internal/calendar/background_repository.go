@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -183,4 +184,25 @@ WHERE user_id=$1
 		return fmt.Errorf("mark background calendar sync failure: connection not found")
 	}
 	return nil
+}
+
+
+func splitScopes(value string) []string {
+	return strings.Fields(value)
+}
+
+func normalizeConnectionTimes(value *Connection) {
+	value.ConnectedAt = value.ConnectedAt.UTC()
+	if value.LastSyncedAt != nil {
+		normalized := value.LastSyncedAt.UTC()
+		value.LastSyncedAt = &normalized
+	}
+	if value.LastAttemptAt != nil {
+		normalized := value.LastAttemptAt.UTC()
+		value.LastAttemptAt = &normalized
+	}
+	if value.NextAttemptAt != nil {
+		normalized := value.NextAttemptAt.UTC()
+		value.NextAttemptAt = &normalized
+	}
 }

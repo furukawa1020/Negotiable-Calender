@@ -75,7 +75,7 @@ describe('App', () => {
     expect(screen.getByText(/前回の自動同期に失敗しました（timeout）/)).toBeInTheDocument()
     fireEvent.click(await screen.findByRole('button', { name: 'busy時間を同期' }))
 
-    expect(await screen.findByRole('status')).toHaveTextContent('3件のbusy時間を同期しました。予定名は保存していません。')
+    expect(await screen.findByText('Google Calendarから3件のbusy時間を同期しました。予定名は保存していません。')).toBeInTheDocument()
     expect(globalThis.fetch).toHaveBeenNthCalledWith(4, expect.stringContaining('/api/v1/calendar/sync'), { method: 'POST', credentials: 'include' })
     expect(globalThis.fetch).toHaveBeenNthCalledWith(
       5,

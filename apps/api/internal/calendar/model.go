@@ -29,3 +29,11 @@ type BusySpan struct {
 	StartAt, EndAt  time.Time
 	Busy            bool
 }
+
+
+type ChangeSet struct {
+	Upserts                 []BusySpan
+	DeletedProviderEventIDs []string
+	NextSyncToken           string
+	Full                    bool
+}

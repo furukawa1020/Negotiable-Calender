@@ -957,6 +957,7 @@ function App() {
           <p className="eyebrow">NEGOTIABLE CALENDAR</p>
           <h1>予定を見せずに、予定を共有する。</h1>
           <p className="hero-copy">本人確認後に、あなたのカレンダーと組織の調整状態を表示します。</p>
+          {notice ? <p role="status">{notice}</p> : null}
           <a className="primary-button" href={`${apiURL}/api/v1/auth/google/login`}>Googleでログイン</a>
         </main>
       </div>

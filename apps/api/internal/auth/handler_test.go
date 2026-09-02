@@ -143,29 +143,32 @@ func TestCallbackRejectsMismatchedAndReplayedState(t *testing.T) {
 
 func TestProductionMiddlewareStripsSpoofedIdentityHeaders(t *testing.T) {
 	t.Parallel()
-	var userID, organizationID string
+	var userID, organizationID, authenticatedUserID string
 	next := http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		userID, organizationID = request.Header.Get("X-Demo-User-ID"), request.Header.Get("X-Organization-ID")
+		authenticatedUserID = request.Header.Get(AuthenticatedUserHeader)
 		response.WriteHeader(http.StatusNoContent)
 	})
 	handler := testHandler(next, &stubStore{sessionErr: ErrNotFound}, &stubProvider{}, false)
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/requests", nil)
 	request.Header.Set("X-Demo-User-ID", "attacker")
 	request.Header.Set("X-Organization-ID", "attacker-org")
+	request.Header.Set(AuthenticatedUserHeader, "attacker")
 	response := httptest.NewRecorder()
 
 	handler.ServeHTTP(response, request)
 
-	if userID != "" || organizationID != "" {
-		t.Fatalf("spoofed identity survived: user=%q org=%q", userID, organizationID)
+	if userID != "" || organizationID != "" || authenticatedUserID != "" {
+		t.Fatalf("spoofed identity survived: user=%q org=%q trusted=%q", userID, organizationID, authenticatedUserID)
 	}
 }
 
 func TestValidSessionOverridesSpoofedIdentity(t *testing.T) {
 	t.Parallel()
-	var userID, organizationID string
+	var userID, organizationID, authenticatedUserID string
 	next := http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		userID, organizationID = request.Header.Get("X-Demo-User-ID"), request.Header.Get("X-Organization-ID")
+		authenticatedUserID = request.Header.Get(AuthenticatedUserHeader)
 		response.WriteHeader(http.StatusNoContent)
 	})
 	store := &stubStore{sessionIdentity: Identity{UserID: "user-1", OrganizationID: "org-1"}}
@@ -177,8 +180,8 @@ func TestValidSessionOverridesSpoofedIdentity(t *testing.T) {
 
 	handler.ServeHTTP(response, request)
 
-	if userID != "user-1" || organizationID != "org-1" {
-		t.Fatalf("session identity missing: user=%q org=%q", userID, organizationID)
+	if userID != "user-1" || organizationID != "org-1" || authenticatedUserID != "user-1" {
+		t.Fatalf("session identity missing: user=%q org=%q trusted=%q", userID, organizationID, authenticatedUserID)
 	}
 }
 

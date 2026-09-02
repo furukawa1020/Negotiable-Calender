@@ -87,6 +87,13 @@ type AuthUser = {
   role: string
 }
 
+type CalendarConnection = {
+  grantedScopes: string[]
+  connectedAt: string
+  lastSyncedAt?: string
+  reconnectRequired: boolean
+}
+
 type InteractionState = {
   availability: 'available' | 'limited' | 'unavailable' | 'unknown'
   interruptibility: 'open' | 'normal' | 'urgent_only' | 'do_not_interrupt'
@@ -171,6 +178,8 @@ function App() {
   const [policySaving, setPolicySaving] = useState(false)
   const [sharingPolicy, setSharingPolicy] = useState<SharingPolicyDraft>(defaultSharingPolicy)
   const [authUser, setAuthUser] = useState<AuthUser | null>(null)
+  const [calendarConnection, setCalendarConnection] = useState<CalendarConnection | null>(null)
+  const [calendarBusy, setCalendarBusy] = useState(false)
   const visibleDate = useMemo(() => {
     const value = new Date()
     value.setDate(value.getDate() + dayOffset)
@@ -185,7 +194,10 @@ function App() {
   const requesterUserID = authUser?.userId ?? 'demo-member'
 
   useEffect(() => {
-    if (new URLSearchParams(window.location.search).get('auth') !== 'success') return
+    const params = new URLSearchParams(window.location.search)
+    const authCompleted = params.get('auth') === 'success'
+    const calendarCompleted = params.get('calendar') === 'connected'
+    if (!authCompleted && !calendarCompleted) return
     const loadSession = async () => {
       try {
         const response = await apiFetch(`${apiURL}/api/v1/auth/session`)
@@ -193,12 +205,18 @@ function App() {
         const payload = await response.json() as { authenticated: boolean; user?: AuthUser }
         if (payload.authenticated && payload.user) {
           setAuthUser(payload.user)
-          setNotice('Googleアカウントでログインしました。')
+          if (authCompleted) setNotice('Googleアカウントでログインしました。')
+          if (calendarCompleted) setNotice('Google Calendarを接続しました。同期を開始できます。')
+          const calendarResponse = await apiFetch(`${apiURL}/api/v1/calendar/connection`)
+          if (calendarResponse.ok) {
+            const calendarPayload = await calendarResponse.json() as { connected: boolean; connection?: CalendarConnection }
+            setCalendarConnection(calendarPayload.connected ? calendarPayload.connection ?? null : null)
+          }
         }
       } catch {
-        setNotice('ログイン状態を確認できませんでした。')
+        if (authCompleted || calendarCompleted) setNotice('ログイン状態を確認できませんでした。')
       } finally {
-        window.history.replaceState({}, '', window.location.pathname)
+        if (authCompleted || calendarCompleted) window.history.replaceState({}, '', window.location.pathname)
       }
     }
     void loadSession()
@@ -665,10 +683,40 @@ function App() {
       })
       if (!response.ok) throw new Error('logout failed')
       setAuthUser(null)
+      setCalendarConnection(null)
       setAccountOpen(false)
       setNotice('ログアウトしました。')
     } catch {
       setNotice('ログアウトできませんでした。')
+    }
+  }
+
+  const syncCalendar = async () => {
+    setCalendarBusy(true)
+    try {
+      const response = await apiFetch(`${apiURL}/api/v1/calendar/sync`, { method: 'POST' })
+      if (!response.ok) throw new Error('sync failed')
+      const payload = await response.json() as { busySpanCount: number; lastSyncedAt: string }
+      setCalendarConnection((current) => current ? { ...current, lastSyncedAt: payload.lastSyncedAt, reconnectRequired: false } : current)
+      setNotice(`Google Calendarから${payload.busySpanCount}件のbusy時間を同期しました。予定名は保存していません。`)
+    } catch {
+      setNotice('Calendarを同期できませんでした。再接続が必要な場合があります。')
+    } finally {
+      setCalendarBusy(false)
+    }
+  }
+
+  const disconnectCalendar = async () => {
+    setCalendarBusy(true)
+    try {
+      const response = await apiFetch(`${apiURL}/api/v1/calendar/connection`, { method: 'DELETE' })
+      if (!response.ok) throw new Error('disconnect failed')
+      setCalendarConnection(null)
+      setNotice('Google Calendarの接続と同期済みbusy時間を削除しました。')
+    } catch {
+      setNotice('Calendar接続を解除できませんでした。')
+    } finally {
+      setCalendarBusy(false)
     }
   }
 
@@ -714,7 +762,22 @@ function App() {
                 <strong>{authUser?.displayName ?? '山田 太郎'}</strong>
                 <span>{authUser ? `${authUser.role} · ${authUser.email}` : 'Manager · Demo mode'}</span>
                 {authUser ? (
-                  <button type="button" onClick={logout}>ログアウト</button>
+                  <>
+                    {calendarConnection ? (
+                      <>
+                        <span>{calendarConnection.reconnectRequired ? 'Calendarの再接続が必要です' : 'Calendar 接続済み'}{calendarConnection.lastSyncedAt ? ` · 最終同期 ${formatDateTime(calendarConnection.lastSyncedAt)}` : ''}</span>
+                        {calendarConnection.reconnectRequired ? (
+                          <a href={`${apiURL}/api/v1/calendar/google/connect`}>Google Calendarを再接続</a>
+                        ) : (
+                          <button type="button" onClick={syncCalendar} disabled={calendarBusy}>{calendarBusy ? '処理中…' : 'busy時間を同期'}</button>
+                        )}
+                        <button type="button" onClick={disconnectCalendar} disabled={calendarBusy}>Calendar接続を解除</button>
+                      </>
+                    ) : (
+                      <a href={`${apiURL}/api/v1/calendar/google/connect`}>Google Calendarを接続</a>
+                    )}
+                    <button type="button" onClick={logout}>ログアウト</button>
+                  </>
                 ) : (
                   <a href={`${apiURL}/api/v1/auth/google/login`}>Googleでログイン</a>
                 )}

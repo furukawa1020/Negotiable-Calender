@@ -13,8 +13,9 @@ import (
 )
 
 const (
-	flowCookieName    = "negotiable_oauth_flow"
-	sessionCookieName = "negotiable_session"
+	flowCookieName          = "negotiable_oauth_flow"
+	sessionCookieName       = "negotiable_session"
+	AuthenticatedUserHeader = "X-Negotiable-Authenticated-User-ID"
 )
 
 type HandlerConfig struct {
@@ -68,9 +69,11 @@ func (handler *Handler) ServeHTTP(response http.ResponseWriter, request *http.Re
 	identity, authenticated := handler.identity(request)
 	if strings.HasPrefix(request.URL.Path, "/api/v1/") {
 		cloned := request.Clone(request.Context())
+		cloned.Header.Del(AuthenticatedUserHeader)
 		if authenticated {
 			cloned.Header.Set("X-Demo-User-ID", identity.UserID)
 			cloned.Header.Set("X-Organization-ID", identity.OrganizationID)
+			cloned.Header.Set(AuthenticatedUserHeader, identity.UserID)
 		} else if !handler.config.DemoMode {
 			cloned.Header.Del("X-Demo-User-ID")
 			cloned.Header.Del("X-Organization-ID")

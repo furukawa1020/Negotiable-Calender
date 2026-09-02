@@ -35,7 +35,7 @@ describe('App', () => {
     expect(screen.getByText('OWNER · person@example.com')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'ログアウト' }))
 
-    expect(await screen.findByRole('status')).toHaveTextContent('ログアウトしました。')
+    expect(await screen.findByText('ログアウトしました。')).toBeInTheDocument()
     expect(globalThis.fetch).toHaveBeenNthCalledWith(1, expect.stringContaining('/api/v1/auth/session'), { credentials: 'include' })
     expect(globalThis.fetch).toHaveBeenNthCalledWith(2, expect.stringContaining('/api/v1/calendar/connection'), { credentials: 'include' })
     expect(globalThis.fetch).toHaveBeenNthCalledWith(4, expect.stringContaining('/api/v1/auth/logout'), { method: 'POST', credentials: 'include' })

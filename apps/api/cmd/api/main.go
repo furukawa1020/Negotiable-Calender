@@ -22,6 +22,7 @@ import (
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/organization"
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/policy"
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/projection"
+	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/security"
 	coordinationrequest "github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/request"
 )
 
@@ -129,9 +130,10 @@ func main() {
 	invitationHandler := organization.NewInvitationHandler(calendarHandler, organization.NewPostgresStore(db), organization.InvitationHandlerConfig{
 		WebOrigin: os.Getenv("WEB_ORIGIN"),
 	}, logger)
-	handler := auth.NewHandler(invitationHandler, auth.NewPostgresStore(db), googleProvider, auth.HandlerConfig{
+	authHandler := auth.NewHandler(invitationHandler, auth.NewPostgresStore(db), googleProvider, auth.HandlerConfig{
 		WebOrigin: os.Getenv("WEB_ORIGIN"), DemoMode: demoMode, SecureCookies: secureCookies,
 	}, logger)
+	handler := security.New(authHandler, security.Config{WebOrigin: os.Getenv("WEB_ORIGIN")})
 
 	server := &http.Server{
 		Addr:              ":" + port,

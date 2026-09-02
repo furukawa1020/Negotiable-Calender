@@ -68,6 +68,10 @@ func main() {
 		logger.Error("migrate calendar integration database", "error", err)
 		os.Exit(1)
 	}
+	if err := calendarintegration.EnsureBackgroundSchema(migrationContext, db); err != nil {
+		logger.Error("migrate background calendar sync database", "error", err)
+		os.Exit(1)
+	}
 	if err := projection.EnsureSchema(migrationContext, db); err != nil {
 		logger.Error("migrate projection database", "error", err)
 		os.Exit(1)
@@ -124,7 +128,8 @@ func main() {
 	}
 	apiHandler := httpapi.NewWithStores(db, policy.NewPostgresStore(db), projection.NewPostgresStore(db), organization.NewPostgresStore(db), coordinationrequest.NewPostgresStore(db), notification.NewPostgresStore(db), audit.NewPostgresStore(db), os.Getenv("WEB_ORIGIN"), logger)
 	projectionRebuilder := projection.NewRebuilder(projection.NewPostgresRebuildStore(db), policy.NewPostgresStore(db))
-	calendarHandler := calendarintegration.NewHandler(apiHandler, calendarintegration.NewPostgresStore(db), calendarProvider, calendarCipher, projectionRebuilder, calendarintegration.HandlerConfig{
+	calendarStore := calendarintegration.NewPostgresStore(db)
+	calendarHandler := calendarintegration.NewHandler(apiHandler, calendarStore, calendarProvider, calendarCipher, projectionRebuilder, calendarintegration.HandlerConfig{
 		WebOrigin: os.Getenv("WEB_ORIGIN"), SecureCookies: secureCookies,
 	}, logger)
 	invitationHandler := organization.NewInvitationHandler(calendarHandler, organization.NewPostgresStore(db), organization.InvitationHandlerConfig{
@@ -146,6 +151,10 @@ func main() {
 
 	shutdownSignal, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	if calendarProvider.Configured() && calendarCipher != nil {
+		worker := calendarintegration.NewWorker(calendarStore, calendarHandler, calendarintegration.WorkerConfig{}, logger)
+		go worker.Run(shutdownSignal)
+	}
 
 	go func() {
 		logger.Info("api listening", "address", server.Addr)

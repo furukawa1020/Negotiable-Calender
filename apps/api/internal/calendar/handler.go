@@ -1,6 +1,7 @@
 package calendar
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -26,16 +27,21 @@ type HandlerConfig struct {
 }
 
 type Handler struct {
-	next     http.Handler
-	store    Store
-	provider Provider
-	cipher   *TokenCipher
-	config   HandlerConfig
-	logger   *slog.Logger
-	now      func() time.Time
+	next      http.Handler
+	store     Store
+	provider  Provider
+	cipher    *TokenCipher
+	projector Projector
+	config    HandlerConfig
+	logger    *slog.Logger
+	now       func() time.Time
 }
 
-func NewHandler(next http.Handler, store Store, provider Provider, cipher *TokenCipher, config HandlerConfig, logger *slog.Logger) http.Handler {
+type Projector interface {
+	Rebuild(context.Context, string, time.Time, time.Time, time.Time) error
+}
+
+func NewHandler(next http.Handler, store Store, provider Provider, cipher *TokenCipher, projector Projector, config HandlerConfig, logger *slog.Logger) http.Handler {
 	if config.FlowTTL == 0 {
 		config.FlowTTL = 10 * time.Minute
 	}
@@ -45,7 +51,7 @@ func NewHandler(next http.Handler, store Store, provider Provider, cipher *Token
 	if config.SyncFuture == 0 {
 		config.SyncFuture = 90 * 24 * time.Hour
 	}
-	return &Handler{next: next, store: store, provider: provider, cipher: cipher, config: config, logger: logger, now: time.Now}
+	return &Handler{next: next, store: store, provider: provider, cipher: cipher, projector: projector, config: config, logger: logger, now: time.Now}
 }
 
 func (handler *Handler) ServeHTTP(response http.ResponseWriter, request *http.Request) {
@@ -210,6 +216,21 @@ func (handler *Handler) sync(response http.ResponseWriter, request *http.Request
 	if err := handler.store.ReplaceBusySpans(request.Context(), userID, spans, from, to, now); err != nil {
 		handler.logger.Error("replace calendar busy spans", "error", err)
 		writeJSON(response, 500, map[string]string{"error": "unable to store calendar sync"})
+		return
+	}
+	if handler.projector == nil {
+		handler.logger.Error("calendar projection rebuilder is not configured")
+		writeJSON(response, 500, map[string]string{"error": "unable to rebuild public availability"})
+		return
+	}
+	if err := handler.projector.Rebuild(request.Context(), userID, from, to, now); err != nil {
+		handler.logger.Error("rebuild public availability", "error", err)
+		writeJSON(response, 500, map[string]string{"error": "unable to rebuild public availability"})
+		return
+	}
+	if err := handler.store.MarkSynced(request.Context(), userID, now); err != nil {
+		handler.logger.Error("mark calendar sync complete", "error", err)
+		writeJSON(response, 500, map[string]string{"error": "unable to complete calendar sync"})
 		return
 	}
 	writeJSON(response, 200, map[string]any{"synced": true, "busySpanCount": len(spans), "lastSyncedAt": now})

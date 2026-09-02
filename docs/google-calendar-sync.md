@@ -19,4 +19,7 @@ not be committed. Losing it requires users to reconnect. Rotation needs a
 re-encryption migration before replacing the old key.
 
 Manual sync imports a rolling window from 30 days ago through 90 days ahead.
+After import, the API combines those private busy spans with the user's sharing
+policy and active manual overrides, then atomically replaces the public
+15-minute projections for that window. Manual overrides are applied last.
 Disconnecting deletes both the encrypted grant and imported busy spans.

@@ -54,6 +54,14 @@ describe('App', () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({
         synced: true, busySpanCount: 3, lastSyncedAt: '2026-09-02T01:00:00Z',
       }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        userId: 'user-1', timezone: 'Asia/Tokyo', generatedAt: '2026-09-02T01:00:00Z',
+        segments: [{
+          startAt: '2026-09-02T02:00:00Z', endAt: '2026-09-02T03:00:00Z',
+          availability: 'unavailable', interruptibility: 'do_not_interrupt',
+          requestability: 'closed', reschedulability: 'fixed',
+        }],
+      }), { status: 200 }))
     render(<App />)
 
     expect(await screen.findByRole('status')).toHaveTextContent('Google Calendarを接続しました')
@@ -62,6 +70,11 @@ describe('App', () => {
 
     expect(await screen.findByRole('status')).toHaveTextContent('3件のbusy時間を同期しました。予定名は保存していません。')
     expect(globalThis.fetch).toHaveBeenNthCalledWith(3, expect.stringContaining('/api/v1/calendar/sync'), { method: 'POST', credentials: 'include' })
+    expect(globalThis.fetch).toHaveBeenNthCalledWith(
+      4,
+      expect.stringContaining('/api/v1/people/user-1/projection'),
+      expect.objectContaining({ credentials: 'include' }),
+    )
   })
   it('explains the privacy projection without exposing sample details as shared data', () => {
     render(<App />)

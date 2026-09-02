@@ -3,6 +3,7 @@ package calendar
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -36,6 +37,10 @@ func (store *stubStore) ReplaceBusySpans(_ context.Context, _ string, values []B
 	store.spans = values
 	return nil
 }
+func (store *stubStore) MarkSynced(_ context.Context, _ string, value time.Time) error {
+	store.connection.LastSyncedAt = &value
+	return nil
+}
 func (store *stubStore) MarkReconnectRequired(context.Context, string) error {
 	store.connection.ReconnectRequired = true
 	return nil
@@ -47,6 +52,16 @@ func (store *stubStore) DeleteConnection(context.Context, string) error {
 }
 
 type stubProvider struct{ refreshed string }
+
+type stubProjector struct {
+	rebuilt bool
+	err     error
+}
+
+func (value *stubProjector) Rebuild(context.Context, string, time.Time, time.Time, time.Time) error {
+	value.rebuilt = true
+	return value.err
+}
 
 func (*stubProvider) Configured() bool                       { return true }
 func (*stubProvider) AuthorizationURL(string, string) string { return "https://google.example/consent" }
@@ -62,7 +77,7 @@ func (*stubProvider) ListBusy(context.Context, string, time.Time, time.Time) ([]
 }
 
 func TestCalendarEndpointsRequireRealAuthenticatedSession(t *testing.T) {
-	handler := NewHandler(http.NotFoundHandler(), &stubStore{}, &stubProvider{}, testCipher(t), HandlerConfig{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	handler := NewHandler(http.NotFoundHandler(), &stubStore{}, &stubProvider{}, testCipher(t), &stubProjector{}, HandlerConfig{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/calendar/connection", nil)
 	request.Header.Set("X-Demo-User-ID", "demo-manager")
 	response := httptest.NewRecorder()
@@ -80,7 +95,8 @@ func TestCalendarSyncDecryptsGrantAndStoresOnlyBusySpanShape(t *testing.T) {
 	}
 	store := &stubStore{connection: Connection{UserID: "user-1", RefreshTokenCipher: encrypted}}
 	provider := &stubProvider{}
-	handler := NewHandler(http.NotFoundHandler(), store, provider, cipher, HandlerConfig{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	projector := &stubProjector{}
+	handler := NewHandler(http.NotFoundHandler(), store, provider, cipher, projector, HandlerConfig{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/calendar/sync", nil)
 	request.Header.Set(auth.AuthenticatedUserHeader, "user-1")
 	response := httptest.NewRecorder()
@@ -93,6 +109,30 @@ func TestCalendarSyncDecryptsGrantAndStoresOnlyBusySpanShape(t *testing.T) {
 	}
 	if len(store.spans) != 1 || store.spans[0].ProviderEventID != "event-1" {
 		t.Fatalf("busy span missing: %#v", store.spans)
+	}
+	if !projector.rebuilt || store.connection.LastSyncedAt == nil {
+		t.Fatal("public availability was not rebuilt before sync completion")
+	}
+}
+
+func TestCalendarSyncDoesNotMarkCompleteWhenProjectionRebuildFails(t *testing.T) {
+	cipher := testCipher(t)
+	encrypted, err := cipher.Encrypt("refresh-secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := &stubStore{connection: Connection{UserID: "user-1", RefreshTokenCipher: encrypted}}
+	projector := &stubProjector{err: errors.New("projection database unavailable")}
+	handler := NewHandler(http.NotFoundHandler(), store, &stubProvider{}, cipher, projector, HandlerConfig{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/calendar/sync", nil)
+	request.Header.Set(auth.AuthenticatedUserHeader, "user-1")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusInternalServerError {
+		t.Fatalf("expected failed sync, got %d", response.Code)
+	}
+	if store.connection.LastSyncedAt != nil {
+		t.Fatal("failed projection rebuild was marked as a completed sync")
 	}
 }
 

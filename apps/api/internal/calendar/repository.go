@@ -17,6 +17,7 @@ type Store interface {
 	SaveConnection(context.Context, Connection) error
 	GetConnection(context.Context, string) (Connection, error)
 	ReplaceBusySpans(context.Context, string, []BusySpan, time.Time, time.Time, time.Time) error
+	MarkSynced(context.Context, string, time.Time) error
 	MarkReconnectRequired(context.Context, string) error
 	DeleteConnection(context.Context, string) error
 }
@@ -138,11 +139,15 @@ VALUES ($1,$2,$3,$4,$5,$6,'default',$7,$7)`, userID, span.ProviderEventID, span.
 			return fmt.Errorf("insert busy span: %w", err)
 		}
 	}
-	if _, err = tx.ExecContext(ctx, `UPDATE calendar_connections SET last_synced_at=$2,reconnect_required=false WHERE user_id=$1`, userID, now); err != nil {
-		return fmt.Errorf("mark calendar sync: %w", err)
-	}
 	if err = tx.Commit(); err != nil {
 		return fmt.Errorf("commit calendar sync: %w", err)
+	}
+	return nil
+}
+
+func (store *PostgresStore) MarkSynced(ctx context.Context, userID string, now time.Time) error {
+	if _, err := store.database.ExecContext(ctx, `UPDATE calendar_connections SET last_synced_at=$2,reconnect_required=false WHERE user_id=$1`, userID, now); err != nil {
+		return fmt.Errorf("mark calendar sync: %w", err)
 	}
 	return nil
 }

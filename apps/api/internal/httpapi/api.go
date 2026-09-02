@@ -779,7 +779,7 @@ func (api *API) middleware(next http.Handler) http.Handler {
 			response.Header().Set("Access-Control-Allow-Origin", api.webOrigin)
 			response.Header().Set("Access-Control-Allow-Credentials", "true")
 			response.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Demo-User-ID, X-Organization-ID")
-			response.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
+			response.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 			response.Header().Set("Vary", "Origin")
 		}
 

@@ -420,6 +420,7 @@ h1 {
 }
 
 .date-controls,
+.calendar-view-controls,
 .layer-controls {
   display: flex;
   align-items: center;
@@ -427,6 +428,7 @@ h1 {
 }
 
 .date-controls button,
+.calendar-view-controls button,
 .layer-controls button,
 .override-button {
   padding: 8px 11px;
@@ -439,6 +441,13 @@ h1 {
   cursor: pointer;
 }
 
+.calendar-view-controls,
+.layer-controls {
+  padding: 3px;
+  border-radius: 8px;
+  background: #ebece6;
+}
+
 .layer-controls {
   margin-left: auto;
   padding: 3px;
@@ -446,10 +455,12 @@ h1 {
   background: #ebece6;
 }
 
+.calendar-view-controls button,
 .layer-controls button {
   border-color: transparent;
 }
 
+.calendar-view-controls button.active,
 .layer-controls button.active {
   color: var(--green);
   background: white;
@@ -700,10 +711,16 @@ h1 {
 }
 
 .private-event {
+  width: 100%;
   min-height: 55px;
   padding: 10px 13px;
+  border: 0;
   border-left: 3px solid #546b61;
+  color: inherit;
   background: #edf0eb;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
 .private-event.medium {
@@ -727,6 +744,13 @@ h1 {
   margin-top: 5px;
   color: #838a86;
   font-size: 10px;
+}
+
+.private-event .private-event-details {
+  margin-top: 9px;
+  color: #435149;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 .projection-list {

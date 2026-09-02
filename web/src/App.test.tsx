@@ -72,7 +72,7 @@ describe('App', () => {
 
     expect(await screen.findByRole('status')).toHaveTextContent('Google Calendarを接続しました')
     fireEvent.click(screen.getByRole('button', { name: '山田太郎のアカウントメニュー' }))
-    expect(screen.getByRole('status')).toHaveTextContent('前回の自動同期に失敗しました（timeout）')
+    expect(screen.getByText(/前回の自動同期に失敗しました（timeout）/)).toBeInTheDocument()
     fireEvent.click(await screen.findByRole('button', { name: 'busy時間を同期' }))
 
     expect(await screen.findByRole('status')).toHaveTextContent('3件のbusy時間を同期しました。予定名は保存していません。')

@@ -63,6 +63,47 @@ func (store *PostgresStore) ListForUser(ctx context.Context, userID string) ([]S
 	return store.list(ctx, userID, time.Time{}, time.Time{}, true)
 }
 
+func (store *PostgresStore) Replace(ctx context.Context, userID string, from, to time.Time, values []ScheduleProjection) error {
+	for _, value := range values {
+		if err := value.Validate(); err != nil {
+			return fmt.Errorf("validate replacement projection: %w", err)
+		}
+		if value.UserID != userID {
+			return fmt.Errorf("replacement projection user mismatch")
+		}
+	}
+	transaction, err := store.database.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin projection replacement: %w", err)
+	}
+	defer transaction.Rollback()
+	if _, err := transaction.ExecContext(ctx, `
+DELETE FROM schedule_projections
+WHERE user_id = $1 AND start_at < $3 AND end_at > $2
+`, userID, from, to); err != nil {
+		return fmt.Errorf("clear projection window: %w", err)
+	}
+	for _, value := range values {
+		_, err := transaction.ExecContext(ctx, `
+INSERT INTO schedule_projections (
+    id, user_id, start_at, end_at, availability, interruptibility,
+    requestability, reschedulability, expected_response_bucket,
+    generated_at, expires_at
+) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+`, value.ID, value.UserID, value.StartAt, value.EndAt,
+			value.State.Availability, value.State.Interruptibility,
+			value.State.Requestability, value.State.Reschedulability,
+			value.ExpectedResponseBucket, value.GeneratedAt, value.ExpiresAt)
+		if err != nil {
+			return fmt.Errorf("insert replacement projection: %w", err)
+		}
+	}
+	if err := transaction.Commit(); err != nil {
+		return fmt.Errorf("commit projection replacement: %w", err)
+	}
+	return nil
+}
+
 func (store *PostgresStore) list(ctx context.Context, userID string, from, to time.Time, includeAll bool) ([]ScheduleProjection, error) {
 	rows, err := store.database.QueryContext(ctx, `
 SELECT id, user_id, start_at, end_at, availability, interruptibility,

@@ -118,7 +118,8 @@ func main() {
 		}
 	}
 	apiHandler := httpapi.NewWithStores(db, policy.NewPostgresStore(db), projection.NewPostgresStore(db), organization.NewPostgresStore(db), coordinationrequest.NewPostgresStore(db), notification.NewPostgresStore(db), audit.NewPostgresStore(db), os.Getenv("WEB_ORIGIN"), logger)
-	calendarHandler := calendarintegration.NewHandler(apiHandler, calendarintegration.NewPostgresStore(db), calendarProvider, calendarCipher, calendarintegration.HandlerConfig{
+	projectionRebuilder := projection.NewRebuilder(projection.NewPostgresRebuildStore(db), policy.NewPostgresStore(db))
+	calendarHandler := calendarintegration.NewHandler(apiHandler, calendarintegration.NewPostgresStore(db), calendarProvider, calendarCipher, projectionRebuilder, calendarintegration.HandlerConfig{
 		WebOrigin: os.Getenv("WEB_ORIGIN"), SecureCookies: secureCookies,
 	}, logger)
 	handler := auth.NewHandler(calendarHandler, auth.NewPostgresStore(db), googleProvider, auth.HandlerConfig{
@@ -130,7 +131,7 @@ func main() {
 		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
-		WriteTimeout:      10 * time.Second,
+		WriteTimeout:      60 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
 

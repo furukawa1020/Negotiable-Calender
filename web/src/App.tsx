@@ -699,6 +699,26 @@ function App() {
       const payload = await response.json() as { busySpanCount: number; lastSyncedAt: string }
       setCalendarConnection((current) => current ? { ...current, lastSyncedAt: payload.lastSyncedAt, reconnectRequired: false } : current)
       setNotice(`Google Calendarから${payload.busySpanCount}件のbusy時間を同期しました。予定名は保存していません。`)
+      try {
+        const from = new Date(visibleDate)
+        from.setHours(0, 0, 0, 0)
+        const to = new Date(from)
+        to.setDate(to.getDate() + 1)
+        const query = new URLSearchParams({
+          timezone: 'Asia/Tokyo',
+          from: from.toISOString(),
+          to: to.toISOString(),
+        })
+        const projectionResponse = await apiFetch(`${apiURL}/api/v1/people/${activeUserID}/projection?${query}`, {
+          headers: { 'X-Demo-User-ID': activeUserID, 'X-Organization-ID': activeOrganizationID },
+        })
+        if (projectionResponse.ok) {
+          const view = await projectionResponse.json() as PublicProjection
+          setProjections(mapPublicSegments(view))
+        }
+      } catch {
+        setNotice(`Google Calendarから${payload.busySpanCount}件を同期しましたが、表示の再読込に失敗しました。`)
+      }
     } catch {
       setNotice('Calendarを同期できませんでした。再接続が必要な場合があります。')
     } finally {

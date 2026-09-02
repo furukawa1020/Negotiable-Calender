@@ -83,6 +83,10 @@ func main() {
 		logger.Error("migrate audit database", "error", err)
 		os.Exit(1)
 	}
+	if err := organization.EnsureInvitationSchema(migrationContext, db); err != nil {
+		logger.Error("migrate organization invitation database", "error", err)
+		os.Exit(1)
+	}
 	if os.Getenv("DEMO_MODE") == "true" {
 		if err := organization.SeedDemo(migrationContext, db, time.Now().UTC()); err != nil {
 			logger.Error("seed demo organization", "error", err)
@@ -122,7 +126,10 @@ func main() {
 	calendarHandler := calendarintegration.NewHandler(apiHandler, calendarintegration.NewPostgresStore(db), calendarProvider, calendarCipher, projectionRebuilder, calendarintegration.HandlerConfig{
 		WebOrigin: os.Getenv("WEB_ORIGIN"), SecureCookies: secureCookies,
 	}, logger)
-	handler := auth.NewHandler(calendarHandler, auth.NewPostgresStore(db), googleProvider, auth.HandlerConfig{
+	invitationHandler := organization.NewInvitationHandler(calendarHandler, organization.NewPostgresStore(db), organization.InvitationHandlerConfig{
+		WebOrigin: os.Getenv("WEB_ORIGIN"),
+	}, logger)
+	handler := auth.NewHandler(invitationHandler, auth.NewPostgresStore(db), googleProvider, auth.HandlerConfig{
 		WebOrigin: os.Getenv("WEB_ORIGIN"), DemoMode: demoMode, SecureCookies: secureCookies,
 	}, logger)
 

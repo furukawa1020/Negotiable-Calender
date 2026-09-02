@@ -5,12 +5,15 @@ import "time"
 type Action string
 
 const (
-	RequestCreated   Action = "request_created"
-	RequestAccepted  Action = "request_accepted"
-	RequestChanged   Action = "request_changed"
-	RequestDeclined  Action = "request_declined"
-	RequestDelegated Action = "request_delegated"
-	RequestCancelled Action = "request_cancelled"
+	RequestCreated     Action = "request_created"
+	RequestAccepted    Action = "request_accepted"
+	RequestChanged     Action = "request_changed"
+	RequestDeclined    Action = "request_declined"
+	RequestDelegated   Action = "request_delegated"
+	RequestCancelled   Action = "request_cancelled"
+	InvitationCreated  Action = "invitation_created"
+	InvitationAccepted Action = "invitation_accepted"
+	WorkspaceSwitched  Action = "workspace_switched"
 )
 
 type Event struct {

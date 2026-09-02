@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"io"
 	"log/slog"
 	"net/http"
@@ -143,10 +144,13 @@ func TestCallbackRejectsMismatchedAndReplayedState(t *testing.T) {
 
 func TestProductionMiddlewareStripsSpoofedIdentityHeaders(t *testing.T) {
 	t.Parallel()
-	var userID, organizationID, authenticatedUserID string
+	var userID, organizationID, authenticatedUserID, trustedOrganizationID, trustedRole, trustedSession string
 	next := http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		userID, organizationID = request.Header.Get("X-Demo-User-ID"), request.Header.Get("X-Organization-ID")
 		authenticatedUserID = request.Header.Get(AuthenticatedUserHeader)
+		trustedOrganizationID = request.Header.Get(AuthenticatedOrganizationHeader)
+		trustedRole = request.Header.Get(AuthenticatedRoleHeader)
+		trustedSession = request.Header.Get(AuthenticatedSessionHeader)
 		response.WriteHeader(http.StatusNoContent)
 	})
 	handler := testHandler(next, &stubStore{sessionErr: ErrNotFound}, &stubProvider{}, false)
@@ -154,24 +158,30 @@ func TestProductionMiddlewareStripsSpoofedIdentityHeaders(t *testing.T) {
 	request.Header.Set("X-Demo-User-ID", "attacker")
 	request.Header.Set("X-Organization-ID", "attacker-org")
 	request.Header.Set(AuthenticatedUserHeader, "attacker")
+	request.Header.Set(AuthenticatedOrganizationHeader, "attacker-org")
+	request.Header.Set(AuthenticatedRoleHeader, "OWNER")
+	request.Header.Set(AuthenticatedSessionHeader, "attacker-session")
 	response := httptest.NewRecorder()
 
 	handler.ServeHTTP(response, request)
 
-	if userID != "" || organizationID != "" || authenticatedUserID != "" {
-		t.Fatalf("spoofed identity survived: user=%q org=%q trusted=%q", userID, organizationID, authenticatedUserID)
+	if userID != "" || organizationID != "" || authenticatedUserID != "" || trustedOrganizationID != "" || trustedRole != "" || trustedSession != "" {
+		t.Fatalf("spoofed identity survived: user=%q org=%q trusted=%q trustedOrg=%q role=%q session=%q", userID, organizationID, authenticatedUserID, trustedOrganizationID, trustedRole, trustedSession)
 	}
 }
 
 func TestValidSessionOverridesSpoofedIdentity(t *testing.T) {
 	t.Parallel()
-	var userID, organizationID, authenticatedUserID string
+	var userID, organizationID, authenticatedUserID, trustedOrganizationID, trustedRole, trustedSession string
 	next := http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		userID, organizationID = request.Header.Get("X-Demo-User-ID"), request.Header.Get("X-Organization-ID")
 		authenticatedUserID = request.Header.Get(AuthenticatedUserHeader)
+		trustedOrganizationID = request.Header.Get(AuthenticatedOrganizationHeader)
+		trustedRole = request.Header.Get(AuthenticatedRoleHeader)
+		trustedSession = request.Header.Get(AuthenticatedSessionHeader)
 		response.WriteHeader(http.StatusNoContent)
 	})
-	store := &stubStore{sessionIdentity: Identity{UserID: "user-1", OrganizationID: "org-1"}}
+	store := &stubStore{sessionIdentity: Identity{UserID: "user-1", OrganizationID: "org-1", Role: "ADMIN"}}
 	handler := testHandler(next, store, &stubProvider{}, false)
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/requests", nil)
 	request.Header.Set("X-Demo-User-ID", "attacker")
@@ -180,8 +190,9 @@ func TestValidSessionOverridesSpoofedIdentity(t *testing.T) {
 
 	handler.ServeHTTP(response, request)
 
-	if userID != "user-1" || organizationID != "org-1" || authenticatedUserID != "user-1" {
-		t.Fatalf("session identity missing: user=%q org=%q trusted=%q", userID, organizationID, authenticatedUserID)
+	expectedSession := base64.RawURLEncoding.EncodeToString(hashToken("raw-session-token"))
+	if userID != "user-1" || organizationID != "org-1" || authenticatedUserID != "user-1" || trustedOrganizationID != "org-1" || trustedRole != "ADMIN" || trustedSession != expectedSession {
+		t.Fatalf("session identity missing: user=%q org=%q trusted=%q trustedOrg=%q role=%q session=%q", userID, organizationID, authenticatedUserID, trustedOrganizationID, trustedRole, trustedSession)
 	}
 }
 

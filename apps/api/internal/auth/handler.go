@@ -13,9 +13,12 @@ import (
 )
 
 const (
-	flowCookieName          = "negotiable_oauth_flow"
-	sessionCookieName       = "negotiable_session"
-	AuthenticatedUserHeader = "X-Negotiable-Authenticated-User-ID"
+	flowCookieName                  = "negotiable_oauth_flow"
+	sessionCookieName               = "negotiable_session"
+	AuthenticatedUserHeader         = "X-Negotiable-Authenticated-User-ID"
+	AuthenticatedOrganizationHeader = "X-Negotiable-Authenticated-Organization-ID"
+	AuthenticatedRoleHeader         = "X-Negotiable-Authenticated-Role"
+	AuthenticatedSessionHeader      = "X-Negotiable-Authenticated-Session-Hash"
 )
 
 type HandlerConfig struct {
@@ -70,10 +73,18 @@ func (handler *Handler) ServeHTTP(response http.ResponseWriter, request *http.Re
 	if strings.HasPrefix(request.URL.Path, "/api/v1/") {
 		cloned := request.Clone(request.Context())
 		cloned.Header.Del(AuthenticatedUserHeader)
+		cloned.Header.Del(AuthenticatedOrganizationHeader)
+		cloned.Header.Del(AuthenticatedRoleHeader)
+		cloned.Header.Del(AuthenticatedSessionHeader)
 		if authenticated {
 			cloned.Header.Set("X-Demo-User-ID", identity.UserID)
 			cloned.Header.Set("X-Organization-ID", identity.OrganizationID)
 			cloned.Header.Set(AuthenticatedUserHeader, identity.UserID)
+			cloned.Header.Set(AuthenticatedOrganizationHeader, identity.OrganizationID)
+			cloned.Header.Set(AuthenticatedRoleHeader, identity.Role)
+			if cookie, err := request.Cookie(sessionCookieName); err == nil {
+				cloned.Header.Set(AuthenticatedSessionHeader, base64.RawURLEncoding.EncodeToString(hashToken(cookie.Value)))
+			}
 		} else if !handler.config.DemoMode {
 			cloned.Header.Del("X-Demo-User-ID")
 			cloned.Header.Del("X-Organization-ID")

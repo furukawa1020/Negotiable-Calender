@@ -91,11 +91,11 @@ RETURNING id,user_id,state_hash,code_verifier,expires_at,created_at`,
 
 func (store *PostgresStore) SaveConnection(ctx context.Context, value Connection) error {
 	_, err := store.database.ExecContext(ctx, `INSERT INTO calendar_connections
-(user_id,refresh_token_cipher,granted_scopes,connected_at,last_synced_at,reconnect_required)
-VALUES ($1,$2,$3,$4,$5,$6)
+(user_id,refresh_token_cipher,granted_scopes,connected_at,last_synced_at,reconnect_required,next_attempt_at,last_error_code,failure_count,sync_token)
+VALUES ($1,$2,$3,$4,$5,$6,$4,'',0,'')
 ON CONFLICT (user_id) DO UPDATE SET refresh_token_cipher=EXCLUDED.refresh_token_cipher,
 granted_scopes=EXCLUDED.granted_scopes, connected_at=EXCLUDED.connected_at,
-reconnect_required=false`, value.UserID, value.RefreshTokenCipher, strings.Join(value.GrantedScopes, " "), value.ConnectedAt, value.LastSyncedAt, value.ReconnectRequired)
+reconnect_required=false,next_attempt_at=EXCLUDED.connected_at,last_error_code='',failure_count=0,sync_token=''`, value.UserID, value.RefreshTokenCipher, strings.Join(value.GrantedScopes, " "), value.ConnectedAt, value.LastSyncedAt, value.ReconnectRequired)
 	if err != nil {
 		return fmt.Errorf("save calendar connection: %w", err)
 	}
@@ -106,8 +106,11 @@ func (store *PostgresStore) GetConnection(ctx context.Context, userID string) (C
 	var value Connection
 	var scopes string
 	err := store.database.QueryRowContext(ctx, `SELECT user_id,refresh_token_cipher,granted_scopes,
-connected_at,last_synced_at,reconnect_required FROM calendar_connections WHERE user_id=$1`, userID).
-		Scan(&value.UserID, &value.RefreshTokenCipher, &scopes, &value.ConnectedAt, &value.LastSyncedAt, &value.ReconnectRequired)
+connected_at,last_synced_at,last_attempt_at,next_attempt_at,last_error_code,failure_count,sync_token,reconnect_required
+FROM calendar_connections WHERE user_id=$1`, userID).
+		Scan(&value.UserID, &value.RefreshTokenCipher, &scopes, &value.ConnectedAt, &value.LastSyncedAt,
+			&value.LastAttemptAt, &value.NextAttemptAt, &value.LastErrorCode, &value.FailureCount,
+			&value.SyncToken, &value.ReconnectRequired)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Connection{}, ErrNotFound
 	}
@@ -115,6 +118,7 @@ connected_at,last_synced_at,reconnect_required FROM calendar_connections WHERE u
 		return Connection{}, fmt.Errorf("get calendar connection: %w", err)
 	}
 	value.GrantedScopes = strings.Fields(scopes)
+	normalizeConnectionTimes(&value)
 	return value, nil
 }
 

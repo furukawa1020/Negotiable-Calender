@@ -49,11 +49,14 @@ func TestCalendarProviderExchangesRefreshTokenAndRedactsEventDetails(t *testing.
 			if fields := request.URL.Query().Get("fields"); strings.Contains(fields, "summary") || strings.Contains(fields, "description") {
 				t.Errorf("private fields requested: %s", fields)
 			}
-			_ = json.NewEncoder(response).Encode(map[string]any{"items": []map[string]any{{
-				"id": "event-1", "summary": "Board secret", "description": "never store",
-				"start": map[string]string{"dateTime": "2026-09-03T09:00:00+09:00"},
-				"end":   map[string]string{"dateTime": "2026-09-03T10:00:00+09:00"},
-			}}}, "nextSyncToken": "sync-1"})
+			_ = json.NewEncoder(response).Encode(map[string]any{
+				"items": []map[string]any{{
+					"id": "event-1", "summary": "Board secret", "description": "never store",
+					"start": map[string]string{"dateTime": "2026-09-03T09:00:00+09:00"},
+					"end":   map[string]string{"dateTime": "2026-09-03T10:00:00+09:00"},
+				}},
+				"nextSyncToken": "sync-1",
+			})
 		}
 	}))
 	defer server.Close()

@@ -3,6 +3,7 @@ package calendar
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -52,7 +53,7 @@ func TestCalendarProviderExchangesRefreshTokenAndRedactsEventDetails(t *testing.
 				"id": "event-1", "summary": "Board secret", "description": "never store",
 				"start": map[string]string{"dateTime": "2026-09-03T09:00:00+09:00"},
 				"end":   map[string]string{"dateTime": "2026-09-03T10:00:00+09:00"},
-			}}})
+			}}}, "nextSyncToken": "sync-1"})
 		}
 	}))
 	defer server.Close()
@@ -75,5 +76,66 @@ func TestCalendarProviderExchangesRefreshTokenAndRedactsEventDetails(t *testing.
 	}
 	if spans[0].StartAt.Location() != time.UTC {
 		t.Fatal("busy span not normalized to UTC")
+	}
+}
+
+
+func TestCalendarProviderUsesIncrementalCursorAndDeletesCancelledInstances(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.URL.Query().Get("syncToken") != "sync-old" {
+			t.Errorf("syncToken = %q", request.URL.Query().Get("syncToken"))
+		}
+		if request.URL.Query().Get("timeMin") != "" || request.URL.Query().Get("timeMax") != "" {
+			t.Error("incremental request included incompatible time bounds")
+		}
+		_ = json.NewEncoder(response).Encode(map[string]any{
+			"items": []map[string]any{
+				{"id": "deleted-instance", "status": "cancelled"},
+				{"id": "changed-instance", "start": map[string]string{"dateTime": "2026-09-03T09:00:00+09:00"}, "end": map[string]string{"dateTime": "2026-09-03T10:00:00+09:00"}},
+			},
+			"nextSyncToken": "sync-new",
+		})
+	}))
+	defer server.Close()
+	provider := NewGoogleProvider(GoogleConfig{ClientID: "client", RedirectURL: "https://app.example/callback"}, server.Client())
+	provider.eventsURL = server.URL
+	changes, err := provider.ListChanges(context.Background(), "access", "sync-old", time.Time{}, time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changes.Full || changes.NextSyncToken != "sync-new" || len(changes.Upserts) != 1 {
+		t.Fatalf("unexpected changes %#v", changes)
+	}
+	if len(changes.DeletedProviderEventIDs) != 1 || changes.DeletedProviderEventIDs[0] != "deleted-instance" {
+		t.Fatalf("deleted instances = %#v", changes.DeletedProviderEventIDs)
+	}
+}
+
+func TestCalendarProviderReportsExpiredSyncCursor(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		response.WriteHeader(http.StatusGone)
+	}))
+	defer server.Close()
+	provider := NewGoogleProvider(GoogleConfig{ClientID: "client", RedirectURL: "https://app.example/callback"}, server.Client())
+	provider.eventsURL = server.URL
+	_, err := provider.ListChanges(context.Background(), "access", "expired", time.Time{}, time.Time{})
+	if !errors.Is(err, ErrSyncTokenExpired) {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestCalendarRefreshClassifiesRevokedGrant(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		response.WriteHeader(http.StatusBadRequest)
+	}))
+	defer server.Close()
+	provider := NewGoogleProvider(GoogleConfig{ClientID: "client", RedirectURL: "https://app.example/callback"}, server.Client())
+	provider.tokenURL = server.URL
+	_, err := provider.Refresh(context.Background(), "revoked")
+	if !errors.Is(err, ErrReconnectRequired) {
+		t.Fatalf("error = %v", err)
 	}
 }

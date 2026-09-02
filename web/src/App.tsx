@@ -91,6 +91,9 @@ type CalendarConnection = {
   grantedScopes: string[]
   connectedAt: string
   lastSyncedAt?: string
+  lastAttemptAt?: string
+  nextAttemptAt?: string
+  lastErrorCode?: string
   reconnectRequired: boolean
 }
 
@@ -884,7 +887,13 @@ function App() {
                     ) : null}
                     {calendarConnection ? (
                       <>
-                        <span>{calendarConnection.reconnectRequired ? 'Calendarの再接続が必要です' : 'Calendar 接続済み'}{calendarConnection.lastSyncedAt ? ` · 最終同期 ${formatDateTime(calendarConnection.lastSyncedAt)}` : ''}</span>
+                        <span>{calendarConnection.reconnectRequired ? 'Calendarの再接続が必要です' : 'Calendar 自動同期中'}{calendarConnection.lastSyncedAt ? ` · 最終成功 ${formatDateTime(calendarConnection.lastSyncedAt)}` : ''}</span>
+                        {!calendarConnection.reconnectRequired && calendarConnection.lastErrorCode ? (
+                          <span role="status">前回の自動同期に失敗しました（{calendarConnection.lastErrorCode}）。{calendarConnection.nextAttemptAt ? `次回 ${formatDateTime(calendarConnection.nextAttemptAt)}` : '自動で再試行します。'}</span>
+                        ) : null}
+                        {!calendarConnection.reconnectRequired && !calendarConnection.lastErrorCode && calendarConnection.nextAttemptAt ? (
+                          <span>次回の自動同期 {formatDateTime(calendarConnection.nextAttemptAt)}</span>
+                        ) : null}
                         {calendarConnection.reconnectRequired ? (
                           <a href={`${apiURL}/api/v1/calendar/google/connect`}>Google Calendarを再接続</a>
                         ) : (

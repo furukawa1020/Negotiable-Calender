@@ -42,3 +42,18 @@ type ChangeSet struct {
 	NextSyncToken           string
 	Full                    bool
 }
+
+
+type PrivateEventView struct {
+	ID            string     `json:"id"`
+	Title         string     `json:"title"`
+	Description   string     `json:"description,omitempty"`
+	Location      string     `json:"location,omitempty"`
+	Attendees     []string   `json:"attendees,omitempty"`
+	ConferenceURL string     `json:"conferenceUrl,omitempty"`
+	StartAt       *time.Time `json:"startAt,omitempty"`
+	EndAt         *time.Time `json:"endAt,omitempty"`
+	StartDate     string     `json:"startDate,omitempty"`
+	EndDate       string     `json:"endDate,omitempty"`
+	AllDay        bool       `json:"allDay"`
+}

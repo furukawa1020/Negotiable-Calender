@@ -1,10 +1,10 @@
 import { type FormEvent, useEffect, useMemo, useState } from 'react'
 
 const demoPrivateEvents = [
-  { time: '09:00', label: 'Product Review', size: 'short' },
-  { time: '10:00', label: 'Customer Meeting', size: 'medium' },
-  { time: '11:30', label: 'Focus', size: 'large' },
-  { time: '13:00', label: 'Recruiting Interview', size: 'large' },
+  { id: 'demo-1', time: '09:00', label: 'Product Review', size: 'short', details: [] as string[] },
+  { id: 'demo-2', time: '10:00', label: 'Customer Meeting', size: 'medium', details: [] as string[] },
+  { id: 'demo-3', time: '11:30', label: 'Focus', size: 'large', details: [] as string[] },
+  { id: 'demo-4', time: '13:00', label: 'Recruiting Interview', size: 'large', details: [] as string[] },
 ]
 
 const initialProjections = [

@@ -50,7 +50,11 @@ describe('App', () => {
       }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({
         connected: true,
-        connection: { grantedScopes: ['https://www.googleapis.com/auth/calendar.readonly'], connectedAt: '2026-09-02T00:00:00Z', reconnectRequired: false },
+        connection: {
+          grantedScopes: ['https://www.googleapis.com/auth/calendar.readonly'],
+          connectedAt: '2026-09-02T00:00:00Z', reconnectRequired: false,
+          lastErrorCode: 'timeout', nextAttemptAt: '2026-09-02T00:15:00Z',
+        },
       }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ activeWorkspaceId: 'org-1', workspaces: [{ id: 'org-1', name: 'Person Workspace', role: 'OWNER' }] }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({
@@ -68,9 +72,10 @@ describe('App', () => {
 
     expect(await screen.findByRole('status')).toHaveTextContent('Google Calendarを接続しました')
     fireEvent.click(screen.getByRole('button', { name: '山田太郎のアカウントメニュー' }))
+    expect(screen.getByText(/前回の自動同期に失敗しました（timeout）/)).toBeInTheDocument()
     fireEvent.click(await screen.findByRole('button', { name: 'busy時間を同期' }))
 
-    expect(await screen.findByRole('status')).toHaveTextContent('3件のbusy時間を同期しました。予定名は保存していません。')
+    expect(await screen.findByText('Google Calendarから3件のbusy時間を同期しました。予定名は保存していません。')).toBeInTheDocument()
     expect(globalThis.fetch).toHaveBeenNthCalledWith(4, expect.stringContaining('/api/v1/calendar/sync'), { method: 'POST', credentials: 'include' })
     expect(globalThis.fetch).toHaveBeenNthCalledWith(
       5,

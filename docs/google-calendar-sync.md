@@ -23,3 +23,35 @@ After import, the API combines those private busy spans with the user's sharing
 policy and active manual overrides, then atomically replaces the public
 15-minute projections for that window. Manual overrides are applied last.
 Disconnecting deletes both the encrypted grant and imported busy spans.
+
+
+## Automatic incremental sync
+
+The API starts a bounded background worker when Google Calendar credentials and
+the token-encryption key are configured. New connections are scheduled
+immediately; successful connections are checked every 15 minutes.
+
+The first run imports the configured rolling window and saves Google's opaque
+sync cursor. Later runs use that cursor, upsert changed recurring instances, and
+delete cancelled instances. A `410 Gone` cursor expiry triggers one full-window
+recovery. Public projections are rebuilt before the new cursor is committed, so
+a failed rebuild is retried idempotently instead of publishing partial state.
+
+Workers claim due connections with PostgreSQL `FOR UPDATE SKIP LOCKED` and a
+two-minute lease, preventing concurrent API replicas from processing the same
+connection. Each Google operation is bounded by the worker timeout. Temporary
+failures use exponential backoff with deterministic jitter, capped at six
+hours. A revoked grant is excluded from future claims and the UI requests an
+explicit reconnect.
+
+The connection API exposes only sanitized health fields:
+
+- `lastSyncedAt`
+- `lastAttemptAt`
+- `nextAttemptAt`
+- `lastErrorCode`
+- `reconnectRequired`
+
+Refresh tokens remain AES-GCM encrypted. Access tokens, refresh tokens, sync
+cursors, raw Google responses, event titles, attendees, locations, and
+descriptions are never returned or logged.

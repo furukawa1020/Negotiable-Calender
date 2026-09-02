@@ -3,6 +3,7 @@ package calendar
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -12,6 +13,11 @@ import (
 
 const CalendarReadonlyScope = "https://www.googleapis.com/auth/calendar.readonly"
 
+var (
+	ErrReconnectRequired = errors.New("calendar reconnect required")
+	ErrSyncTokenExpired   = errors.New("calendar sync token expired")
+)
+
 type Provider interface {
 	Configured() bool
 	AuthorizationURL(state, challenge string) string
@@ -20,12 +26,25 @@ type Provider interface {
 	ListBusy(context.Context, string, time.Time, time.Time) ([]BusySpan, error)
 }
 
+type IncrementalProvider interface {
+	ListChanges(context.Context, string, string, time.Time, time.Time) (ChangeSet, error)
+}
+
 type GoogleConfig struct{ ClientID, ClientSecret, RedirectURL string }
 
 type GoogleProvider struct {
 	config                       GoogleConfig
 	client                       *http.Client
 	authURL, tokenURL, eventsURL string
+}
+
+type providerStatusError struct {
+	service string
+	status  int
+}
+
+func (value providerStatusError) Error() string {
+	return fmt.Sprintf("%s endpoint returned %d", value.service, value.status)
 }
 
 func NewGoogleProvider(config GoogleConfig, client *http.Client) *GoogleProvider {
@@ -53,7 +72,12 @@ func (provider *GoogleProvider) Exchange(ctx context.Context, code, verifier str
 }
 
 func (provider *GoogleProvider) Refresh(ctx context.Context, refreshToken string) (TokenSet, error) {
-	return provider.token(ctx, url.Values{"grant_type": {"refresh_token"}, "refresh_token": {refreshToken}})
+	tokens, err := provider.token(ctx, url.Values{"grant_type": {"refresh_token"}, "refresh_token": {refreshToken}})
+	var statusErr providerStatusError
+	if errors.As(err, &statusErr) && (statusErr.status == http.StatusBadRequest || statusErr.status == http.StatusUnauthorized) {
+		return TokenSet{}, fmt.Errorf("%w: token refresh rejected", ErrReconnectRequired)
+	}
+	return tokens, err
 }
 
 func (provider *GoogleProvider) token(ctx context.Context, form url.Values) (TokenSet, error) {
@@ -72,7 +96,7 @@ func (provider *GoogleProvider) token(ctx context.Context, form url.Values) (Tok
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return TokenSet{}, fmt.Errorf("calendar token endpoint returned %s", response.Status)
+		return TokenSet{}, providerStatusError{service: "calendar token", status: response.StatusCode}
 	}
 	var body struct {
 		AccessToken  string `json:"access_token"`
@@ -90,30 +114,54 @@ func (provider *GoogleProvider) token(ctx context.Context, form url.Values) (Tok
 }
 
 func (provider *GoogleProvider) ListBusy(ctx context.Context, accessToken string, from, to time.Time) ([]BusySpan, error) {
-	query := url.Values{"timeMin": {from.Format(time.RFC3339)}, "timeMax": {to.Format(time.RFC3339)},
-		"singleEvents": {"true"}, "showDeleted": {"false"}, "maxResults": {"2500"},
-		"fields": {"items(id,start,end,transparency,status),nextPageToken"}}
-	next := ""
-	result := []BusySpan{}
+	changes, err := provider.ListChanges(ctx, accessToken, "", from, to)
+	return changes.Upserts, err
+}
+
+func (provider *GoogleProvider) ListChanges(ctx context.Context, accessToken, syncToken string, from, to time.Time) (ChangeSet, error) {
+	query := url.Values{
+		"singleEvents": {"true"}, "showDeleted": {"true"}, "maxResults": {"2500"},
+		"fields": {"items(id,start,end,transparency,status),nextPageToken,nextSyncToken"},
+	}
+	full := syncToken == ""
+	if full {
+		query.Set("timeMin", from.Format(time.RFC3339))
+		query.Set("timeMax", to.Format(time.RFC3339))
+	} else {
+		query.Set("syncToken", syncToken)
+	}
+
+	nextPage := ""
+	result := ChangeSet{Full: full, Upserts: []BusySpan{}, DeletedProviderEventIDs: []string{}}
 	for {
-		if next != "" {
-			query.Set("pageToken", next)
+		if nextPage != "" {
+			query.Set("pageToken", nextPage)
 		}
 		request, err := http.NewRequestWithContext(ctx, http.MethodGet, provider.eventsURL+"?"+query.Encode(), nil)
 		if err != nil {
-			return nil, fmt.Errorf("create events request: %w", err)
+			return ChangeSet{}, fmt.Errorf("create events request: %w", err)
 		}
 		request.Header.Set("Authorization", "Bearer "+accessToken)
 		response, err := provider.client.Do(request)
 		if err != nil {
-			return nil, fmt.Errorf("list calendar events: %w", err)
+			return ChangeSet{}, fmt.Errorf("list calendar events: %w", err)
+		}
+		if response.StatusCode == http.StatusGone && !full {
+			response.Body.Close()
+			return ChangeSet{}, ErrSyncTokenExpired
+		}
+		if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden {
+			response.Body.Close()
+			return ChangeSet{}, ErrReconnectRequired
 		}
 		if response.StatusCode != http.StatusOK {
+			status := response.StatusCode
 			response.Body.Close()
-			return nil, fmt.Errorf("calendar events endpoint returned %s", response.Status)
+			return ChangeSet{}, providerStatusError{service: "calendar events", status: status}
 		}
 		var body struct {
 			NextPageToken string `json:"nextPageToken"`
+			NextSyncToken string `json:"nextSyncToken"`
 			Items         []struct {
 				ID, Transparency, Status string
 				Start, End               struct{ DateTime, Date string }
@@ -122,10 +170,16 @@ func (provider *GoogleProvider) ListBusy(ctx context.Context, accessToken string
 		err = json.NewDecoder(response.Body).Decode(&body)
 		response.Body.Close()
 		if err != nil {
-			return nil, fmt.Errorf("decode calendar events: %w", err)
+			return ChangeSet{}, fmt.Errorf("decode calendar events: %w", err)
 		}
 		for _, item := range body.Items {
+			if item.ID == "" {
+				continue
+			}
 			if item.Status == "cancelled" {
+				if !full {
+					result.DeletedProviderEventIDs = append(result.DeletedProviderEventIDs, item.ID)
+				}
 				continue
 			}
 			start, err := googleTime(item.Start.DateTime, item.Start.Date)
@@ -136,12 +190,16 @@ func (provider *GoogleProvider) ListBusy(ctx context.Context, accessToken string
 			if err != nil || !end.After(start) {
 				continue
 			}
-			result = append(result, BusySpan{ProviderEventID: item.ID, CalendarID: "primary", StartAt: start, EndAt: end, Busy: item.Transparency != "transparent"})
+			result.Upserts = append(result.Upserts, BusySpan{ProviderEventID: item.ID, CalendarID: "primary", StartAt: start, EndAt: end, Busy: item.Transparency != "transparent"})
 		}
 		if body.NextPageToken == "" {
+			if body.NextSyncToken == "" {
+				return ChangeSet{}, fmt.Errorf("calendar events response missing next sync token")
+			}
+			result.NextSyncToken = body.NextSyncToken
 			return result, nil
 		}
-		next = body.NextPageToken
+		nextPage = body.NextPageToken
 	}
 }
 

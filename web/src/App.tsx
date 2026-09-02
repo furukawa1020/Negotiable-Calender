@@ -276,6 +276,7 @@ function App() {
   const [policySaving, setPolicySaving] = useState(false)
   const [sharingPolicy, setSharingPolicy] = useState<SharingPolicyDraft>(defaultSharingPolicy)
   const [authUser, setAuthUser] = useState<AuthUser | null>(null)
+  const [demoMode, setDemoMode] = useState(import.meta.env.DEV)
   const [calendarConnection, setCalendarConnection] = useState<CalendarConnection | null>(null)
   const [calendarBusy, setCalendarBusy] = useState(false)
   const [workspaces, setWorkspaces] = useState<Workspace[]>([])
@@ -297,12 +298,13 @@ function App() {
     const authCompleted = params.get('auth') === 'success'
     const calendarCompleted = params.get('calendar') === 'connected'
     const incomingInvitation = params.get('invite') ?? ''
-    if (!authCompleted && !calendarCompleted && !incomingInvitation) return
+    if (!authCompleted && !calendarCompleted && !incomingInvitation && import.meta.env.DEV) return
     const loadSession = async () => {
       try {
         const response = await apiFetch(`${apiURL}/api/v1/auth/session`)
         if (!response.ok) throw new Error('session failed')
-        const payload = await response.json() as { authenticated: boolean; user?: AuthUser }
+        const payload = await response.json() as { authenticated: boolean; demoMode?: boolean; user?: AuthUser }
+        setDemoMode(payload.demoMode === true)
         if (payload.authenticated && payload.user) {
           setAuthUser(payload.user)
           if (authCompleted) setNotice('Googleアカウントでログインしました。')
@@ -385,7 +387,9 @@ function App() {
     setSelectedPrivateEventID('')
   }
 
-  const privateRows = authUser ? privateCalendarEvents.map((event) => privateEventRow(event, calendarView)) : demoPrivateEvents
+  const privateRows = authUser
+    ? privateCalendarEvents.map((event) => privateEventRow(event, calendarView))
+    : demoMode ? demoPrivateEvents : []
 
   const submitRequest = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -943,6 +947,20 @@ function App() {
       setNotice(`${payload.activeWorkspace.name} に参加しました。`)
     } catch { setNotice('招待を受諾できませんでした。') }
     finally { setWorkspaceBusy(false) }
+  }
+
+  if (!authUser && !demoMode) {
+    return (
+      <div className="app-shell">
+        <main className="signin-gate">
+          <span className="brand-mark" aria-hidden="true">N</span>
+          <p className="eyebrow">NEGOTIABLE CALENDAR</p>
+          <h1>予定を見せずに、予定を共有する。</h1>
+          <p className="hero-copy">本人確認後に、あなたのカレンダーと組織の調整状態を表示します。</p>
+          <a className="primary-button" href={`${apiURL}/api/v1/auth/google/login`}>Googleでログイン</a>
+        </main>
+      </div>
+    )
   }
 
   return (

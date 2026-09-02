@@ -94,6 +94,15 @@ type CalendarConnection = {
   reconnectRequired: boolean
 }
 
+type Workspace = { id: string; name: string; role: string }
+type InvitationPreview = {
+  invitationId: string
+  organizationId: string
+  organizationName: string
+  role: string
+  expiresAt: string
+}
+
 type InteractionState = {
   availability: 'available' | 'limited' | 'unavailable' | 'unknown'
   interruptibility: 'open' | 'normal' | 'urgent_only' | 'do_not_interrupt'
@@ -180,6 +189,12 @@ function App() {
   const [authUser, setAuthUser] = useState<AuthUser | null>(null)
   const [calendarConnection, setCalendarConnection] = useState<CalendarConnection | null>(null)
   const [calendarBusy, setCalendarBusy] = useState(false)
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([])
+  const [invitationToken, setInvitationToken] = useState('')
+  const [invitationPreview, setInvitationPreview] = useState<InvitationPreview | null>(null)
+  const [inviteRole, setInviteRole] = useState('MEMBER')
+  const [inviteURL, setInviteURL] = useState('')
+  const [workspaceBusy, setWorkspaceBusy] = useState(false)
   const visibleDate = useMemo(() => {
     const value = new Date()
     value.setDate(value.getDate() + dayOffset)
@@ -197,7 +212,8 @@ function App() {
     const params = new URLSearchParams(window.location.search)
     const authCompleted = params.get('auth') === 'success'
     const calendarCompleted = params.get('calendar') === 'connected'
-    if (!authCompleted && !calendarCompleted) return
+    const incomingInvitation = params.get('invite') ?? ''
+    if (!authCompleted && !calendarCompleted && !incomingInvitation) return
     const loadSession = async () => {
       try {
         const response = await apiFetch(`${apiURL}/api/v1/auth/session`)
@@ -212,11 +228,25 @@ function App() {
             const calendarPayload = await calendarResponse.json() as { connected: boolean; connection?: CalendarConnection }
             setCalendarConnection(calendarPayload.connected ? calendarPayload.connection ?? null : null)
           }
+          const workspaceResponse = await apiFetch(`${apiURL}/api/v1/workspaces`)
+          if (workspaceResponse.ok) {
+            const workspacePayload = await workspaceResponse.json() as { workspaces: Workspace[] }
+            setWorkspaces(workspacePayload.workspaces)
+          }
+          if (incomingInvitation) {
+            setInvitationToken(incomingInvitation)
+            const invitationResponse = await apiFetch(`${apiURL}/api/v1/invitations/preview`, {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ token: incomingInvitation }),
+            })
+            if (invitationResponse.ok) setInvitationPreview(await invitationResponse.json() as InvitationPreview)
+            else setNotice('招待リンクは無効、期限切れ、または使用済みです。')
+          }
         }
       } catch {
         if (authCompleted || calendarCompleted) setNotice('ログイン状態を確認できませんでした。')
       } finally {
-        if (authCompleted || calendarCompleted) window.history.replaceState({}, '', window.location.pathname)
+        if (authCompleted || calendarCompleted || incomingInvitation) window.history.replaceState({}, '', window.location.pathname)
       }
     }
     void loadSession()
@@ -740,6 +770,59 @@ function App() {
     }
   }
 
+  const createInvitation = async () => {
+    setWorkspaceBusy(true)
+    try {
+      const response = await apiFetch(`${apiURL}/api/v1/workspaces/${activeOrganizationID}/invitations`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ role: inviteRole }),
+      })
+      if (!response.ok) throw new Error('invite failed')
+      const payload = await response.json() as { inviteUrl: string }
+      setInviteURL(payload.inviteUrl)
+      try { await navigator.clipboard?.writeText(payload.inviteUrl) } catch { /* link remains visible for manual copy */ }
+      setNotice('一回限りの招待リンクを作成しました。')
+    } catch { setNotice('招待リンクを作成できませんでした。権限を確認してください。') }
+    finally { setWorkspaceBusy(false) }
+  }
+
+  const switchWorkspace = async (organizationId: string) => {
+    if (organizationId === activeOrganizationID) return
+    setWorkspaceBusy(true)
+    try {
+      const response = await apiFetch(`${apiURL}/api/v1/workspaces/switch`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ organizationId }),
+      })
+      if (!response.ok) throw new Error('switch failed')
+      const payload = await response.json() as { activeWorkspace: Workspace }
+      setAuthUser((current) => current ? { ...current, organizationId: payload.activeWorkspace.id, role: payload.activeWorkspace.role } : current)
+      setNotice(`${payload.activeWorkspace.name} に切り替えました。`)
+    } catch { setNotice('Workspaceを切り替えられませんでした。') }
+    finally { setWorkspaceBusy(false) }
+  }
+
+  const acceptInvitation = async () => {
+    if (!invitationPreview || !invitationToken) return
+    setWorkspaceBusy(true)
+    try {
+      const accepted = await apiFetch(`${apiURL}/api/v1/invitations/accept`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: invitationToken }),
+      })
+      if (!accepted.ok) throw new Error('accept failed')
+      const switched = await apiFetch(`${apiURL}/api/v1/workspaces/switch`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ organizationId: invitationPreview.organizationId }),
+      })
+      if (!switched.ok) throw new Error('switch failed')
+      const payload = await switched.json() as { activeWorkspace: Workspace }
+      setAuthUser((current) => current ? { ...current, organizationId: payload.activeWorkspace.id, role: payload.activeWorkspace.role } : current)
+      setWorkspaces((current) => [...current.filter((item) => item.id !== payload.activeWorkspace.id), payload.activeWorkspace])
+      setInvitationPreview(null)
+      setInvitationToken('')
+      setNotice(`${payload.activeWorkspace.name} に参加しました。`)
+    } catch { setNotice('招待を受諾できませんでした。') }
+    finally { setWorkspaceBusy(false) }
+  }
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -783,6 +866,22 @@ function App() {
                 <span>{authUser ? `${authUser.role} · ${authUser.email}` : 'Manager · Demo mode'}</span>
                 {authUser ? (
                   <>
+                    {workspaces.length > 0 ? (
+                      <select aria-label="Workspace" value={activeOrganizationID} disabled={workspaceBusy} onChange={(event) => void switchWorkspace(event.target.value)}>
+                        {workspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name} · {workspace.role}</option>)}
+                      </select>
+                    ) : null}
+                    {authUser.role === 'OWNER' || authUser.role === 'ADMIN' ? (
+                      <div className="invite-controls">
+                        <select aria-label="招待する役割" value={inviteRole} onChange={(event) => setInviteRole(event.target.value)}>
+                          {authUser.role === 'OWNER' ? <option value="ADMIN">ADMIN</option> : null}
+                          <option value="MANAGER">MANAGER</option>
+                          <option value="MEMBER">MEMBER</option>
+                        </select>
+                        <button type="button" onClick={createInvitation} disabled={workspaceBusy}>招待リンクを作成</button>
+                        {inviteURL ? <input aria-label="招待リンク" readOnly value={inviteURL} /> : null}
+                      </div>
+                    ) : null}
                     {calendarConnection ? (
                       <>
                         <span>{calendarConnection.reconnectRequired ? 'Calendarの再接続が必要です' : 'Calendar 接続済み'}{calendarConnection.lastSyncedAt ? ` · 最終同期 ${formatDateTime(calendarConnection.lastSyncedAt)}` : ''}</span>
@@ -809,6 +908,13 @@ function App() {
       </header>
 
       <main id="top">
+        {invitationPreview ? (
+          <section className="privacy-note" aria-label="Workspace招待">
+            <ShieldIcon />
+            <div><strong>{invitationPreview.organizationName} への招待</strong><span>付与される役割: {invitationPreview.role}</span></div>
+            <button type="button" onClick={acceptInvitation} disabled={workspaceBusy}>{workspaceBusy ? '参加中…' : '招待を受諾'}</button>
+          </section>
+        ) : null}
         {currentView === 'calendar' ? (
         <>
         <section className="hero" aria-labelledby="page-title">

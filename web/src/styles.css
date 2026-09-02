@@ -274,6 +274,22 @@ a:focus-visible {
   text-decoration: none;
 }
 
+.account-menu select,
+.account-menu input {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 11px;
+}
+
+.invite-controls {
+  display: grid;
+  gap: 5px;
+}
+
 .rule-list select {
   min-width: 128px;
   padding: 8px 10px;

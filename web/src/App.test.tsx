@@ -25,6 +25,7 @@ describe('App', () => {
         user: { userId: 'user-1', organizationId: 'org-1', email: 'person@example.com', displayName: 'Person', role: 'OWNER' },
       }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ connected: false }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ activeWorkspaceId: 'org-1', workspaces: [{ id: 'org-1', name: 'Person Workspace', role: 'OWNER' }] }), { status: 200 }))
       .mockResolvedValueOnce(new Response(null, { status: 204 }))
     render(<App />)
 
@@ -37,7 +38,7 @@ describe('App', () => {
     expect(await screen.findByRole('status')).toHaveTextContent('ログアウトしました。')
     expect(globalThis.fetch).toHaveBeenNthCalledWith(1, expect.stringContaining('/api/v1/auth/session'), { credentials: 'include' })
     expect(globalThis.fetch).toHaveBeenNthCalledWith(2, expect.stringContaining('/api/v1/calendar/connection'), { credentials: 'include' })
-    expect(globalThis.fetch).toHaveBeenNthCalledWith(3, expect.stringContaining('/api/v1/auth/logout'), { method: 'POST', credentials: 'include' })
+    expect(globalThis.fetch).toHaveBeenNthCalledWith(4, expect.stringContaining('/api/v1/auth/logout'), { method: 'POST', credentials: 'include' })
   })
 
   it('shows a connected Calendar and manually syncs privacy-safe busy spans', async () => {
@@ -51,6 +52,7 @@ describe('App', () => {
         connected: true,
         connection: { grantedScopes: ['https://www.googleapis.com/auth/calendar.readonly'], connectedAt: '2026-09-02T00:00:00Z', reconnectRequired: false },
       }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ activeWorkspaceId: 'org-1', workspaces: [{ id: 'org-1', name: 'Person Workspace', role: 'OWNER' }] }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({
         synced: true, busySpanCount: 3, lastSyncedAt: '2026-09-02T01:00:00Z',
       }), { status: 200 }))
@@ -69,11 +71,43 @@ describe('App', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'busy時間を同期' }))
 
     expect(await screen.findByRole('status')).toHaveTextContent('3件のbusy時間を同期しました。予定名は保存していません。')
-    expect(globalThis.fetch).toHaveBeenNthCalledWith(3, expect.stringContaining('/api/v1/calendar/sync'), { method: 'POST', credentials: 'include' })
+    expect(globalThis.fetch).toHaveBeenNthCalledWith(4, expect.stringContaining('/api/v1/calendar/sync'), { method: 'POST', credentials: 'include' })
     expect(globalThis.fetch).toHaveBeenNthCalledWith(
-      4,
+      5,
       expect.stringContaining('/api/v1/people/user-1/projection'),
       expect.objectContaining({ credentials: 'include' }),
+    )
+  })
+
+  it('previews and accepts a Workspace invitation, then switches the session', async () => {
+    window.history.replaceState({}, '', '/?invite=abcdefghijklmnopqrstuvwxyz-0123456789')
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        authenticated: true,
+        user: { userId: 'user-2', organizationId: 'personal-org', email: 'member@example.com', displayName: 'Member', role: 'OWNER' },
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ connected: false }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        activeWorkspaceId: 'personal-org', workspaces: [{ id: 'personal-org', name: 'Personal', role: 'OWNER' }],
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        invitationId: 'invite-1', organizationId: 'shared-org', organizationName: 'Shared Team', role: 'MEMBER', expiresAt: '2026-09-04T00:00:00Z',
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        accepted: true, workspace: { id: 'shared-org', name: 'Shared Team', role: 'MEMBER' },
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        activeWorkspace: { id: 'shared-org', name: 'Shared Team', role: 'MEMBER' },
+      }), { status: 200 }))
+    render(<App />)
+
+    expect(await screen.findByText('Shared Team への招待')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '招待を受諾' }))
+    expect(await screen.findByRole('status')).toHaveTextContent('Shared Team に参加しました。')
+    expect(globalThis.fetch).toHaveBeenNthCalledWith(
+      6,
+      expect.stringContaining('/api/v1/workspaces/switch'),
+      expect.objectContaining({ method: 'POST', credentials: 'include' }),
     )
   })
   it('explains the privacy projection without exposing sample details as shared data', () => {

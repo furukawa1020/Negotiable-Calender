@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -229,7 +230,7 @@ func (handler *Handler) deleteAccount(response http.ResponseWriter, request *htt
 		return
 	}
 	var trailing any
-	if err := decoder.Decode(&trailing); err == nil {
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		writeJSON(response, http.StatusBadRequest, map[string]string{"error": "invalid confirmation"})
 		return
 	}

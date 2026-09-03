@@ -49,3 +49,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: docker compose config --quiet
+
+  deployment:
+    name: Production blueprint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate production invariants
+        shell: bash
+        run: |
+          grep -q 'healthCheckPath: /healthz' render.yaml
+          grep -q 'value: "false"' render.yaml
+          grep -q 'value: "true"' render.yaml
+          grep -q 'GOOGLE_CLIENT_SECRET' render.yaml
+          grep -q 'sync: false' render.yaml
+          grep -q 'generateValue: true' render.yaml
+          ! grep -Eq 'GOOGLE_CLIENT_SECRET:[[:space:]]+[^$]' render.yaml

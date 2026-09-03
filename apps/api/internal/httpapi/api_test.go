@@ -32,9 +32,10 @@ type stubPolicyStore struct {
 }
 
 type stubProjectionStore struct {
-	view   projection.View
-	values []projection.ScheduleProjection
-	err    error
+	view            projection.View
+	values          []projection.ScheduleProjection
+	invalidatedUser string
+	err             error
 }
 
 func (store *stubProjectionStore) List(context.Context, string, time.Time, time.Time) ([]projection.ScheduleProjection, error) {
@@ -43,6 +44,24 @@ func (store *stubProjectionStore) List(context.Context, string, time.Time, time.
 
 func (store *stubProjectionStore) ListForUser(context.Context, string) ([]projection.ScheduleProjection, error) {
 	return store.values, store.err
+}
+
+func (store *stubProjectionStore) DeleteForUser(_ context.Context, userID string) error {
+	store.invalidatedUser = userID
+	return store.err
+}
+
+type stubProjectionRebuilder struct {
+	userID string
+	from   time.Time
+	to     time.Time
+	now    time.Time
+	err    error
+}
+
+func (value *stubProjectionRebuilder) Rebuild(_ context.Context, userID string, from, to, now time.Time) error {
+	value.userID, value.from, value.to, value.now = userID, from, to, now
+	return value.err
 }
 
 type stubOrganizationStore struct {
@@ -331,6 +350,61 @@ func TestSharingPolicyPutThenGet(t *testing.T) {
 		if !strings.Contains(getResponse.Body.String(), expected) {
 			t.Fatalf("response missing %q: %s", expected, getResponse.Body)
 		}
+	}
+}
+
+func TestSharingPolicySaveRebuildsPublicProjection(t *testing.T) {
+	t.Parallel()
+	policyStore := &stubPolicyStore{err: policy.ErrNotFound}
+	projectionStore := &stubProjectionStore{}
+	rebuilder := &stubProjectionRebuilder{}
+	handler := NewWithStoresAndRebuilder(
+		stubDatabase{}, policyStore, projectionStore, &stubOrganizationStore{}, &stubRequestStore{},
+		&stubNotificationStore{}, &stubAuditStore{}, rebuilder, "", testLogger(),
+	)
+	body := `{
+  "default":{"availability":"limited","interruptibility":"urgent_only","requestability":"async_only","reschedulability":"low"},
+  "workingHours":[{"weekday":1,"startMinute":540,"endMinute":1080}],
+  "rules":[{"conditionType":"event","condition":{"busyStatus":"busy"},"state":{"availability":"unavailable","interruptibility":"do_not_interrupt","requestability":"closed","reschedulability":"fixed"},"priority":100,"enabled":true}]
+}`
+	request := httptest.NewRequest(http.MethodPut, "/api/v1/users/manager-1/sharing-policy", strings.NewReader(body))
+	request.Header.Set("X-Demo-User-ID", "manager-1")
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("save failed: %d %s", response.Code, response.Body.String())
+	}
+	if rebuilder.userID != "manager-1" || rebuilder.to.Sub(rebuilder.from) != 120*24*time.Hour {
+		t.Fatalf("projection was not rebuilt over the bounded horizon: %#v", rebuilder)
+	}
+	if projectionStore.invalidatedUser != "" {
+		t.Fatal("successful projection rebuild was invalidated")
+	}
+}
+
+func TestSharingPolicySaveInvalidatesProjectionWhenRebuildFails(t *testing.T) {
+	t.Parallel()
+	policyStore := &stubPolicyStore{err: policy.ErrNotFound}
+	projectionStore := &stubProjectionStore{}
+	rebuilder := &stubProjectionRebuilder{err: errors.New("projection rebuild failed")}
+	handler := NewWithStoresAndRebuilder(
+		stubDatabase{}, policyStore, projectionStore, &stubOrganizationStore{}, &stubRequestStore{},
+		&stubNotificationStore{}, &stubAuditStore{}, rebuilder, "", testLogger(),
+	)
+	body := `{"default":{"availability":"available","interruptibility":"normal","requestability":"open","reschedulability":"medium"},"workingHours":[],"rules":[]}`
+	request := httptest.NewRequest(http.MethodPut, "/api/v1/users/manager-1/sharing-policy", strings.NewReader(body))
+	request.Header.Set("X-Demo-User-ID", "manager-1")
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusServiceUnavailable || projectionStore.invalidatedUser != "manager-1" {
+		t.Fatalf("stale projection remained public: status=%d invalidated=%q", response.Code, projectionStore.invalidatedUser)
+	}
+	if policyStore.value.UserID != "manager-1" {
+		t.Fatal("validated policy was not persisted before fail-closed invalidation")
 	}
 }
 

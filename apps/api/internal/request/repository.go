@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -18,6 +19,7 @@ type Store interface {
 	GetForUser(context.Context, string, string) (CoordinationRequest, error)
 	Cancel(context.Context, string, string) error
 	Respond(context.Context, string, string, Status, string) error
+	RespondAsync(context.Context, string, string, string) error
 	Suggest(context.Context, string, string, Option) error
 	Delegate(context.Context, string, string, Option) error
 }
@@ -44,6 +46,7 @@ CREATE TABLE IF NOT EXISTS coordination_requests (
     sync_preference text NOT NULL,
     priority text NOT NULL,
     status text NOT NULL,
+    async_message text,
     created_at timestamptz NOT NULL,
     updated_at timestamptz NOT NULL
 );
@@ -65,6 +68,7 @@ CREATE INDEX IF NOT EXISTS coordination_request_options_request_idx
     ON coordination_request_options(request_id, created_at, id);
 ALTER TABLE coordination_requests ADD COLUMN IF NOT EXISTS accepted_option_id text;
 ALTER TABLE coordination_requests ADD COLUMN IF NOT EXISTS delegated_user_id text;
+ALTER TABLE coordination_requests ADD COLUMN IF NOT EXISTS async_message text;
 `
 	if _, err := database.ExecContext(ctx, schema); err != nil {
 		return fmt.Errorf("create coordination request schema: %w", err)
@@ -127,7 +131,7 @@ func (store *PostgresStore) listForUser(ctx context.Context, userID string, incl
 	rows, err := store.database.QueryContext(ctx, `
 SELECT id, organization_id, requester_user_id, target_user_id, type, title,
        duration_minutes, deadline_at, sync_preference, priority, status,
-       created_at, updated_at, accepted_option_id, delegated_user_id
+       created_at, updated_at, accepted_option_id, delegated_user_id, async_message
 FROM coordination_requests
 WHERE ($2 AND target_user_id = $1) OR ($3 AND requester_user_id = $1)
 ORDER BY created_at DESC, id DESC
@@ -139,12 +143,12 @@ ORDER BY created_at DESC, id DESC
 	values := make([]CoordinationRequest, 0)
 	for rows.Next() {
 		var value CoordinationRequest
-		var acceptedOptionID, delegatedUserID sql.NullString
+		var acceptedOptionID, delegatedUserID, asyncMessage sql.NullString
 		if err := rows.Scan(
 			&value.ID, &value.OrganizationID, &value.RequesterUserID, &value.TargetUserID,
 			&value.Type, &value.Title, &value.DurationMinutes, &value.DeadlineAt,
 			&value.SyncPreference, &value.Priority, &value.Status,
-			&value.CreatedAt, &value.UpdatedAt, &acceptedOptionID, &delegatedUserID,
+			&value.CreatedAt, &value.UpdatedAt, &acceptedOptionID, &delegatedUserID, &asyncMessage,
 		); err != nil {
 			return nil, fmt.Errorf("scan coordination request: %w", err)
 		}
@@ -153,6 +157,7 @@ ORDER BY created_at DESC, id DESC
 		value.UpdatedAt = value.UpdatedAt.UTC()
 		value.AcceptedOptionID = acceptedOptionID.String
 		value.DelegatedUserID = delegatedUserID.String
+		value.AsyncMessage = asyncMessage.String
 		value.Options = []Option{}
 		values = append(values, value)
 	}
@@ -174,18 +179,18 @@ ORDER BY created_at DESC, id DESC
 
 func (store *PostgresStore) GetForUser(ctx context.Context, requestID, userID string) (CoordinationRequest, error) {
 	var value CoordinationRequest
-	var acceptedOptionID, delegatedUserID sql.NullString
+	var acceptedOptionID, delegatedUserID, asyncMessage sql.NullString
 	err := store.database.QueryRowContext(ctx, `
 SELECT id, organization_id, requester_user_id, target_user_id, type, title,
        duration_minutes, deadline_at, sync_preference, priority, status,
-       created_at, updated_at, accepted_option_id, delegated_user_id
+       created_at, updated_at, accepted_option_id, delegated_user_id, async_message
 FROM coordination_requests
 WHERE id = $1 AND (requester_user_id = $2 OR target_user_id = $2)
 `, requestID, userID).Scan(
 		&value.ID, &value.OrganizationID, &value.RequesterUserID, &value.TargetUserID,
 		&value.Type, &value.Title, &value.DurationMinutes, &value.DeadlineAt,
 		&value.SyncPreference, &value.Priority, &value.Status,
-		&value.CreatedAt, &value.UpdatedAt, &acceptedOptionID, &delegatedUserID,
+		&value.CreatedAt, &value.UpdatedAt, &acceptedOptionID, &delegatedUserID, &asyncMessage,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return CoordinationRequest{}, ErrNotFound
@@ -198,6 +203,7 @@ WHERE id = $1 AND (requester_user_id = $2 OR target_user_id = $2)
 	value.UpdatedAt = value.UpdatedAt.UTC()
 	value.AcceptedOptionID = acceptedOptionID.String
 	value.DelegatedUserID = delegatedUserID.String
+	value.AsyncMessage = asyncMessage.String
 	value.Options, err = store.listOptions(ctx, value.ID)
 	if err != nil {
 		return CoordinationRequest{}, err
@@ -253,6 +259,29 @@ WHERE id = $3 AND target_user_id = $4 AND status = $5
 	updated, err := result.RowsAffected()
 	if err != nil {
 		return fmt.Errorf("count coordination request response: %w", err)
+	}
+	if updated == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (store *PostgresStore) RespondAsync(ctx context.Context, requestID, targetUserID, message string) error {
+	if err := ValidateAsyncMessage(message); err != nil {
+		return err
+	}
+	message = strings.TrimSpace(message)
+	result, err := store.database.ExecContext(ctx, `
+UPDATE coordination_requests
+SET status = $1, accepted_option_id = NULL, async_message = $2, updated_at = $3
+WHERE id = $4 AND target_user_id = $5 AND status = $6
+`, Async, message, time.Now().UTC(), requestID, targetUserID, Suggested)
+	if err != nil {
+		return fmt.Errorf("respond asynchronously to coordination request: %w", err)
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("count asynchronous request response: %w", err)
 	}
 	if updated == 0 {
 		return ErrNotFound

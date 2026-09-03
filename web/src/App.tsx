@@ -827,7 +827,7 @@ function App() {
       setAuthUser(null)
       setCalendarConnection(null)
       setWorkspaces([])
-      setPrivateEvents([])
+      setPrivateCalendarEvents([])
       setProjections([])
       setActiveDialog('')
       setAccountOpen(false)

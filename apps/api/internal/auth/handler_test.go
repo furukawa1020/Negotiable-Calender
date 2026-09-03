@@ -22,6 +22,8 @@ type stubStore struct {
 	sessionIdentity Identity
 	sessionErr      error
 	deletedHash     []byte
+	deletedUser     string
+	accountErr      error
 }
 
 func (store *stubStore) CreateFlow(_ context.Context, value Flow) error {
@@ -56,6 +58,13 @@ func (store *stubStore) DeleteSession(_ context.Context, value []byte) error {
 	store.deletedHash = value
 	return nil
 }
+func (store *stubStore) DeleteAccount(_ context.Context, userID string) error {
+	store.deletedUser = userID
+	if store.accountErr == nil {
+		store.sessionErr = ErrNotFound
+	}
+	return store.accountErr
+}
 
 type stubProvider struct {
 	configured bool
@@ -73,6 +82,24 @@ func (provider *stubProvider) AuthorizationURL(state, challenge string) string {
 func (provider *stubProvider) Exchange(context.Context, string, string) (Profile, error) {
 	provider.exchanges++
 	return provider.profile, nil
+}
+
+type stubAccountRevoker struct {
+	preparedUser string
+	revoked      bool
+	prepareErr   error
+	revokeErr    error
+}
+
+func (value *stubAccountRevoker) PrepareForAccountDeletion(_ context.Context, userID string) (func(context.Context) error, error) {
+	value.preparedUser = userID
+	if value.prepareErr != nil {
+		return nil, value.prepareErr
+	}
+	return func(context.Context) error {
+		value.revoked = true
+		return value.revokeErr
+	}, nil
 }
 
 func TestLoginCreatesOneTimeFlowAndSecurePKCEChallenge(t *testing.T) {
@@ -212,6 +239,96 @@ func TestLogoutRevokesHashedSessionAndExpiresCookie(t *testing.T) {
 	cookies := response.Result().Cookies()
 	if len(cookies) != 1 || cookies[0].MaxAge != -1 {
 		t.Fatalf("session cookie was not expired: %#v", cookies)
+	}
+}
+
+func TestAccountDeletionRequiresRealSessionAndExactConfirmation(t *testing.T) {
+	t.Parallel()
+	store := &stubStore{sessionIdentity: Identity{UserID: "user-1", OrganizationID: "org-1"}}
+	handler := testHandler(http.NotFoundHandler(), store, &stubProvider{}, false)
+
+	unauthenticated := httptest.NewRecorder()
+	handler.ServeHTTP(unauthenticated, httptest.NewRequest(http.MethodDelete, "/api/v1/me/account", strings.NewReader(`{"confirmation":"DELETE"}`)))
+	if unauthenticated.Code != http.StatusUnauthorized || store.deletedUser != "" {
+		t.Fatalf("unauthenticated deletion reached store: status=%d user=%q", unauthenticated.Code, store.deletedUser)
+	}
+
+	for name, body := range map[string]string{
+		"wrong":    `{"confirmation":"delete"}`,
+		"unknown":  `{"confirmation":"DELETE","userId":"victim"}`,
+		"trailing": `{"confirmation":"DELETE"}{"confirmation":"DELETE"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodDelete, "/api/v1/me/account", strings.NewReader(body))
+			request.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "session"})
+			handler.ServeHTTP(response, request)
+			if response.Code != http.StatusBadRequest && response.Code != http.StatusUnprocessableEntity {
+				t.Fatalf("invalid confirmation accepted: status=%d body=%s", response.Code, response.Body.String())
+			}
+		})
+	}
+	if store.deletedUser != "" {
+		t.Fatalf("invalid confirmation deleted user %q", store.deletedUser)
+	}
+}
+
+func TestAccountDeletionInvalidatesSessionsAndRevokesPreparedGrant(t *testing.T) {
+	t.Parallel()
+	store := &stubStore{sessionIdentity: Identity{UserID: "user-1", OrganizationID: "org-1"}}
+	revoker := &stubAccountRevoker{}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	handler := NewHandlerWithAccountRevoker(http.NotFoundHandler(), store, &stubProvider{}, revoker, HandlerConfig{
+		WebOrigin: "https://app.example", SecureCookies: true,
+	}, logger)
+	request := httptest.NewRequest(http.MethodDelete, "/api/v1/me/account", strings.NewReader(`{"confirmation":"DELETE"}`))
+	request.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "raw-session"})
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusNoContent || store.deletedUser != "user-1" {
+		t.Fatalf("account was not deleted: status=%d store=%#v", response.Code, store)
+	}
+	if revoker.preparedUser != "user-1" || !revoker.revoked {
+		t.Fatalf("calendar grant was not revoked after deletion: %#v", revoker)
+	}
+	cookies := response.Result().Cookies()
+	if len(cookies) != 2 {
+		t.Fatalf("expected session and flow cookies to expire: %#v", cookies)
+	}
+	for _, cookie := range cookies {
+		if cookie.MaxAge != -1 || !cookie.HttpOnly || !cookie.Secure {
+			t.Fatalf("unsafe expired cookie: %#v", cookie)
+		}
+	}
+	replay := httptest.NewRecorder()
+	handler.ServeHTTP(replay, request)
+	if replay.Code != http.StatusUnauthorized {
+		t.Fatalf("deleted session was reusable: %d", replay.Code)
+	}
+}
+
+func TestAccountDeletionDoesNotRevokeGrantWhenOwnerGuardRejects(t *testing.T) {
+	t.Parallel()
+	store := &stubStore{
+		sessionIdentity: Identity{UserID: "owner-1", OrganizationID: "shared-org"},
+		accountErr: ErrLastOrganizationOwner,
+	}
+	revoker := &stubAccountRevoker{}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	handler := NewHandlerWithAccountRevoker(http.NotFoundHandler(), store, &stubProvider{}, revoker, HandlerConfig{}, logger)
+	request := httptest.NewRequest(http.MethodDelete, "/api/v1/me/account", strings.NewReader(`{"confirmation":"DELETE"}`))
+	request.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "raw-session"})
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusConflict || revoker.revoked {
+		t.Fatalf("owner guard failed: status=%d revoked=%t", response.Code, revoker.revoked)
+	}
+	if len(response.Result().Cookies()) != 0 {
+		t.Fatal("active session cookie expired even though deletion was rejected")
 	}
 }
 

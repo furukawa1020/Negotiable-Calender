@@ -59,6 +59,13 @@ func (store *PostgresStore) List(ctx context.Context, userID string, from, to ti
 	return store.list(ctx, userID, from, to, false)
 }
 
+func (store *PostgresStore) DeleteForUser(ctx context.Context, userID string) error {
+	if _, err := store.database.ExecContext(ctx, `DELETE FROM schedule_projections WHERE user_id = $1`, userID); err != nil {
+		return fmt.Errorf("delete user projections: %w", err)
+	}
+	return nil
+}
+
 func (store *PostgresStore) ListForUser(ctx context.Context, userID string) ([]ScheduleProjection, error) {
 	return store.list(ctx, userID, time.Time{}, time.Time{}, true)
 }

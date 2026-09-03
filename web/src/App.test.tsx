@@ -464,4 +464,41 @@ describe('App', () => {
     )
   })
 
+  it('deletes the authenticated account only after typed confirmation', async () => {
+    window.history.replaceState({}, '', '/?auth=success')
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        authenticated: true, demoMode: false,
+        user: { userId: 'user-1', organizationId: 'org-1', email: 'person@example.com', displayName: 'Person', role: 'OWNER' },
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ connected: false }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        activeWorkspaceId: 'org-1', workspaces: [{ id: 'org-1', name: 'Person Workspace', role: 'OWNER' }],
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+
+    render(<App />)
+    expect(await screen.findByText('Googleアカウントでログインしました。')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '山田太郎のアカウントメニュー' }))
+    fireEvent.click(screen.getByRole('button', { name: 'アカウントを削除' }))
+
+    expect(screen.getByRole('dialog', { name: 'アカウントを完全に削除' })).toBeInTheDocument()
+    expect(screen.getByText(/この操作は取り消せません/)).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('確認のため DELETE と入力'), { target: { value: 'DELETE' } })
+    fireEvent.click(screen.getByRole('button', { name: '完全に削除する' }))
+
+    expect(await screen.findByText('アカウントと保存データを削除しました。')).toBeInTheDocument()
+    expect(screen.queryByText('Person')).not.toBeInTheDocument()
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
+      expect.stringContaining('/api/v1/me/account'),
+      expect.objectContaining({
+        method: 'DELETE',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirmation: 'DELETE' }),
+      }),
+    )
+  })
+
 })

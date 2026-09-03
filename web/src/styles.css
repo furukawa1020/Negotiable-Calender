@@ -1215,6 +1215,55 @@ footer {
   cursor: pointer;
 }
 
+.async-form {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) auto;
+  align-items: end;
+  gap: 8px;
+}
+
+.async-form label {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.async-form textarea {
+  min-width: 0;
+  resize: vertical;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  background: white;
+  font: inherit;
+}
+
+.async-form button {
+  padding: 9px 12px;
+  border: 1px solid var(--green);
+  border-radius: 6px;
+  color: white;
+  background: var(--green);
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.async-message {
+  max-width: 52ch;
+  margin: 8px 0 0;
+  padding: 10px;
+  border-left: 3px solid var(--green);
+  color: var(--ink);
+  background: var(--paper-deep);
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
 .delegate-form {
   display: grid;
   grid-template-columns: minmax(160px, 1fr) auto;

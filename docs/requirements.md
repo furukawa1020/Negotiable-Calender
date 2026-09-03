@@ -1882,6 +1882,7 @@ POST /api/v1/requests/{id}/accept
 POST /api/v1/requests/{id}/suggest
 POST /api/v1/requests/{id}/delegate
 POST /api/v1/requests/{id}/decline
+POST /api/v1/requests/{id}/async
 POST /api/v1/requests/{id}/cancel
 ```
 
@@ -1924,6 +1925,21 @@ POST /api/v1/requests/{id}/cancel
 ```
 
 Private Eventを含めない。
+
+非同期回答は受信者本人だけが、候補提示中の依頼に対して実行できる。
+
+```http
+POST /api/v1/requests/{id}/async
+```
+
+```json
+{
+  "message": "設計コメントを文書で返します"
+}
+```
+
+`message` は必須・500文字以内とし、予定詳細・本文・トークンを通知や監査ログへ複製しない。
+成功時は依頼を終端状態 `async` に更新し、依頼者と受信者だけがRequest APIで本文を確認できる。
 
 ---
 

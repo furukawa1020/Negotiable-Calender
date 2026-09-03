@@ -29,6 +29,7 @@ const (
 	Cancelled Status = "cancelled"
 	Expired   Status = "expired"
 	Completed Status = "completed"
+	Async     Status = "async"
 
 	SyncPreferred  SyncPreference = "sync"
 	AsyncPreferred SyncPreference = "async"
@@ -56,7 +57,7 @@ func (v Type) Valid() bool {
 
 func (v Status) Valid() bool {
 	switch v {
-	case Pending, Suggested, Accepted, Declined, Delegated, Cancelled, Expired, Completed:
+	case Pending, Suggested, Accepted, Declined, Delegated, Cancelled, Expired, Completed, Async:
 		return true
 	default:
 		return false
@@ -104,6 +105,7 @@ type CoordinationRequest struct {
 	Status           Status         `json:"status"`
 	AcceptedOptionID string         `json:"acceptedOptionId,omitempty"`
 	DelegatedUserID  string         `json:"delegatedUserId,omitempty"`
+	AsyncMessage     string         `json:"asyncMessage,omitempty"`
 	Options          []Option       `json:"options"`
 	CreatedAt        time.Time      `json:"createdAt"`
 	UpdatedAt        time.Time      `json:"updatedAt"`
@@ -148,6 +150,11 @@ func (r CoordinationRequest) Validate() error {
 	}
 	if !r.Status.Valid() {
 		return fmt.Errorf("invalid status")
+	}
+	if r.Status == Async {
+		if err := ValidateAsyncMessage(r.AsyncMessage); err != nil {
+			return err
+		}
 	}
 	for _, option := range r.Options {
 		if err := option.Validate(); err != nil {
@@ -230,6 +237,19 @@ func validUTC(name string, value time.Time) error {
 	}
 	if value.Location() != time.UTC {
 		return fmt.Errorf("%s must be UTC", name)
+	}
+	return nil
+}
+
+const MaxAsyncMessageRunes = 500
+
+func ValidateAsyncMessage(value string) error {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return fmt.Errorf("async message is required")
+	}
+	if len([]rune(trimmed)) > MaxAsyncMessageRunes {
+		return fmt.Errorf("async message must be at most %d characters", MaxAsyncMessageRunes)
 	}
 	return nil
 }

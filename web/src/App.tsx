@@ -76,6 +76,7 @@ type CoordinationRequest = {
   deadlineAt: string
   priority: string
   status: string
+  asyncMessage?: string
   options: CoordinationOption[]
   createdAt: string
 }
@@ -694,6 +695,34 @@ function App() {
     }
   }
 
+  const respondAsync = async (event: FormEvent<HTMLFormElement>, requestID: string) => {
+    event.preventDefault()
+    const formElement = event.currentTarget
+    const message = String(new FormData(formElement).get('asyncMessage')).trim()
+    setRespondingRequestID(requestID)
+    try {
+      const response = await apiFetch(`${apiURL}/api/v1/requests/${requestID}/async`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Demo-User-ID': activeUserID,
+        },
+        body: JSON.stringify({ message }),
+      })
+      if (!response.ok) throw new Error('async response failed')
+      const payload = await response.json() as { status: string; asyncMessage: string }
+      setInboxRequests((current) => current.map((item) => item.id === requestID
+        ? { ...item, status: payload.status, asyncMessage: payload.asyncMessage }
+        : item))
+      setNotice('非同期で回答しました。依頼者に通知しました。')
+      formElement.reset()
+    } catch {
+      setNotice('非同期で回答できませんでした。最新状態とメッセージを確認してください。')
+    } finally {
+      setRespondingRequestID('')
+    }
+  }
+
   const suggestTime = async (event: FormEvent<HTMLFormElement>, requestID: string) => {
     event.preventDefault()
     const formElement = event.currentTarget
@@ -1231,7 +1260,7 @@ function App() {
                         <strong>{option.startAt && option.endAt
                           ? `${formatDateTime(option.startAt)} — ${new Intl.DateTimeFormat('ja-JP', { hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(option.endAt))}`
                           : '非同期で回答'}</strong>
-                        {item.status === 'suggested' ? (
+                        {item.status === 'suggested' && option.type === 'meeting' ? (
                           <button type="button" disabled={respondingRequestID === item.id} onClick={() => respondToRequest(item.id, 'accept', option.id)}>この候補を承認</button>
                         ) : null}
                       </div>
@@ -1243,13 +1272,17 @@ function App() {
                           <label>終了時間<input name="suggestEnd" type="datetime-local" required /></label>
                           <button type="submit" disabled={respondingRequestID === item.id}>別時間を提案</button>
                         </form>
+                        <form className="async-form" onSubmit={(event) => respondAsync(event, item.id)}>
+                          <label>非同期メッセージ<textarea name="asyncMessage" maxLength={500} rows={2} placeholder="回答方法や次のアクションを500文字以内で入力" required /></label>
+                          <button type="submit" disabled={respondingRequestID === item.id}>非同期で回答</button>
+                        </form>
                         <form className="delegate-form" onSubmit={(event) => delegateRequest(event, item.id)}>
                           <label>委譲先ユーザー<input name="delegateUserId" defaultValue="demo-member" required /></label>
                           <button type="submit" disabled={respondingRequestID === item.id}>委譲する</button>
                         </form>
                         <button className="decline-button" type="button" disabled={respondingRequestID === item.id} onClick={() => respondToRequest(item.id, 'decline')}>今回は辞退</button>
                       </>
-                    ) : <p className="response-complete">回答済み · {item.status}</p>}
+                    ) : <div><p className="response-complete">回答済み · {item.status}</p>{item.asyncMessage ? <p className="async-message">{item.asyncMessage}</p> : null}</div>}
                   </div>
                 </article>
               ))}
@@ -1287,7 +1320,7 @@ function App() {
                         <button className="decline-button" type="button" disabled={respondingRequestID === item.id} onClick={() => cancelSentRequest(item.id)}>
                           {respondingRequestID === item.id ? 'キャンセル中…' : '依頼をキャンセル'}
                         </button>
-                      ) : <p className="response-complete">更新済み · {item.status}</p>}
+                      ) : <div><p className="response-complete">更新済み · {item.status}</p>{item.asyncMessage ? <p className="async-message">{item.asyncMessage}</p> : null}</div>}
                     </div>
                   </article>
                 )

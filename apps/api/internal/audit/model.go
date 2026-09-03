@@ -9,6 +9,7 @@ const (
 	RequestAccepted    Action = "request_accepted"
 	RequestChanged     Action = "request_changed"
 	RequestDeclined    Action = "request_declined"
+	RequestAsync       Action = "request_async"
 	RequestDelegated   Action = "request_delegated"
 	RequestCancelled   Action = "request_cancelled"
 	InvitationCreated  Action = "invitation_created"

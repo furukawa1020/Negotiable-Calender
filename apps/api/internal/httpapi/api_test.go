@@ -66,6 +66,8 @@ type stubRequestStore struct {
 	cancelErr       error
 	suggestedOption coordinationrequest.Option
 	delegatedOption coordinationrequest.Option
+	asyncMessage    string
+	asyncErr        error
 	err             error
 }
 
@@ -119,6 +121,12 @@ func (store *stubRequestStore) Suggest(_ context.Context, requestID, targetUserI
 	store.respondID, store.respondTarget = requestID, targetUserID
 	store.suggestedOption = option
 	return store.err
+}
+
+func (store *stubRequestStore) RespondAsync(_ context.Context, requestID, targetUserID, message string) error {
+	store.respondID, store.respondTarget = requestID, targetUserID
+	store.asyncMessage = message
+	return store.asyncErr
 }
 
 func (store *stubRequestStore) Respond(_ context.Context, requestID, targetUserID string, status coordinationrequest.Status, optionID string) error {
@@ -989,4 +997,105 @@ func TestCoordinationRequestDelegatesAsTarget(t *testing.T) {
 
 func testLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+func TestCoordinationRequestRespondsAsyncAsRecipient(t *testing.T) {
+	t.Parallel()
+	store := &stubRequestStore{value: coordinationrequest.CoordinationRequest{
+		ID: "request-1", OrganizationID: "org-1", RequesterUserID: "member-1",
+		TargetUserID: "manager-1", Status: coordinationrequest.Suggested,
+	}}
+	notifications := &stubNotificationStore{}
+	audits := &stubAuditStore{}
+	handler := NewWithStores(stubDatabase{}, &stubPolicyStore{}, &stubProjectionStore{}, &stubOrganizationStore{}, store, notifications, audits, "", testLogger())
+	message := "設計コメントを文書で返します。<script>alert(1)</script>"
+	body, _ := json.Marshal(map[string]string{"message": message})
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/requests/request-1/async", bytes.NewReader(body))
+	request.Header.Set("X-Demo-User-ID", "manager-1")
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", response.Code, response.Body.String())
+	}
+	if store.respondID != "request-1" || store.respondTarget != "manager-1" || store.asyncMessage != message {
+		t.Fatalf("unexpected async response call: %#v", store)
+	}
+	if strings.Contains(response.Body.String(), "<script>") {
+		t.Fatalf("response did not HTML-escape untrusted message: %s", response.Body.String())
+	}
+	var payload struct {
+		Status coordinationrequest.Status `json:"status"`
+		AsyncMessage string `json:"asyncMessage"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Status != coordinationrequest.Async || payload.AsyncMessage != message {
+		t.Fatalf("unexpected response: %#v", payload)
+	}
+	if len(notifications.values) != 1 || notifications.values[0].UserID != "member-1" || notifications.values[0].Type != notification.RequestAsync {
+		t.Fatalf("requester notification missing: %#v", notifications.values)
+	}
+	if strings.Contains(notifications.values[0].Message, "<script>") {
+		t.Fatal("private async message copied into notification")
+	}
+	if len(audits.values) != 1 || audits.values[0].Action != audit.RequestAsync || audits.values[0].ActorUserID != "manager-1" {
+		t.Fatalf("async audit missing: %#v", audits.values)
+	}
+}
+
+func TestCoordinationRequestAsyncRequiresBoundedMessage(t *testing.T) {
+	t.Parallel()
+	for name, message := range map[string]string{
+		"empty": "   ",
+		"too-long": strings.Repeat("あ", coordinationrequest.MaxAsyncMessageRunes+1),
+	} {
+		t.Run(name, func(t *testing.T) {
+			store := &stubRequestStore{}
+			handler := New(stubDatabase{}, &stubPolicyStore{}, &stubProjectionStore{}, &stubOrganizationStore{}, store, "", testLogger())
+			body, _ := json.Marshal(map[string]string{"message": message})
+			request := httptest.NewRequest(http.MethodPost, "/api/v1/requests/request-1/async", bytes.NewReader(body))
+			request.Header.Set("X-Demo-User-ID", "manager-1")
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			if response.Code != http.StatusUnprocessableEntity || store.asyncMessage != "" {
+				t.Fatalf("invalid message accepted: status=%d store=%#v", response.Code, store)
+			}
+		})
+	}
+}
+
+func TestCoordinationRequestAsyncRejectsRequesterAndStaleState(t *testing.T) {
+	t.Parallel()
+	value := coordinationrequest.CoordinationRequest{
+		ID: "request-1", RequesterUserID: "member-1", TargetUserID: "manager-1",
+		Status: coordinationrequest.Suggested,
+	}
+	body := func() *bytes.Reader { return bytes.NewReader([]byte(`{"message":"文書で回答します"}`)) }
+
+	t.Run("requester", func(t *testing.T) {
+		store := &stubRequestStore{value: value}
+		handler := New(stubDatabase{}, &stubPolicyStore{}, &stubProjectionStore{}, &stubOrganizationStore{}, store, "", testLogger())
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/requests/request-1/async", body())
+		request.Header.Set("X-Demo-User-ID", "member-1")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusForbidden || store.asyncMessage != "" {
+			t.Fatalf("requester responded: status=%d store=%#v", response.Code, store)
+		}
+	})
+
+	t.Run("stale", func(t *testing.T) {
+		store := &stubRequestStore{value: value, asyncErr: coordinationrequest.ErrNotFound}
+		handler := New(stubDatabase{}, &stubPolicyStore{}, &stubProjectionStore{}, &stubOrganizationStore{}, store, "", testLogger())
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/requests/request-1/async", body())
+		request.Header.Set("X-Demo-User-ID", "manager-1")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusConflict {
+			t.Fatalf("expected conflict, got %d: %s", response.Code, response.Body.String())
+		}
+	})
 }

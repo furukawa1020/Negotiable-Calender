@@ -427,4 +427,41 @@ describe('App', () => {
       expect.objectContaining({ headers: expect.objectContaining({ 'X-Organization-ID': 'demo-org' }) }),
     )
   })
+  it('responds asynchronously with a safely rendered note', async () => {
+    const unsafeMessage = '文書で返します <img src=x onerror=alert(1)>'
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        requests: [{
+          id: 'request-async', requesterUserId: 'demo-member', targetUserId: 'demo-manager',
+          title: '方針確認', type: 'decision', durationMinutes: 15,
+          deadlineAt: '2026-09-05T08:00:00Z', priority: 'normal', status: 'suggested',
+          createdAt: '2026-09-03T00:00:00Z',
+          options: [{ id: 'option-async', type: 'async' }],
+        }],
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        id: 'request-async', status: 'async', asyncMessage: unsafeMessage,
+      }), { status: 200 }))
+
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: '依頼' }))
+    expect(await screen.findByRole('heading', { name: '方針確認' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'この候補を承認' })).not.toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('非同期メッセージ'), { target: { value: unsafeMessage } })
+    fireEvent.click(screen.getByRole('button', { name: '非同期で回答' }))
+
+    expect(await screen.findByRole('status')).toHaveTextContent('非同期で回答しました。依頼者に通知しました。')
+    const rendered = screen.getByText(unsafeMessage)
+    expect(rendered.querySelector('img')).toBeNull()
+    expect(screen.getByText('回答済み · async')).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining('/api/v1/requests/request-async/async'),
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ message: unsafeMessage }),
+      }),
+    )
+  })
+
 })

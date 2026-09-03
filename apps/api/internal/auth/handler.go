@@ -32,7 +32,7 @@ type HandlerConfig struct {
 }
 
 type AccountGrantRevoker interface {
-	RevokeForAccountDeletion(context.Context, string) error
+	PrepareForAccountDeletion(context.Context, string) (func(context.Context) error, error)
 }
 
 type Handler struct {
@@ -238,9 +238,13 @@ func (handler *Handler) deleteAccount(response http.ResponseWriter, request *htt
 		writeJSON(response, http.StatusUnprocessableEntity, map[string]string{"error": "confirmation must equal DELETE"})
 		return
 	}
+	var revokeGrant func(context.Context) error
 	if handler.revoker != nil {
-		if err := handler.revoker.RevokeForAccountDeletion(request.Context(), identity.UserID); err != nil {
-			handler.logger.Warn("calendar grant revocation failed during account deletion")
+		prepared, err := handler.revoker.PrepareForAccountDeletion(request.Context(), identity.UserID)
+		if err != nil {
+			handler.logger.Warn("calendar grant preparation failed during account deletion")
+		} else {
+			revokeGrant = prepared
 		}
 	}
 	if err := handler.store.DeleteAccount(request.Context(), identity.UserID); errors.Is(err, ErrLastOrganizationOwner) {
@@ -254,6 +258,11 @@ func (handler *Handler) deleteAccount(response http.ResponseWriter, request *htt
 		handler.logger.Error("delete account")
 		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to delete account"})
 		return
+	}
+	if revokeGrant != nil {
+		if err := revokeGrant(request.Context()); err != nil {
+			handler.logger.Warn("calendar grant revocation failed after account deletion")
+		}
 	}
 	expireCookie(response, sessionCookieName, "/", handler.config.SecureCookies)
 	expireCookie(response, flowCookieName, "/api/v1/auth/google/callback", handler.config.SecureCookies)

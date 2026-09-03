@@ -6,27 +6,29 @@ import (
 	"fmt"
 )
 
-func (handler *Handler) RevokeForAccountDeletion(ctx context.Context, userID string) error {
+func (handler *Handler) PrepareForAccountDeletion(ctx context.Context, userID string) (func(context.Context) error, error) {
 	connection, err := handler.store.GetConnection(ctx, userID)
 	if errors.Is(err, ErrNotFound) {
-		return nil
+		return nil, nil
 	}
 	if err != nil {
-		return fmt.Errorf("load calendar grant for revocation: %w", err)
+		return nil, fmt.Errorf("load calendar grant for revocation: %w", err)
 	}
 	if handler.cipher == nil {
-		return fmt.Errorf("calendar token cipher is unavailable")
+		return nil, fmt.Errorf("calendar token cipher is unavailable")
 	}
 	refreshToken, err := handler.cipher.Decrypt(connection.RefreshTokenCipher)
 	if err != nil {
-		return fmt.Errorf("decrypt calendar grant for revocation")
+		return nil, fmt.Errorf("decrypt calendar grant for revocation")
 	}
 	revoker, ok := handler.provider.(TokenRevoker)
 	if !ok {
-		return fmt.Errorf("calendar provider does not support revocation")
+		return nil, fmt.Errorf("calendar provider does not support revocation")
 	}
-	if err := revoker.Revoke(ctx, refreshToken); err != nil {
-		return fmt.Errorf("revoke calendar grant")
-	}
-	return nil
+	return func(revokeContext context.Context) error {
+		if err := revoker.Revoke(revokeContext, refreshToken); err != nil {
+			return fmt.Errorf("revoke calendar grant")
+		}
+		return nil
+	}, nil
 }

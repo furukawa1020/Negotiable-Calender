@@ -16,7 +16,10 @@ type Store interface {
 	CreateSession(context.Context, Session) error
 	GetSession(context.Context, []byte, time.Time) (Identity, error)
 	DeleteSession(context.Context, []byte) error
+	DeleteAccount(context.Context, string) error
 }
+
+var ErrLastOrganizationOwner = errors.New("account is the last owner of a shared organization")
 
 type PostgresStore struct{ database *sql.DB }
 
@@ -174,6 +177,97 @@ WHERE auth_sessions.token_hash = $1 AND auth_sessions.expires_at > $2
 func (store *PostgresStore) DeleteSession(ctx context.Context, tokenHash []byte) error {
 	if _, err := store.database.ExecContext(ctx, `DELETE FROM auth_sessions WHERE token_hash = $1`, tokenHash); err != nil {
 		return fmt.Errorf("delete auth session: %w", err)
+	}
+	return nil
+}
+
+func (store *PostgresStore) DeleteAccount(ctx context.Context, userID string) error {
+	transaction, err := store.database.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin account deletion: %w", err)
+	}
+	defer transaction.Rollback()
+
+	rows, err := transaction.QueryContext(ctx, `
+SELECT organizations.id, memberships.role,
+       (SELECT COUNT(*) FROM memberships AS members WHERE members.organization_id = organizations.id),
+       (SELECT COUNT(*) FROM memberships AS owners WHERE owners.organization_id = organizations.id AND owners.role = 'OWNER')
+FROM organizations
+JOIN memberships ON memberships.organization_id = organizations.id
+WHERE memberships.user_id = $1
+ORDER BY organizations.id
+FOR UPDATE OF organizations
+`, userID)
+	if err != nil {
+		return fmt.Errorf("lock account organizations: %w", err)
+	}
+	organizationIDs := []string{}
+	for rows.Next() {
+		var organizationID, role string
+		var memberCount, ownerCount int
+		if err := rows.Scan(&organizationID, &role, &memberCount, &ownerCount); err != nil {
+			rows.Close()
+			return fmt.Errorf("scan account organization: %w", err)
+		}
+		if role == "OWNER" && memberCount > 1 && ownerCount == 1 {
+			rows.Close()
+			return ErrLastOrganizationOwner
+		}
+		organizationIDs = append(organizationIDs, organizationID)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("iterate account organizations: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("close account organizations: %w", err)
+	}
+
+	statements := []string{
+		`DELETE FROM audit_logs
+WHERE actor_user_id = $1 OR (
+  resource_type = 'request' AND resource_id IN (
+    SELECT id FROM coordination_requests
+    WHERE requester_user_id = $1 OR target_user_id = $1 OR delegated_user_id = $1
+       OR EXISTS (SELECT 1 FROM coordination_request_options WHERE request_id = coordination_requests.id AND delegate_user_id = $1)
+  )
+)`,
+		`DELETE FROM organization_invitations WHERE invited_by = $1 OR accepted_by = $1`,
+		`DELETE FROM notifications WHERE user_id = $1`,
+		`DELETE FROM coordination_requests
+WHERE requester_user_id = $1 OR target_user_id = $1 OR delegated_user_id = $1
+   OR EXISTS (SELECT 1 FROM coordination_request_options WHERE request_id = coordination_requests.id AND delegate_user_id = $1)`,
+		`DELETE FROM schedule_projections WHERE user_id = $1`,
+		`DELETE FROM manual_overrides WHERE user_id = $1`,
+		`DELETE FROM sharing_policies WHERE user_id = $1`,
+	}
+	for _, statement := range statements {
+		if _, err := transaction.ExecContext(ctx, statement, userID); err != nil {
+			return fmt.Errorf("delete account-owned data: %w", err)
+		}
+	}
+	result, err := transaction.ExecContext(ctx, `DELETE FROM users WHERE id = $1`, userID)
+	if err != nil {
+		return fmt.Errorf("delete account user: %w", err)
+	}
+	deleted, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("count deleted account user: %w", err)
+	}
+	if deleted != 1 {
+		return ErrNotFound
+	}
+	for _, organizationID := range organizationIDs {
+		if _, err := transaction.ExecContext(ctx, `
+DELETE FROM organizations
+WHERE id = $1 AND NOT EXISTS (
+  SELECT 1 FROM memberships WHERE organization_id = $1
+)`, organizationID); err != nil {
+			return fmt.Errorf("delete empty account organization: %w", err)
+		}
+	}
+	if err := transaction.Commit(); err != nil {
+		return fmt.Errorf("commit account deletion: %w", err)
 	}
 	return nil
 }

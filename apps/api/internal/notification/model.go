@@ -9,6 +9,7 @@ const (
 	RequestAccepted  Type = "request_accepted"
 	RequestChanged   Type = "request_changed"
 	RequestDeclined  Type = "request_declined"
+	RequestAsync     Type = "request_async"
 	RequestDelegated Type = "request_delegated"
 	RequestCancelled Type = "request_cancelled"
 )

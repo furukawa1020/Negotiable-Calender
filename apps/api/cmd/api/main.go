@@ -22,6 +22,7 @@ import (
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/organization"
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/policy"
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/projection"
+	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/security"
 	coordinationrequest "github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/request"
 )
 
@@ -65,6 +66,10 @@ func main() {
 	}
 	if err := calendarintegration.EnsureSchema(migrationContext, db); err != nil {
 		logger.Error("migrate calendar integration database", "error", err)
+		os.Exit(1)
+	}
+	if err := calendarintegration.EnsureBackgroundSchema(migrationContext, db); err != nil {
+		logger.Error("migrate background calendar sync database", "error", err)
 		os.Exit(1)
 	}
 	if err := projection.EnsureSchema(migrationContext, db); err != nil {
@@ -123,15 +128,17 @@ func main() {
 	}
 	apiHandler := httpapi.NewWithStores(db, policy.NewPostgresStore(db), projection.NewPostgresStore(db), organization.NewPostgresStore(db), coordinationrequest.NewPostgresStore(db), notification.NewPostgresStore(db), audit.NewPostgresStore(db), os.Getenv("WEB_ORIGIN"), logger)
 	projectionRebuilder := projection.NewRebuilder(projection.NewPostgresRebuildStore(db), policy.NewPostgresStore(db))
-	calendarHandler := calendarintegration.NewHandler(apiHandler, calendarintegration.NewPostgresStore(db), calendarProvider, calendarCipher, projectionRebuilder, calendarintegration.HandlerConfig{
+	calendarStore := calendarintegration.NewPostgresStore(db)
+	calendarHandler := calendarintegration.NewHandler(apiHandler, calendarStore, calendarProvider, calendarCipher, projectionRebuilder, calendarintegration.HandlerConfig{
 		WebOrigin: os.Getenv("WEB_ORIGIN"), SecureCookies: secureCookies,
 	}, logger)
 	invitationHandler := organization.NewInvitationHandler(calendarHandler, organization.NewPostgresStore(db), organization.InvitationHandlerConfig{
 		WebOrigin: os.Getenv("WEB_ORIGIN"),
 	}, logger)
-	handler := auth.NewHandler(invitationHandler, auth.NewPostgresStore(db), googleProvider, auth.HandlerConfig{
+	authHandler := auth.NewHandlerWithAccountRevoker(invitationHandler, auth.NewPostgresStore(db), googleProvider, calendarHandler, auth.HandlerConfig{
 		WebOrigin: os.Getenv("WEB_ORIGIN"), DemoMode: demoMode, SecureCookies: secureCookies,
 	}, logger)
+	handler := security.New(authHandler, security.Config{WebOrigin: os.Getenv("WEB_ORIGIN")})
 
 	server := &http.Server{
 		Addr:              ":" + port,
@@ -144,6 +151,10 @@ func main() {
 
 	shutdownSignal, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	if calendarProvider.Configured() && calendarCipher != nil {
+		worker := calendarintegration.NewWorker(calendarStore, calendarHandler, calendarintegration.WorkerConfig{}, logger)
+		go worker.Run(shutdownSignal)
+	}
 
 	go func() {
 		logger.Info("api listening", "address", server.Addr)

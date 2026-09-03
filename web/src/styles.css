@@ -420,6 +420,7 @@ h1 {
 }
 
 .date-controls,
+.calendar-view-controls,
 .layer-controls {
   display: flex;
   align-items: center;
@@ -427,6 +428,7 @@ h1 {
 }
 
 .date-controls button,
+.calendar-view-controls button,
 .layer-controls button,
 .override-button {
   padding: 8px 11px;
@@ -439,6 +441,13 @@ h1 {
   cursor: pointer;
 }
 
+.calendar-view-controls,
+.layer-controls {
+  padding: 3px;
+  border-radius: 8px;
+  background: #ebece6;
+}
+
 .layer-controls {
   margin-left: auto;
   padding: 3px;
@@ -446,10 +455,12 @@ h1 {
   background: #ebece6;
 }
 
+.calendar-view-controls button,
 .layer-controls button {
   border-color: transparent;
 }
 
+.calendar-view-controls button.active,
 .layer-controls button.active {
   color: var(--green);
   background: white;
@@ -700,10 +711,16 @@ h1 {
 }
 
 .private-event {
+  width: 100%;
   min-height: 55px;
   padding: 10px 13px;
+  border: 0;
   border-left: 3px solid #546b61;
+  color: inherit;
   background: #edf0eb;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
 .private-event.medium {
@@ -727,6 +744,13 @@ h1 {
   margin-top: 5px;
   color: #838a86;
   font-size: 10px;
+}
+
+.private-event .private-event-details {
+  margin-top: 9px;
+  color: #435149;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 .projection-list {
@@ -1191,6 +1215,55 @@ footer {
   cursor: pointer;
 }
 
+.async-form {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) auto;
+  align-items: end;
+  gap: 8px;
+}
+
+.async-form label {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.async-form textarea {
+  min-width: 0;
+  resize: vertical;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  background: white;
+  font: inherit;
+}
+
+.async-form button {
+  padding: 9px 12px;
+  border: 1px solid var(--green);
+  border-radius: 6px;
+  color: white;
+  background: var(--green);
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.async-message {
+  max-width: 52ch;
+  margin: 8px 0 0;
+  padding: 10px;
+  border-left: 3px solid var(--green);
+  color: var(--ink);
+  background: var(--paper-deep);
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
 .delegate-form {
   display: grid;
   grid-template-columns: minmax(160px, 1fr) auto;
@@ -1370,4 +1443,56 @@ footer {
   html {
     scroll-behavior: auto;
   }
+}
+
+
+.signin-gate {
+  min-height: 100vh;
+  display: grid;
+  place-content: center;
+  justify-items: start;
+  gap: 20px;
+  max-width: 760px;
+}
+
+.signin-gate .brand-mark {
+  width: 48px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+}
+
+.signin-gate h1 {
+  white-space: normal;
+}
+
+.signin-gate .primary-button {
+  display: inline-block;
+  text-decoration: none;
+}
+
+.danger-link {
+  color: #9f2f2f !important;
+  border-color: #d8a8a8 !important;
+  background: #fff7f7 !important;
+}
+
+.danger-modal {
+  border-top: 4px solid #a63535;
+}
+
+.danger-button {
+  padding: 10px 16px;
+  border: 1px solid #8f2929;
+  border-radius: 8px;
+  color: white;
+  background: #a63535;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.danger-button:disabled {
+  cursor: wait;
+  opacity: 0.6;
 }

@@ -35,46 +35,79 @@ describe('App', () => {
     expect(screen.getByText('OWNER · person@example.com')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'ログアウト' }))
 
-    expect(await screen.findByRole('status')).toHaveTextContent('ログアウトしました。')
+    expect(await screen.findByText('ログアウトしました。')).toBeInTheDocument()
     expect(globalThis.fetch).toHaveBeenNthCalledWith(1, expect.stringContaining('/api/v1/auth/session'), { credentials: 'include' })
     expect(globalThis.fetch).toHaveBeenNthCalledWith(2, expect.stringContaining('/api/v1/calendar/connection'), { credentials: 'include' })
     expect(globalThis.fetch).toHaveBeenNthCalledWith(4, expect.stringContaining('/api/v1/auth/logout'), { method: 'POST', credentials: 'include' })
   })
 
-  it('shows a connected Calendar and manually syncs privacy-safe busy spans', async () => {
+  it('loads the owners real calendar across day week and month views', async () => {
     window.history.replaceState({}, '', '/?calendar=connected')
-    vi.spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        authenticated: true,
-        user: { userId: 'user-1', organizationId: 'org-1', email: 'person@example.com', displayName: 'Person', role: 'OWNER' },
-      }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        connected: true,
-        connection: { grantedScopes: ['https://www.googleapis.com/auth/calendar.readonly'], connectedAt: '2026-09-02T00:00:00Z', reconnectRequired: false },
-      }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ activeWorkspaceId: 'org-1', workspaces: [{ id: 'org-1', name: 'Person Workspace', role: 'OWNER' }] }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        synced: true, busySpanCount: 3, lastSyncedAt: '2026-09-02T01:00:00Z',
-      }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        userId: 'user-1', timezone: 'Asia/Tokyo', generatedAt: '2026-09-02T01:00:00Z',
-        segments: [{
-          startAt: '2026-09-02T02:00:00Z', endAt: '2026-09-02T03:00:00Z',
-          availability: 'unavailable', interruptibility: 'do_not_interrupt',
-          requestability: 'closed', reschedulability: 'fixed',
-        }],
-      }), { status: 200 }))
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = String(input)
+      if (url.includes('/api/v1/auth/session')) {
+        return new Response(JSON.stringify({
+          authenticated: true,
+          user: { userId: 'user-1', organizationId: 'org-1', email: 'person@example.com', displayName: 'Person', role: 'OWNER' },
+        }), { status: 200 })
+      }
+      if (url.includes('/api/v1/calendar/connection')) {
+        return new Response(JSON.stringify({
+          connected: true,
+          connection: {
+            grantedScopes: ['https://www.googleapis.com/auth/calendar.readonly'],
+            connectedAt: '2026-09-02T00:00:00Z', reconnectRequired: false,
+            lastErrorCode: 'timeout', nextAttemptAt: '2026-09-02T00:15:00Z',
+          },
+        }), { status: 200 })
+      }
+      if (url.includes('/api/v1/workspaces')) {
+        return new Response(JSON.stringify({
+          activeWorkspaceId: 'org-1', workspaces: [{ id: 'org-1', name: 'Person Workspace', role: 'OWNER' }],
+        }), { status: 200 })
+      }
+      if (url.includes('/api/v1/me/private-events')) {
+        return new Response(JSON.stringify({
+          timezone: 'Asia/Tokyo',
+          events: [{
+            id: 'private-1', title: 'Confidential board meeting', location: 'Secret room',
+            attendees: ['Partner'], startAt: '2026-09-03T00:00:00Z', endAt: '2026-09-03T01:00:00Z', allDay: false,
+          }],
+        }), { status: 200 })
+      }
+      if (url.includes('/api/v1/people/user-1/projection')) {
+        return new Response(JSON.stringify({
+          userId: 'user-1', timezone: 'Asia/Tokyo', generatedAt: '2026-09-02T01:00:00Z',
+          segments: [{
+            startAt: '2026-09-03T02:00:00Z', endAt: '2026-09-03T03:00:00Z',
+            availability: 'unavailable', interruptibility: 'do_not_interrupt',
+            requestability: 'closed', reschedulability: 'fixed',
+          }],
+        }), { status: 200 })
+      }
+      if (url.includes('/api/v1/calendar/sync')) {
+        return new Response(JSON.stringify({ synced: true, busySpanCount: 3, lastSyncedAt: '2026-09-02T01:00:00Z' }), { status: 200 })
+      }
+      return new Response('{}', { status: 404 })
+    })
     render(<App />)
 
-    expect(await screen.findByRole('status')).toHaveTextContent('Google Calendarを接続しました')
-    fireEvent.click(screen.getByRole('button', { name: '山田太郎のアカウントメニュー' }))
-    fireEvent.click(await screen.findByRole('button', { name: 'busy時間を同期' }))
+    expect(await screen.findByText('Confidential board meeting')).toBeInTheDocument()
+    expect(screen.queryByText('Product Review')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Confidential board meeting/ }))
+    expect(screen.getByText(/Secret room · Partner/)).toBeInTheDocument()
 
-    expect(await screen.findByRole('status')).toHaveTextContent('3件のbusy時間を同期しました。予定名は保存していません。')
-    expect(globalThis.fetch).toHaveBeenNthCalledWith(4, expect.stringContaining('/api/v1/calendar/sync'), { method: 'POST', credentials: 'include' })
-    expect(globalThis.fetch).toHaveBeenNthCalledWith(
-      5,
-      expect.stringContaining('/api/v1/people/user-1/projection'),
+    fireEvent.click(screen.getByRole('button', { name: '週' }))
+    expect(screen.getByRole('button', { name: '次の週' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '月' }))
+    expect(screen.getByRole('button', { name: '次の月' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '山田太郎のアカウントメニュー' }))
+    expect(screen.getByText(/前回の自動同期に失敗しました（timeout）/)).toBeInTheDocument()
+    fireEvent.click(await screen.findByRole('button', { name: 'busy時間を同期' }))
+    expect(await screen.findByText('Google Calendarから3件のbusy時間を同期しました。予定名は保存していません。')).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/v1/me/private-events?'),
       expect.objectContaining({ credentials: 'include' }),
     )
   })
@@ -394,4 +427,78 @@ describe('App', () => {
       expect.objectContaining({ headers: expect.objectContaining({ 'X-Organization-ID': 'demo-org' }) }),
     )
   })
+  it('responds asynchronously with a safely rendered note', async () => {
+    const unsafeMessage = '文書で返します <img src=x onerror=alert(1)>'
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        requests: [{
+          id: 'request-async', requesterUserId: 'demo-member', targetUserId: 'demo-manager',
+          title: '方針確認', type: 'decision', durationMinutes: 15,
+          deadlineAt: '2026-09-05T08:00:00Z', priority: 'normal', status: 'suggested',
+          createdAt: '2026-09-03T00:00:00Z',
+          options: [{ id: 'option-async', type: 'async' }],
+        }],
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        id: 'request-async', status: 'async', asyncMessage: unsafeMessage,
+      }), { status: 200 }))
+
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: '依頼' }))
+    expect(await screen.findByRole('heading', { name: '方針確認' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'この候補を承認' })).not.toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('非同期メッセージ'), { target: { value: unsafeMessage } })
+    fireEvent.click(screen.getByRole('button', { name: '非同期で回答' }))
+
+    expect(await screen.findByRole('status')).toHaveTextContent('非同期で回答しました。依頼者に通知しました。')
+    const rendered = screen.getByText(unsafeMessage)
+    expect(rendered.querySelector('img')).toBeNull()
+    expect(screen.getByText('回答済み · async')).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining('/api/v1/requests/request-async/async'),
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ message: unsafeMessage }),
+      }),
+    )
+  })
+
+  it('deletes the authenticated account only after typed confirmation', async () => {
+    window.history.replaceState({}, '', '/?auth=success')
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        authenticated: true, demoMode: false,
+        user: { userId: 'user-1', organizationId: 'org-1', email: 'person@example.com', displayName: 'Person', role: 'OWNER' },
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ connected: false }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        activeWorkspaceId: 'org-1', workspaces: [{ id: 'org-1', name: 'Person Workspace', role: 'OWNER' }],
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+
+    render(<App />)
+    expect(await screen.findByText('Googleアカウントでログインしました。')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '山田太郎のアカウントメニュー' }))
+    fireEvent.click(screen.getByRole('button', { name: 'アカウントを削除' }))
+
+    expect(screen.getByRole('dialog', { name: 'アカウントを完全に削除' })).toBeInTheDocument()
+    expect(screen.getByText(/この操作は取り消せません/)).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('確認のため DELETE と入力'), { target: { value: 'DELETE' } })
+    fireEvent.click(screen.getByRole('button', { name: '完全に削除する' }))
+
+    expect(await screen.findByText('アカウントと保存データを削除しました。')).toBeInTheDocument()
+    expect(screen.queryByText('Person')).not.toBeInTheDocument()
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
+      expect.stringContaining('/api/v1/me/account'),
+      expect.objectContaining({
+        method: 'DELETE',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirmation: 'DELETE' }),
+      }),
+    )
+  })
+
 })

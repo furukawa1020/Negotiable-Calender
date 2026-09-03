@@ -1882,6 +1882,7 @@ POST /api/v1/requests/{id}/accept
 POST /api/v1/requests/{id}/suggest
 POST /api/v1/requests/{id}/delegate
 POST /api/v1/requests/{id}/decline
+POST /api/v1/requests/{id}/async
 POST /api/v1/requests/{id}/cancel
 ```
 
@@ -1924,6 +1925,21 @@ POST /api/v1/requests/{id}/cancel
 ```
 
 Private Eventを含めない。
+
+非同期回答は受信者本人だけが、候補提示中の依頼に対して実行できる。
+
+```http
+POST /api/v1/requests/{id}/async
+```
+
+```json
+{
+  "message": "設計コメントを文書で返します"
+}
+```
+
+`message` は必須・500文字以内とし、予定詳細・本文・トークンを通知や監査ログへ複製しない。
+成功時は依頼を終端状態 `async` に更新し、依頼者と受信者だけがRequest APIで本文を確認できる。
 
 ---
 
@@ -2355,16 +2371,35 @@ No event details shared
 
 # 88. Account Deletion
 
+本人の実セッションからのみ実行できる。
+
+```http
+DELETE /api/v1/me/account
+Content-Type: application/json
+```
+
+```json
+{
+  "confirmation": "DELETE"
+}
+```
+
 削除時：
 
 ```text
-OAuth Token削除
-Private Event削除
-Projection削除
-Policy削除
+Google Calendar grant失効
+OAuth identity / 全Session削除
+Private Event / sync cursor削除
+Projection / Manual Override / Policy削除
+本人が関与するRequest / Notification / Invitation削除
+Membership削除
 ```
 
-Auditは必要最小限の匿名化情報のみ残す。
+複数メンバーがいる共有Organizationの最後のOWNERは削除を拒否し、所有権移譲を要求する。
+空になった個人Organizationは同一トランザクション内で削除する。
+保持義務を設定していない現行MVPでは、本人をactorとするAuditと削除対象RequestのAuditも削除し、識別可能な墓標を残さない。
+将来保持義務を導入する場合のみ、別の保持ポリシーと復元不能な匿名化を実装する。
+Token、メール、予定内容、確認payloadをログへ出力しない。
 
 ---
 

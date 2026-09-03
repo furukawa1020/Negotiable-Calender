@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/audit"
@@ -67,6 +68,7 @@ func newAPI(database databasePinger, policies policy.Store, projections projecti
 	mux.HandleFunc("POST /api/v1/requests/{requestId}/suggest", api.suggestCoordinationRequest)
 	mux.HandleFunc("POST /api/v1/requests/{requestId}/delegate", api.delegateCoordinationRequest)
 	mux.HandleFunc("POST /api/v1/requests/{requestId}/decline", api.declineCoordinationRequest)
+	mux.HandleFunc("POST /api/v1/requests/{requestId}/async", api.asyncCoordinationRequest)
 	mux.HandleFunc("POST /api/v1/requests/{requestId}/cancel", api.cancelCoordinationRequest)
 	mux.HandleFunc("GET /api/v1/notifications", api.listNotifications)
 	mux.HandleFunc("POST /api/v1/notifications/{notificationId}/read", api.readNotification)
@@ -346,6 +348,58 @@ func (api *API) declineCoordinationRequest(response http.ResponseWriter, request
 		return
 	}
 	api.respondToCoordinationRequest(response, request, targetUserID, coordinationrequest.Declined, "")
+}
+
+type asyncCoordinationRequestInput struct {
+	Message string `json:"message"`
+}
+
+func (api *API) asyncCoordinationRequest(response http.ResponseWriter, request *http.Request) {
+	targetUserID := request.Header.Get("X-Demo-User-ID")
+	if targetUserID == "" {
+		writeJSON(response, http.StatusUnauthorized, map[string]string{"error": "request identity is required"})
+		return
+	}
+	var input asyncCoordinationRequestInput
+	decoder := json.NewDecoder(http.MaxBytesReader(response, request.Body, 8<<10))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&input); err != nil {
+		writeJSON(response, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+		return
+	}
+	input.Message = strings.TrimSpace(input.Message)
+	if err := coordinationrequest.ValidateAsyncMessage(input.Message); err != nil {
+		writeJSON(response, http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
+		return
+	}
+	requestID := request.PathValue("requestId")
+	value, err := api.requests.GetForUser(request.Context(), requestID, targetUserID)
+	if errors.Is(err, coordinationrequest.ErrNotFound) {
+		writeJSON(response, http.StatusNotFound, map[string]string{"error": "coordination request not found"})
+		return
+	}
+	if err != nil {
+		api.logger.Error("load coordination request for async response", "error", err)
+		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to update request"})
+		return
+	}
+	if value.TargetUserID != targetUserID {
+		writeJSON(response, http.StatusForbidden, map[string]string{"error": "only the recipient can respond"})
+		return
+	}
+	if err := api.requests.RespondAsync(request.Context(), requestID, targetUserID, input.Message); errors.Is(err, coordinationrequest.ErrNotFound) {
+		writeJSON(response, http.StatusConflict, map[string]string{"error": "request cannot be updated"})
+		return
+	} else if err != nil {
+		api.logger.Error("respond asynchronously to coordination request", "error", err)
+		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to update request"})
+		return
+	}
+	api.notify(request.Context(), value.RequesterUserID, notification.RequestAsync, requestID, "依頼に非同期で回答しました。")
+	api.recordAudit(request.Context(), targetUserID, audit.RequestAsync, requestID)
+	writeJSON(response, http.StatusOK, map[string]any{
+		"id": requestID, "status": coordinationrequest.Async, "asyncMessage": input.Message,
+	})
 }
 
 func (api *API) respondToCoordinationRequest(response http.ResponseWriter, request *http.Request, targetUserID string, status coordinationrequest.Status, optionID string) {

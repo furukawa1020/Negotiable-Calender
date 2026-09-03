@@ -260,7 +260,9 @@ func (handler *Handler) deleteAccount(response http.ResponseWriter, request *htt
 		return
 	}
 	if revokeGrant != nil {
-		if err := revokeGrant(request.Context()); err != nil {
+		revocationContext, cancel := context.WithTimeout(context.WithoutCancel(request.Context()), 10*time.Second)
+		defer cancel()
+		if err := revokeGrant(revocationContext); err != nil {
 			handler.logger.Warn("calendar grant revocation failed after account deletion")
 		}
 	}

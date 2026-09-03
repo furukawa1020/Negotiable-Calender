@@ -21,3 +21,16 @@ func TestCoordinationRequestValidation(t *testing.T) {
 		t.Fatal("self-targeted coordination request accepted")
 	}
 }
+
+func TestAsyncMessageValidation(t *testing.T) {
+	t.Parallel()
+	if err := ValidateAsyncMessage(" 文書で回答します "); err != nil {
+		t.Fatalf("valid async message rejected: %v", err)
+	}
+	if err := ValidateAsyncMessage("   "); err == nil {
+		t.Fatal("blank async message accepted")
+	}
+	if err := ValidateAsyncMessage(strings.Repeat("あ", MaxAsyncMessageRunes+1)); err == nil {
+		t.Fatal("oversized async message accepted")
+	}
+}

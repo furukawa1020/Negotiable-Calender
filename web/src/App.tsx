@@ -135,16 +135,18 @@ type InteractionState = {
   reschedulability: 'high' | 'medium' | 'low' | 'fixed'
 }
 
+type PolicyRuleDraft = {
+  conditionType: 'organization' | 'calendar' | 'event'
+  condition: { calendarId?: string; busyStatus?: 'busy' | 'free' }
+  state: InteractionState
+  priority: number
+  enabled: boolean
+}
+
 type SharingPolicyDraft = {
   default: InteractionState
   workingHours: Array<{ weekday: number; startMinute: number; endMinute: number }>
-  rules: Array<{
-    conditionType: string
-    condition: unknown
-    state: InteractionState
-    priority: number
-    enabled: boolean
-  }>
+  rules: PolicyRuleDraft[]
 }
 
 const defaultSharingPolicy: SharingPolicyDraft = {
@@ -154,6 +156,59 @@ const defaultSharingPolicy: SharingPolicyDraft = {
   },
   workingHours: [1, 2, 3, 4, 5].map((weekday) => ({ weekday, startMinute: 9 * 60, endMinute: 18 * 60 })),
   rules: [],
+}
+
+const weekdays = [
+  { value: 1, label: '月曜日' }, { value: 2, label: '火曜日' },
+  { value: 3, label: '水曜日' }, { value: 4, label: '木曜日' },
+  { value: 5, label: '金曜日' }, { value: 6, label: '土曜日' },
+  { value: 0, label: '日曜日' },
+]
+
+const stateOptions = {
+  availability: [
+    ['available', '相談可能'], ['limited', '制限あり'], ['unavailable', '対応不可'], ['unknown', '要確認'],
+  ],
+  interruptibility: [
+    ['open', 'いつでも可'], ['normal', '通常'], ['urgent_only', '緊急のみ'], ['do_not_interrupt', '割り込み不可'],
+  ],
+  requestability: [
+    ['open', '依頼可'], ['async_only', '非同期のみ'], ['later', '後で'], ['closed', '受付停止'],
+  ],
+  reschedulability: [
+    ['high', '変更しやすい'], ['medium', '変更可能'], ['low', '変更しにくい'], ['fixed', '固定'],
+  ],
+} as const
+
+const minutesToTime = (value: number) => `${String(Math.floor(value / 60)).padStart(2, '0')}:${String(value % 60).padStart(2, '0')}`
+const timeToMinutes = (value: string) => {
+  const [hour, minute] = value.split(':').map(Number)
+  return hour * 60 + minute
+}
+
+const newPolicyRule = (): PolicyRuleDraft => ({
+  conditionType: 'event',
+  condition: { busyStatus: 'busy' },
+  state: {
+    availability: 'limited', interruptibility: 'urgent_only',
+    requestability: 'async_only', reschedulability: 'low',
+  },
+  priority: 100,
+  enabled: true,
+})
+
+const sharingPolicyError = (value: SharingPolicyDraft) => {
+  if (value.rules.length > 50) return 'ルールは50件以内にしてください。'
+  for (const window of value.workingHours) {
+    if (window.startMinute < 0 || window.endMinute > 1440 || window.endMinute <= window.startMinute) {
+      return '勤務時間の開始と終了を確認してください。'
+    }
+  }
+  for (const rule of value.rules) {
+    if (rule.priority < 0 || rule.priority > 1000) return '優先度は0〜1000で指定してください。'
+    if (rule.conditionType === 'calendar' && !rule.condition.calendarId?.trim()) return 'Calendar IDを入力してください。'
+  }
+  return ''
 }
 
 const stateForAvailability = (availability: InteractionState['availability']): InteractionState => {
@@ -294,6 +349,7 @@ function App() {
   const activeUserID = authUser?.userId ?? 'demo-manager'
   const activeOrganizationID = authUser?.organizationId ?? 'demo-org'
   const requesterUserID = authUser?.userId ?? 'demo-member'
+  const policyDraftError = sharingPolicyError(sharingPolicy)
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -866,7 +922,56 @@ function App() {
     }
   }
 
+  const setDefaultPolicyState = (key: keyof InteractionState, value: string) => {
+    setSharingPolicy((current) => ({
+      ...current,
+      default: { ...current.default, [key]: value },
+    }))
+  }
+
+  const toggleWorkingDay = (weekday: number) => {
+    setSharingPolicy((current) => {
+      const exists = current.workingHours.some((window) => window.weekday === weekday)
+      return {
+        ...current,
+        workingHours: exists
+          ? current.workingHours.filter((window) => window.weekday !== weekday)
+          : [...current.workingHours, { weekday, startMinute: 540, endMinute: 1080 }]
+            .sort((left, right) => ((left.weekday + 6) % 7) - ((right.weekday + 6) % 7)),
+      }
+    })
+  }
+
+  const updateWorkingWindow = (weekday: number, key: 'startMinute' | 'endMinute', value: string) => {
+    setSharingPolicy((current) => ({
+      ...current,
+      workingHours: current.workingHours.map((window) => window.weekday === weekday
+        ? { ...window, [key]: timeToMinutes(value) }
+        : window),
+    }))
+  }
+
+  const updatePolicyRule = (index: number, update: Partial<PolicyRuleDraft>) => {
+    setSharingPolicy((current) => ({
+      ...current,
+      rules: current.rules.map((rule, ruleIndex) => ruleIndex === index ? { ...rule, ...update } : rule),
+    }))
+  }
+
+  const updateRuleState = (index: number, key: keyof InteractionState, value: string) => {
+    setSharingPolicy((current) => ({
+      ...current,
+      rules: current.rules.map((rule, ruleIndex) => ruleIndex === index
+        ? { ...rule, state: { ...rule.state, [key]: value } }
+        : rule),
+    }))
+  }
+
   const saveSharingRules = async () => {
+    if (policyDraftError) {
+      setNotice(policyDraftError)
+      return
+    }
     setPolicySaving(true)
     try {
       const response = await apiFetch(`${apiURL}/api/v1/users/${activeUserID}/sharing-policy`, {

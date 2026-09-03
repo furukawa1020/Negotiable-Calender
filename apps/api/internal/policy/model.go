@@ -131,7 +131,7 @@ func validateRuleCondition(conditionType string, raw json.RawMessage) error {
 	switch conditionType {
 	case "organization":
 		var value map[string]json.RawMessage
-		if err := decodeStrictCondition(raw, &value); err != nil || len(value) != 0 {
+		if err := decodeStrictCondition(raw, &value); err != nil || value == nil || len(value) != 0 {
 			return fmt.Errorf("organization condition must be an empty object")
 		}
 		return nil

@@ -185,3 +185,29 @@ func TestPrivateCalendarProviderReturnsOwnerDetailsWithoutPersistingThem(t *test
 		t.Fatalf("all-day event = %#v", events[1])
 	}
 }
+
+func TestCalendarProviderRevokesRefreshTokenInFormBody(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodPost {
+			t.Errorf("method = %s", request.Method)
+		}
+		if request.URL.RawQuery != "" {
+			t.Errorf("token leaked in URL query: %q", request.URL.RawQuery)
+		}
+		if err := request.ParseForm(); err != nil {
+			t.Fatal(err)
+		}
+		if request.Form.Get("token") != "refresh-secret" {
+			t.Errorf("token = %q", request.Form.Get("token"))
+		}
+		response.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	provider := NewGoogleProvider(GoogleConfig{
+		ClientID: "client", RedirectURL: "https://app.example/callback", RevokeURL: server.URL,
+	}, server.Client())
+	if err := provider.Revoke(context.Background(), "refresh-secret"); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -29,23 +30,32 @@ type HandlerConfig struct {
 	SessionTTL    time.Duration
 }
 
+type AccountGrantRevoker interface {
+	RevokeForAccountDeletion(context.Context, string) error
+}
+
 type Handler struct {
 	next     http.Handler
 	store    Store
 	provider Provider
+	revoker  AccountGrantRevoker
 	config   HandlerConfig
 	logger   *slog.Logger
 	now      func() time.Time
 }
 
 func NewHandler(next http.Handler, store Store, provider Provider, config HandlerConfig, logger *slog.Logger) http.Handler {
+	return NewHandlerWithAccountRevoker(next, store, provider, nil, config, logger)
+}
+
+func NewHandlerWithAccountRevoker(next http.Handler, store Store, provider Provider, revoker AccountGrantRevoker, config HandlerConfig, logger *slog.Logger) http.Handler {
 	if config.FlowTTL == 0 {
 		config.FlowTTL = 10 * time.Minute
 	}
 	if config.SessionTTL == 0 {
 		config.SessionTTL = 7 * 24 * time.Hour
 	}
-	return &Handler{next: next, store: store, provider: provider, config: config, logger: logger, now: time.Now}
+	return &Handler{next: next, store: store, provider: provider, revoker: revoker, config: config, logger: logger, now: time.Now}
 }
 
 func (handler *Handler) ServeHTTP(response http.ResponseWriter, request *http.Request) {
@@ -66,6 +76,9 @@ func (handler *Handler) ServeHTTP(response http.ResponseWriter, request *http.Re
 		return
 	case http.MethodPost + " /api/v1/auth/logout":
 		handler.logout(response, request)
+		return
+	case http.MethodDelete + " /api/v1/me/account":
+		handler.deleteAccount(response, request)
 		return
 	}
 
@@ -195,6 +208,54 @@ func (handler *Handler) logout(response http.ResponseWriter, request *http.Reque
 		}
 	}
 	expireCookie(response, sessionCookieName, "/", handler.config.SecureCookies)
+	response.WriteHeader(http.StatusNoContent)
+}
+
+type deleteAccountInput struct {
+	Confirmation string `json:"confirmation"`
+}
+
+func (handler *Handler) deleteAccount(response http.ResponseWriter, request *http.Request) {
+	identity, authenticated := handler.identity(request)
+	if !authenticated {
+		writeJSON(response, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
+		return
+	}
+	var input deleteAccountInput
+	decoder := json.NewDecoder(http.MaxBytesReader(response, request.Body, 1<<10))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&input); err != nil {
+		writeJSON(response, http.StatusBadRequest, map[string]string{"error": "invalid confirmation"})
+		return
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err == nil {
+		writeJSON(response, http.StatusBadRequest, map[string]string{"error": "invalid confirmation"})
+		return
+	}
+	if input.Confirmation != "DELETE" {
+		writeJSON(response, http.StatusUnprocessableEntity, map[string]string{"error": "confirmation must equal DELETE"})
+		return
+	}
+	if handler.revoker != nil {
+		if err := handler.revoker.RevokeForAccountDeletion(request.Context(), identity.UserID); err != nil {
+			handler.logger.Warn("calendar grant revocation failed during account deletion")
+		}
+	}
+	if err := handler.store.DeleteAccount(request.Context(), identity.UserID); errors.Is(err, ErrLastOrganizationOwner) {
+		writeJSON(response, http.StatusConflict, map[string]string{"error": "transfer workspace ownership before deleting your account"})
+		return
+	} else if errors.Is(err, ErrNotFound) {
+		expireCookie(response, sessionCookieName, "/", handler.config.SecureCookies)
+		writeJSON(response, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
+		return
+	} else if err != nil {
+		handler.logger.Error("delete account")
+		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to delete account"})
+		return
+	}
+	expireCookie(response, sessionCookieName, "/", handler.config.SecureCookies)
+	expireCookie(response, flowCookieName, "/api/v1/auth/google/callback", handler.config.SecureCookies)
 	response.WriteHeader(http.StatusNoContent)
 }
 

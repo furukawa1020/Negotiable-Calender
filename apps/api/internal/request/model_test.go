@@ -1,6 +1,7 @@
 package request
 
 import (
+	"strings"
 	"testing"
 	"time"
 )

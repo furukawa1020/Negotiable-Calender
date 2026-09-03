@@ -158,7 +158,7 @@ func TestAccountDeletionGrantIsPreparedWithoutEarlyRevocation(t *testing.T) {
 
 	revoke, err := handler.PrepareForAccountDeletion(context.Background(), "user-1")
 	if err != nil || revoke == nil {
-		t.Fatalf("prepare revocation: revoke=%v err=%v", revoke, err)
+		t.Fatalf("prepare revocation failed: %v", err)
 	}
 	if provider.revoked != "" {
 		t.Fatal("grant was revoked before database deletion committed")

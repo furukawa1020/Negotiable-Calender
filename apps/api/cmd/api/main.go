@@ -135,7 +135,7 @@ func main() {
 	invitationHandler := organization.NewInvitationHandler(calendarHandler, organization.NewPostgresStore(db), organization.InvitationHandlerConfig{
 		WebOrigin: os.Getenv("WEB_ORIGIN"),
 	}, logger)
-	authHandler := auth.NewHandler(invitationHandler, auth.NewPostgresStore(db), googleProvider, auth.HandlerConfig{
+	authHandler := auth.NewHandlerWithAccountRevoker(invitationHandler, auth.NewPostgresStore(db), googleProvider, calendarHandler, auth.HandlerConfig{
 		WebOrigin: os.Getenv("WEB_ORIGIN"), DemoMode: demoMode, SecureCookies: secureCookies,
 	}, logger)
 	handler := security.New(authHandler, security.Config{WebOrigin: os.Getenv("WEB_ORIGIN")})

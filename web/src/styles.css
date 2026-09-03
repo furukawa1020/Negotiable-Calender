@@ -1470,3 +1470,29 @@ footer {
   display: inline-block;
   text-decoration: none;
 }
+
+.danger-link {
+  color: #9f2f2f !important;
+  border-color: #d8a8a8 !important;
+  background: #fff7f7 !important;
+}
+
+.danger-modal {
+  border-top: 4px solid #a63535;
+}
+
+.danger-button {
+  padding: 10px 16px;
+  border: 1px solid #8f2929;
+  border-radius: 8px;
+  color: white;
+  background: #a63535;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.danger-button:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}

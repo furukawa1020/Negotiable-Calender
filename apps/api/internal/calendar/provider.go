@@ -26,16 +26,20 @@ type Provider interface {
 	ListBusy(context.Context, string, time.Time, time.Time) ([]BusySpan, error)
 }
 
+type TokenRevoker interface {
+	Revoke(context.Context, string) error
+}
+
 type IncrementalProvider interface {
 	ListChanges(context.Context, string, string, time.Time, time.Time) (ChangeSet, error)
 }
 
-type GoogleConfig struct{ ClientID, ClientSecret, RedirectURL string }
+type GoogleConfig struct{ ClientID, ClientSecret, RedirectURL, RevokeURL string }
 
 type GoogleProvider struct {
 	config                       GoogleConfig
 	client                       *http.Client
-	authURL, tokenURL, eventsURL string
+	authURL, tokenURL, eventsURL, revokeURL string
 }
 
 type providerStatusError struct {
@@ -51,7 +55,8 @@ func NewGoogleProvider(config GoogleConfig, client *http.Client) *GoogleProvider
 	return &GoogleProvider{config: config, client: client,
 		authURL:   "https://accounts.google.com/o/oauth2/v2/auth",
 		tokenURL:  "https://oauth2.googleapis.com/token",
-		eventsURL: "https://www.googleapis.com/calendar/v3/calendars/primary/events"}
+		eventsURL: "https://www.googleapis.com/calendar/v3/calendars/primary/events",
+		revokeURL: revokeURL(config.RevokeURL)}
 }
 
 func (provider *GoogleProvider) Configured() bool {
@@ -111,6 +116,34 @@ func (provider *GoogleProvider) token(ctx context.Context, form url.Values) (Tok
 		return TokenSet{}, fmt.Errorf("calendar token response missing access token")
 	}
 	return TokenSet{AccessToken: body.AccessToken, RefreshToken: body.RefreshToken, Scopes: strings.Fields(body.Scope), ExpiresAt: time.Now().UTC().Add(time.Duration(body.ExpiresIn) * time.Second)}, nil
+}
+
+func revokeURL(configured string) string {
+	if configured != "" {
+		return configured
+	}
+	return "https://oauth2.googleapis.com/revoke"
+}
+
+func (provider *GoogleProvider) Revoke(ctx context.Context, refreshToken string) error {
+	if strings.TrimSpace(refreshToken) == "" {
+		return fmt.Errorf("calendar refresh token is required")
+	}
+	form := url.Values{"token": {refreshToken}}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, provider.revokeURL, strings.NewReader(form.Encode()))
+	if err != nil {
+		return fmt.Errorf("create calendar revoke request: %w", err)
+	}
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	response, err := provider.client.Do(request)
+	if err != nil {
+		return fmt.Errorf("revoke calendar grant: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return providerStatusError{service: "calendar revoke", status: response.StatusCode}
+	}
+	return nil
 }
 
 func (provider *GoogleProvider) ListBusy(ctx context.Context, accessToken string, from, to time.Time) ([]BusySpan, error) {

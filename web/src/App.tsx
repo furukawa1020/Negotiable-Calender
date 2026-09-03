@@ -273,6 +273,7 @@ function App() {
   const [auditError, setAuditError] = useState('')
   const [overrideSaving, setOverrideSaving] = useState(false)
   const [exporting, setExporting] = useState(false)
+  const [deletingAccount, setDeletingAccount] = useState(false)
   const [policyLoading, setPolicyLoading] = useState(false)
   const [policySaving, setPolicySaving] = useState(false)
   const [sharingPolicy, setSharingPolicy] = useState<SharingPolicyDraft>(defaultSharingPolicy)
@@ -808,6 +809,36 @@ function App() {
     }
   }
 
+  const deleteAccount = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const confirmation = String(new FormData(event.currentTarget).get('confirmation'))
+    setDeletingAccount(true)
+    try {
+      const response = await apiFetch(`${apiURL}/api/v1/me/account`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirmation }),
+      })
+      if (response.status === 409) {
+        setNotice('共有Workspaceの最後のOWNERです。先に別のOWNERへ引き継いでください。')
+        return
+      }
+      if (!response.ok) throw new Error('account deletion failed')
+      setAuthUser(null)
+      setCalendarConnection(null)
+      setWorkspaces([])
+      setPrivateCalendarEvents([])
+      setProjections([])
+      setActiveDialog('')
+      setAccountOpen(false)
+      setNotice('アカウントと保存データを削除しました。')
+    } catch {
+      setNotice('アカウントを削除できませんでした。時間をおいて再試行してください。')
+    } finally {
+      setDeletingAccount(false)
+    }
+  }
+
   const openSharingRules = async () => {
     setActiveDialog('rules')
     setPolicyLoading(true)
@@ -1072,6 +1103,7 @@ function App() {
                       <a href={`${apiURL}/api/v1/calendar/google/connect`}>Google Calendarを接続</a>
                     )}
                     <button type="button" onClick={logout}>ログアウト</button>
+                    <button className="danger-link" type="button" onClick={() => { setAccountOpen(false); setActiveDialog('delete-account') }}>アカウントを削除</button>
                   </>
                 ) : (
                   <a href={`${apiURL}/api/v1/auth/google/login`}>Googleでログイン</a>
@@ -1476,6 +1508,31 @@ function App() {
               <div className="modal-actions">
                 <button className="secondary-button" type="button" onClick={() => setActiveDialog('')}>キャンセル</button>
                 <button className="primary-button" type="submit" disabled={overrideSaving}>{overrideSaving ? '保存中…' : '上書きを保存'}</button>
+              </div>
+            </form>
+          </section>
+        </div>
+      ) : null}
+
+      {activeDialog === 'delete-account' ? (
+        <div className="modal-backdrop" role="presentation">
+          <section className="modal danger-modal" role="dialog" aria-modal="true" aria-labelledby="delete-account-title">
+            <div className="modal-heading">
+              <div>
+                <p className="eyebrow">DANGER ZONE</p>
+                <h2 id="delete-account-title">アカウントを完全に削除</h2>
+              </div>
+              <button className="close-button" type="button" aria-label="閉じる" disabled={deletingAccount} onClick={() => setActiveDialog('')}>×</button>
+            </div>
+            <p className="modal-copy">この操作は取り消せません。Calendar連携を失効し、予定の投影、共有ルール、依頼、通知、セッションを削除します。</p>
+            <form className="request-form" onSubmit={deleteAccount}>
+              <label>
+                確認のため DELETE と入力
+                <input name="confirmation" autoComplete="off" pattern="DELETE" maxLength={6} required />
+              </label>
+              <div className="modal-actions">
+                <button className="secondary-button" type="button" disabled={deletingAccount} onClick={() => setActiveDialog('')}>キャンセル</button>
+                <button className="danger-button" type="submit" disabled={deletingAccount}>{deletingAccount ? '削除中…' : '完全に削除する'}</button>
               </div>
             </form>
           </section>

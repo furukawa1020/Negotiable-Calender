@@ -52,7 +52,10 @@ func (store *stubStore) DeleteConnection(context.Context, string) error {
 	return nil
 }
 
-type stubProvider struct{ refreshed string }
+type stubProvider struct {
+	refreshed string
+	revoked   string
+}
 
 type stubProjector struct {
 	rebuilt bool
@@ -72,6 +75,10 @@ func (*stubProvider) Exchange(context.Context, string, string) (TokenSet, error)
 func (provider *stubProvider) Refresh(_ context.Context, value string) (TokenSet, error) {
 	provider.refreshed = value
 	return TokenSet{AccessToken: "access"}, nil
+}
+func (provider *stubProvider) Revoke(_ context.Context, value string) error {
+	provider.revoked = value
+	return nil
 }
 func (*stubProvider) ListBusy(context.Context, string, time.Time, time.Time) ([]BusySpan, error) {
 	return []BusySpan{{ProviderEventID: "event-1", CalendarID: "primary", StartAt: time.Date(2026, 9, 3, 0, 0, 0, 0, time.UTC), EndAt: time.Date(2026, 9, 3, 1, 0, 0, 0, time.UTC), Busy: true}}, nil
@@ -134,6 +141,33 @@ func TestCalendarSyncDoesNotMarkCompleteWhenProjectionRebuildFails(t *testing.T)
 	}
 	if store.connection.LastSyncedAt != nil {
 		t.Fatal("failed projection rebuild was marked as a completed sync")
+	}
+}
+
+func TestAccountDeletionGrantIsPreparedWithoutEarlyRevocation(t *testing.T) {
+	t.Parallel()
+	cipher := testCipher(t)
+	encrypted, err := cipher.Encrypt("refresh-secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := &stubProvider{}
+	handler := NewHandler(http.NotFoundHandler(), &stubStore{connection: Connection{
+		UserID: "user-1", RefreshTokenCipher: encrypted,
+	}}, provider, cipher, &stubProjector{}, HandlerConfig{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	revoke, err := handler.PrepareForAccountDeletion(context.Background(), "user-1")
+	if err != nil || revoke == nil {
+		t.Fatalf("prepare revocation failed: %v", err)
+	}
+	if provider.revoked != "" {
+		t.Fatal("grant was revoked before database deletion committed")
+	}
+	if err := revoke(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if provider.revoked != "refresh-secret" {
+		t.Fatalf("wrong grant revoked: %q", provider.revoked)
 	}
 }
 

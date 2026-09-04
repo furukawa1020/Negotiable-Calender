@@ -133,7 +133,7 @@ export default function SharingPolicyEditor({ value, onChange, disabled = false 
         <div className="policy-state-grid">
           {(Object.keys(stateOptions) as Array<keyof InteractionState>).map((key) => (
             <label key={key}>{stateLabels[key]}
-              <select aria-label={`基本の${stateLabels[key]}`} value={value.default[key]} onChange={(event) => setDefault(key, event.target.value)}>
+              <select aria-label={key === 'availability' ? '基本の公開状態' : `基本の${stateLabels[key]}`} value={value.default[key]} onChange={(event) => setDefault(key, event.target.value)}>
                 {stateOptions[key].map(([optionValue, label]) => <option key={optionValue} value={optionValue}>{label}</option>)}
               </select>
             </label>

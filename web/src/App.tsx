@@ -1,5 +1,6 @@
 import { type FormEvent, useEffect, useMemo, useState } from 'react'
-import SharingPolicyEditor, { sharingPolicyError, type SharingPolicyDraft } from './SharingPolicyEditor'
+import SharingPolicyEditor from './SharingPolicyEditor'
+import { sharingPolicyError, type SharingPolicyDraft } from './sharingPolicy'
 
 const defaultSharingPolicy: SharingPolicyDraft = {
   default: {

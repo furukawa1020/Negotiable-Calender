@@ -126,8 +126,8 @@ func main() {
 			os.Exit(1)
 		}
 	}
-	apiHandler := httpapi.NewWithStores(db, policy.NewPostgresStore(db), projection.NewPostgresStore(db), organization.NewPostgresStore(db), coordinationrequest.NewPostgresStore(db), notification.NewPostgresStore(db), audit.NewPostgresStore(db), os.Getenv("WEB_ORIGIN"), logger)
 	projectionRebuilder := projection.NewRebuilder(projection.NewPostgresRebuildStore(db), policy.NewPostgresStore(db))
+	apiHandler := httpapi.NewWithStoresAndRebuilder(db, policy.NewPostgresStore(db), projection.NewPostgresStore(db), organization.NewPostgresStore(db), coordinationrequest.NewPostgresStore(db), notification.NewPostgresStore(db), audit.NewPostgresStore(db), projectionRebuilder, os.Getenv("WEB_ORIGIN"), logger)
 	calendarStore := calendarintegration.NewPostgresStore(db)
 	calendarHandler := calendarintegration.NewHandler(apiHandler, calendarStore, calendarProvider, calendarCipher, projectionRebuilder, calendarintegration.HandlerConfig{
 		WebOrigin: os.Getenv("WEB_ORIGIN"), SecureCookies: secureCookies,

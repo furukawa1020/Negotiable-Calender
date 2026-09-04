@@ -228,7 +228,7 @@ describe('App', () => {
     const availability = screen.getByLabelText('基本の公開状態')
     await waitFor(() => expect(availability).not.toBeDisabled())
     fireEvent.change(availability, { target: { value: 'limited' } })
-    fireEvent.click(screen.getByRole('button', { name: 'このルールを保存' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存して公開状態を更新' }))
 
     expect(await screen.findByRole('status')).toHaveTextContent('共有ルールを保存しました。')
     const [, options] = fetchMock.mock.calls[1]

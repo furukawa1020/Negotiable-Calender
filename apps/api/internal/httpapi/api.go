@@ -24,6 +24,14 @@ type databasePinger interface {
 	PingContext(context.Context) error
 }
 
+type ProjectionRebuilder interface {
+	Rebuild(context.Context, string, time.Time, time.Time, time.Time) error
+}
+
+type projectionInvalidator interface {
+	DeleteForUser(context.Context, string) error
+}
+
 type API struct {
 	database      databasePinger
 	policies      policy.Store
@@ -32,24 +40,29 @@ type API struct {
 	requests      coordinationrequest.Store
 	notifications notification.Store
 	audits        audit.Store
+	projector      ProjectionRebuilder
 	webOrigin     string
 	logger        *slog.Logger
 }
 
 func New(database databasePinger, policies policy.Store, projections projection.Store, organizations organization.Store, requests coordinationrequest.Store, webOrigin string, logger *slog.Logger) http.Handler {
-	return newAPI(database, policies, projections, organizations, requests, nil, nil, webOrigin, logger)
+	return newAPI(database, policies, projections, organizations, requests, nil, nil, nil, webOrigin, logger)
 }
 
 func NewWithNotifications(database databasePinger, policies policy.Store, projections projection.Store, organizations organization.Store, requests coordinationrequest.Store, notifications notification.Store, webOrigin string, logger *slog.Logger) http.Handler {
-	return newAPI(database, policies, projections, organizations, requests, notifications, nil, webOrigin, logger)
+	return newAPI(database, policies, projections, organizations, requests, notifications, nil, nil, webOrigin, logger)
 }
 
 func NewWithStores(database databasePinger, policies policy.Store, projections projection.Store, organizations organization.Store, requests coordinationrequest.Store, notifications notification.Store, audits audit.Store, webOrigin string, logger *slog.Logger) http.Handler {
-	return newAPI(database, policies, projections, organizations, requests, notifications, audits, webOrigin, logger)
+	return newAPI(database, policies, projections, organizations, requests, notifications, audits, nil, webOrigin, logger)
 }
 
-func newAPI(database databasePinger, policies policy.Store, projections projection.Store, organizations organization.Store, requests coordinationrequest.Store, notifications notification.Store, audits audit.Store, webOrigin string, logger *slog.Logger) http.Handler {
-	api := &API{database: database, policies: policies, projections: projections, organizations: organizations, requests: requests, notifications: notifications, audits: audits, webOrigin: webOrigin, logger: logger}
+func NewWithStoresAndRebuilder(database databasePinger, policies policy.Store, projections projection.Store, organizations organization.Store, requests coordinationrequest.Store, notifications notification.Store, audits audit.Store, projector ProjectionRebuilder, webOrigin string, logger *slog.Logger) http.Handler {
+	return newAPI(database, policies, projections, organizations, requests, notifications, audits, projector, webOrigin, logger)
+}
+
+func newAPI(database databasePinger, policies policy.Store, projections projection.Store, organizations organization.Store, requests coordinationrequest.Store, notifications notification.Store, audits audit.Store, projector ProjectionRebuilder, webOrigin string, logger *slog.Logger) http.Handler {
+	api := &API{database: database, policies: policies, projections: projections, organizations: organizations, requests: requests, notifications: notifications, audits: audits, projector: projector, webOrigin: webOrigin, logger: logger}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", api.health)
 	mux.HandleFunc("GET /readyz", api.ready)
@@ -811,6 +824,18 @@ func (api *API) putSharingPolicy(response http.ResponseWriter, request *http.Req
 		api.logger.Error("update sharing policy", "error", err)
 		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to update sharing policy"})
 		return
+	}
+	if api.projector != nil {
+		if err := api.projector.Rebuild(request.Context(), userID, now.Add(-30*24*time.Hour), now.Add(90*24*time.Hour), now); err != nil {
+			api.logger.Error("rebuild projections after policy update")
+			if invalidator, ok := api.projections.(projectionInvalidator); ok {
+				if invalidateErr := invalidator.DeleteForUser(request.Context(), userID); invalidateErr != nil {
+					api.logger.Error("invalidate projections after policy rebuild failure")
+				}
+			}
+			writeJSON(response, http.StatusServiceUnavailable, map[string]string{"error": "sharing policy was saved but public projection is temporarily unavailable"})
+			return
+		}
 	}
 	writeJSON(response, http.StatusOK, value)
 }

@@ -1,7 +1,8 @@
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { useState } from 'react'
 import { describe, expect, it } from 'vitest'
-import SharingPolicyEditor, { sharingPolicyError, type SharingPolicyDraft } from './SharingPolicyEditor'
+import SharingPolicyEditor from './SharingPolicyEditor'
+import { sharingPolicyError, type SharingPolicyDraft } from './sharingPolicy'
 
 const policy = (): SharingPolicyDraft => ({
   default: {

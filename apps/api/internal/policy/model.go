@@ -1,10 +1,20 @@
 package policy
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"time"
+)
+
+const (
+	MaxWorkingWindows = 14
+	MaxPolicyRules = 50
+	MaxCalendarIDRunes = 200
+	MaxRulePriority = 1000
 )
 
 type WorkingWindow struct {
@@ -52,10 +62,22 @@ func (p SharingPolicy) Validate() error {
 	if err := p.Default.Validate(); err != nil {
 		return fmt.Errorf("default state: %w", err)
 	}
-	for _, window := range p.WorkingHours {
+	if len(p.WorkingHours) > MaxWorkingWindows {
+		return fmt.Errorf("too many working windows")
+	}
+	for index, window := range p.WorkingHours {
 		if err := window.Validate(); err != nil {
 			return err
 		}
+		for otherIndex := index + 1; otherIndex < len(p.WorkingHours); otherIndex++ {
+			other := p.WorkingHours[otherIndex]
+			if window.Weekday == other.Weekday && window.StartMinute < other.EndMinute && other.StartMinute < window.EndMinute {
+				return fmt.Errorf("working windows must not overlap")
+			}
+		}
+	}
+	if len(p.Rules) > MaxPolicyRules {
+		return fmt.Errorf("too many policy rules")
 	}
 	for _, rule := range p.Rules {
 		if err := rule.Validate(); err != nil {
@@ -85,15 +107,69 @@ func (r Rule) Validate() error {
 	if strings.TrimSpace(r.ConditionType) == "" {
 		return fmt.Errorf("condition type is required")
 	}
-	switch r.ConditionType {
-	case "organization", "calendar", "event":
+	if r.Priority < 0 || r.Priority > MaxRulePriority {
+		return fmt.Errorf("rule priority must be between 0 and %d", MaxRulePriority)
+	}
+	if err := validateRuleCondition(r.ConditionType, r.Condition); err != nil {
+		return err
+	}
+	return r.State.Validate()
+}
+
+type calendarRuleCondition struct {
+	CalendarID string `json:"calendarId"`
+}
+
+type eventRuleCondition struct {
+	BusyStatus string `json:"busyStatus"`
+}
+
+func validateRuleCondition(conditionType string, raw json.RawMessage) error {
+	if !json.Valid(raw) {
+		return fmt.Errorf("condition must be valid JSON")
+	}
+	switch conditionType {
+	case "organization":
+		var value map[string]json.RawMessage
+		if err := decodeStrictCondition(raw, &value); err != nil || value == nil || len(value) != 0 {
+			return fmt.Errorf("organization condition must be an empty object")
+		}
+		return nil
+	case "calendar":
+		var value calendarRuleCondition
+		if err := decodeStrictCondition(raw, &value); err != nil {
+			return fmt.Errorf("invalid calendar condition")
+		}
+		value.CalendarID = strings.TrimSpace(value.CalendarID)
+		if value.CalendarID == "" || len([]rune(value.CalendarID)) > MaxCalendarIDRunes {
+			return fmt.Errorf("calendarId is required and must be at most %d characters", MaxCalendarIDRunes)
+		}
+		return nil
+	case "event":
+		var value eventRuleCondition
+		if err := decodeStrictCondition(raw, &value); err != nil {
+			return fmt.Errorf("invalid event condition")
+		}
+		if value.BusyStatus != "busy" && value.BusyStatus != "free" {
+			return fmt.Errorf("busyStatus must be busy or free")
+		}
+		return nil
 	default:
 		return fmt.Errorf("invalid condition type")
 	}
-	if !json.Valid(r.Condition) {
-		return fmt.Errorf("condition must be valid JSON")
+}
+
+func decodeStrictCondition(raw json.RawMessage, destination any) error {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(destination); err != nil {
+		return err
 	}
-	return r.State.Validate()
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		return fmt.Errorf("condition must contain one JSON value")
+	}
+	return nil
 }
 
 type ManualOverride struct {

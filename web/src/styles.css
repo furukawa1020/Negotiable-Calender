@@ -1496,3 +1496,266 @@ footer {
   cursor: wait;
   opacity: 0.6;
 }
+
+
+/* Sharing policy editor */
+.rules-modal {
+  width: min(920px, calc(100vw - 32px));
+  max-height: min(880px, calc(100vh - 32px));
+  overflow-y: auto;
+}
+
+.policy-editor {
+  display: grid;
+  gap: 18px;
+}
+
+.policy-editor fieldset {
+  margin: 0;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.policy-editor legend {
+  padding: 0 7px;
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.policy-state-grid,
+.policy-condition-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.policy-state-grid label,
+.policy-condition-grid label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.policy-state-grid select,
+.policy-condition-grid select,
+.policy-condition-grid input,
+.working-window input {
+  width: 100%;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--ink);
+  background: var(--paper);
+}
+
+.field-help {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.working-hours-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.working-day {
+  display: grid;
+  grid-template-columns: 34px 1fr auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.working-day > div {
+  display: grid;
+  gap: 6px;
+}
+
+.working-window {
+  display: grid;
+  grid-template-columns: minmax(100px, 1fr) auto minmax(100px, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+}
+
+.working-day button,
+.rule-order-actions button {
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--green);
+  background: transparent;
+  cursor: pointer;
+}
+
+.empty-inline {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.policy-rule-list {
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+  list-style: none;
+}
+
+.policy-rule-list > li {
+  padding: 14px;
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.policy-rule-list > li.disabled-rule {
+  opacity: 0.62;
+}
+
+.policy-rule-heading {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.policy-rule-heading > label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.rule-order-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+}
+
+.policy-condition-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.policy-state-grid.compact {
+  padding-top: 11px;
+  border-top: 1px solid var(--line);
+}
+
+.policy-empty {
+  margin: 0 0 12px;
+  padding: 14px;
+  border-radius: 8px;
+  color: var(--muted);
+  background: var(--cream);
+  font-size: 13px;
+}
+
+.add-policy-rule {
+  margin-top: 12px;
+}
+
+.policy-preview {
+  padding: 16px;
+  border: 1px solid #bcd5c6;
+  border-radius: 10px;
+  color: var(--green);
+  background: #eef7f1;
+}
+
+.policy-preview > strong {
+  display: block;
+  margin-bottom: 10px;
+}
+
+.policy-preview dl {
+  margin: 0 0 10px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.policy-preview dl div {
+  padding: 9px;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.75);
+}
+
+.policy-preview dt {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.policy-preview dd {
+  margin: 4px 0 0;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.policy-preview small {
+  color: var(--muted);
+}
+
+.policy-error {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 7px;
+  color: #8c2d25;
+  background: #fff0ed;
+  font-size: 13px;
+}
+
+.policy-save-actions {
+  position: sticky;
+  bottom: -1px;
+  padding-top: 14px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  background: var(--paper);
+}
+
+@media (max-width: 800px) {
+  .policy-state-grid,
+  .policy-preview dl {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .policy-condition-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 520px) {
+  .rules-modal {
+    width: calc(100vw - 16px);
+  }
+
+  .policy-state-grid,
+  .policy-preview dl {
+    grid-template-columns: 1fr;
+  }
+
+  .working-day {
+    grid-template-columns: 28px 1fr;
+  }
+
+  .working-day > button {
+    grid-column: 2;
+    justify-self: start;
+  }
+
+  .working-window {
+    grid-template-columns: 1fr auto 1fr;
+  }
+
+  .working-window button {
+    grid-column: 1 / -1;
+    justify-self: end;
+  }
+}

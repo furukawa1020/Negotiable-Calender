@@ -1,4 +1,15 @@
 import { type FormEvent, useEffect, useMemo, useState } from 'react'
+import SharingPolicyEditor from './SharingPolicyEditor'
+import { sharingPolicyError, type SharingPolicyDraft } from './sharingPolicy'
+
+const defaultSharingPolicy: SharingPolicyDraft = {
+  default: {
+    availability: 'available', interruptibility: 'normal',
+    requestability: 'open', reschedulability: 'medium',
+  },
+  workingHours: [1, 2, 3, 4, 5].map((weekday) => ({ weekday, startMinute: 9 * 60, endMinute: 18 * 60 })),
+  rules: [],
+}
 
 const demoPrivateEvents = [
   { id: 'demo-1', time: '09:00', label: 'Product Review', size: 'short', details: [] as string[] },
@@ -128,48 +139,6 @@ type InvitationPreview = {
   expiresAt: string
 }
 
-type InteractionState = {
-  availability: 'available' | 'limited' | 'unavailable' | 'unknown'
-  interruptibility: 'open' | 'normal' | 'urgent_only' | 'do_not_interrupt'
-  requestability: 'open' | 'async_only' | 'later' | 'closed'
-  reschedulability: 'high' | 'medium' | 'low' | 'fixed'
-}
-
-type SharingPolicyDraft = {
-  default: InteractionState
-  workingHours: Array<{ weekday: number; startMinute: number; endMinute: number }>
-  rules: Array<{
-    conditionType: string
-    condition: unknown
-    state: InteractionState
-    priority: number
-    enabled: boolean
-  }>
-}
-
-const defaultSharingPolicy: SharingPolicyDraft = {
-  default: {
-    availability: 'available', interruptibility: 'normal',
-    requestability: 'open', reschedulability: 'medium',
-  },
-  workingHours: [1, 2, 3, 4, 5].map((weekday) => ({ weekday, startMinute: 9 * 60, endMinute: 18 * 60 })),
-  rules: [],
-}
-
-const stateForAvailability = (availability: InteractionState['availability']): InteractionState => {
-  if (availability === 'available') {
-    return { availability, interruptibility: 'normal', requestability: 'open', reschedulability: 'medium' }
-  }
-  if (availability === 'limited') {
-    return { availability, interruptibility: 'urgent_only', requestability: 'later', reschedulability: 'low' }
-  }
-  if (availability === 'unavailable') {
-    return { availability, interruptibility: 'do_not_interrupt', requestability: 'closed', reschedulability: 'fixed' }
-  }
-  return { availability, interruptibility: 'normal', requestability: 'later', reschedulability: 'low' }
-}
-
-
 const calendarRange = (anchor: Date, view: CalendarView) => {
   const from = new Date(anchor)
   from.setHours(0, 0, 0, 0)
@@ -294,6 +263,7 @@ function App() {
   const activeUserID = authUser?.userId ?? 'demo-manager'
   const activeOrganizationID = authUser?.organizationId ?? 'demo-org'
   const requesterUserID = authUser?.userId ?? 'demo-member'
+  const policyDraftError = sharingPolicyError(sharingPolicy)
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -867,6 +837,10 @@ function App() {
   }
 
   const saveSharingRules = async () => {
+    if (policyDraftError) {
+      setNotice(policyDraftError)
+      return
+    }
     setPolicySaving(true)
     try {
       const response = await apiFetch(`${apiURL}/api/v1/users/${activeUserID}/sharing-policy`, {
@@ -1453,31 +1427,12 @@ function App() {
               <button className="close-button" type="button" aria-label="閉じる" onClick={() => setActiveDialog('')}>×</button>
             </div>
             <p className="modal-copy">予定の内容ではなく、関わりやすさだけに変換して共有します。</p>
-            <div className="rule-list">
-              <div>
-                <label htmlFor="default-availability">基本の公開状態</label>
-                <select
-                  id="default-availability"
-                  value={sharingPolicy.default.availability}
-                  disabled={policyLoading || policySaving}
-                  onChange={(event) => setSharingPolicy((current) => ({
-                    ...current,
-                    default: stateForAvailability(event.target.value as InteractionState['availability']),
-                  }))}
-                >
-                  <option value="available">相談可能</option>
-                  <option value="limited">緊急のみ</option>
-                  <option value="unavailable">対応不可</option>
-                  <option value="unknown">要確認</option>
-                </select>
-              </div>
-              <div><span>勤務時間</span><strong>平日 09:00 — 18:00</strong></div>
-              <div><span>予定中</span><strong>緊急のみ</strong></div>
-              <div><span>集中時間</span><strong>割り込み非推奨</strong></div>
-              <div><span>空き時間</span><strong>相談可能</strong></div>
-              <div><span>勤務時間外</span><strong>対応不可</strong></div>
+            {policyLoading ? <p role="status">共有ルールを読み込んでいます…</p> : null}
+            <SharingPolicyEditor value={sharingPolicy} onChange={setSharingPolicy} disabled={policyLoading || policySaving} />
+            <div className="policy-save-actions">
+              <button className="secondary-button" type="button" disabled={policySaving} onClick={() => setActiveDialog('')}>キャンセル</button>
+              <button className="primary-button" type="button" onClick={saveSharingRules} disabled={policyLoading || policySaving || Boolean(policyDraftError)}>{policySaving ? '保存中…' : '保存して公開状態を更新'}</button>
             </div>
-            <button className="primary-button full-button" type="button" onClick={saveSharingRules} disabled={policyLoading || policySaving}>{policyLoading ? '読み込み中…' : policySaving ? '保存中…' : 'このルールを保存'}</button>
           </section>
         </div>
       ) : null}

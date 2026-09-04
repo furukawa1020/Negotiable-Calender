@@ -188,6 +188,7 @@ func isOAuthEndpoint(method, path string) bool {
 func setSecurityHeaders(header http.Header) {
 	header.Set("X-Content-Type-Options", "nosniff")
 	header.Set("X-Frame-Options", "DENY")
+	header.Set("Strict-Transport-Security", "max-age=63072000; includeSubDomains")
 	header.Set("Referrer-Policy", "no-referrer")
 	header.Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'; base-uri 'none'")
 	header.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")

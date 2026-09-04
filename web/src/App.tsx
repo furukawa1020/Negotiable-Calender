@@ -1,4 +1,5 @@
 import { type FormEvent, useEffect, useMemo, useState } from 'react'
+import SharingPolicyEditor, { sharingPolicyError, type SharingPolicyDraft } from './SharingPolicyEditor'
 
 const demoPrivateEvents = [
   { id: 'demo-1', time: '09:00', label: 'Product Review', size: 'short', details: [] as string[] },
@@ -127,103 +128,6 @@ type InvitationPreview = {
   role: string
   expiresAt: string
 }
-
-type InteractionState = {
-  availability: 'available' | 'limited' | 'unavailable' | 'unknown'
-  interruptibility: 'open' | 'normal' | 'urgent_only' | 'do_not_interrupt'
-  requestability: 'open' | 'async_only' | 'later' | 'closed'
-  reschedulability: 'high' | 'medium' | 'low' | 'fixed'
-}
-
-type PolicyRuleDraft = {
-  conditionType: 'organization' | 'calendar' | 'event'
-  condition: { calendarId?: string; busyStatus?: 'busy' | 'free' }
-  state: InteractionState
-  priority: number
-  enabled: boolean
-}
-
-type SharingPolicyDraft = {
-  default: InteractionState
-  workingHours: Array<{ weekday: number; startMinute: number; endMinute: number }>
-  rules: PolicyRuleDraft[]
-}
-
-const defaultSharingPolicy: SharingPolicyDraft = {
-  default: {
-    availability: 'available', interruptibility: 'normal',
-    requestability: 'open', reschedulability: 'medium',
-  },
-  workingHours: [1, 2, 3, 4, 5].map((weekday) => ({ weekday, startMinute: 9 * 60, endMinute: 18 * 60 })),
-  rules: [],
-}
-
-const weekdays = [
-  { value: 1, label: '月曜日' }, { value: 2, label: '火曜日' },
-  { value: 3, label: '水曜日' }, { value: 4, label: '木曜日' },
-  { value: 5, label: '金曜日' }, { value: 6, label: '土曜日' },
-  { value: 0, label: '日曜日' },
-]
-
-const stateOptions = {
-  availability: [
-    ['available', '相談可能'], ['limited', '制限あり'], ['unavailable', '対応不可'], ['unknown', '要確認'],
-  ],
-  interruptibility: [
-    ['open', 'いつでも可'], ['normal', '通常'], ['urgent_only', '緊急のみ'], ['do_not_interrupt', '割り込み不可'],
-  ],
-  requestability: [
-    ['open', '依頼可'], ['async_only', '非同期のみ'], ['later', '後で'], ['closed', '受付停止'],
-  ],
-  reschedulability: [
-    ['high', '変更しやすい'], ['medium', '変更可能'], ['low', '変更しにくい'], ['fixed', '固定'],
-  ],
-} as const
-
-const minutesToTime = (value: number) => `${String(Math.floor(value / 60)).padStart(2, '0')}:${String(value % 60).padStart(2, '0')}`
-const timeToMinutes = (value: string) => {
-  const [hour, minute] = value.split(':').map(Number)
-  return hour * 60 + minute
-}
-
-const newPolicyRule = (): PolicyRuleDraft => ({
-  conditionType: 'event',
-  condition: { busyStatus: 'busy' },
-  state: {
-    availability: 'limited', interruptibility: 'urgent_only',
-    requestability: 'async_only', reschedulability: 'low',
-  },
-  priority: 100,
-  enabled: true,
-})
-
-const sharingPolicyError = (value: SharingPolicyDraft) => {
-  if (value.rules.length > 50) return 'ルールは50件以内にしてください。'
-  for (const window of value.workingHours) {
-    if (window.startMinute < 0 || window.endMinute > 1440 || window.endMinute <= window.startMinute) {
-      return '勤務時間の開始と終了を確認してください。'
-    }
-  }
-  for (const rule of value.rules) {
-    if (rule.priority < 0 || rule.priority > 1000) return '優先度は0〜1000で指定してください。'
-    if (rule.conditionType === 'calendar' && !rule.condition.calendarId?.trim()) return 'Calendar IDを入力してください。'
-  }
-  return ''
-}
-
-const stateForAvailability = (availability: InteractionState['availability']): InteractionState => {
-  if (availability === 'available') {
-    return { availability, interruptibility: 'normal', requestability: 'open', reschedulability: 'medium' }
-  }
-  if (availability === 'limited') {
-    return { availability, interruptibility: 'urgent_only', requestability: 'later', reschedulability: 'low' }
-  }
-  if (availability === 'unavailable') {
-    return { availability, interruptibility: 'do_not_interrupt', requestability: 'closed', reschedulability: 'fixed' }
-  }
-  return { availability, interruptibility: 'normal', requestability: 'later', reschedulability: 'low' }
-}
-
 
 const calendarRange = (anchor: Date, view: CalendarView) => {
   const from = new Date(anchor)
@@ -922,51 +826,6 @@ function App() {
     }
   }
 
-  const setDefaultPolicyState = (key: keyof InteractionState, value: string) => {
-    setSharingPolicy((current) => ({
-      ...current,
-      default: { ...current.default, [key]: value },
-    }))
-  }
-
-  const toggleWorkingDay = (weekday: number) => {
-    setSharingPolicy((current) => {
-      const exists = current.workingHours.some((window) => window.weekday === weekday)
-      return {
-        ...current,
-        workingHours: exists
-          ? current.workingHours.filter((window) => window.weekday !== weekday)
-          : [...current.workingHours, { weekday, startMinute: 540, endMinute: 1080 }]
-            .sort((left, right) => ((left.weekday + 6) % 7) - ((right.weekday + 6) % 7)),
-      }
-    })
-  }
-
-  const updateWorkingWindow = (weekday: number, key: 'startMinute' | 'endMinute', value: string) => {
-    setSharingPolicy((current) => ({
-      ...current,
-      workingHours: current.workingHours.map((window) => window.weekday === weekday
-        ? { ...window, [key]: timeToMinutes(value) }
-        : window),
-    }))
-  }
-
-  const updatePolicyRule = (index: number, update: Partial<PolicyRuleDraft>) => {
-    setSharingPolicy((current) => ({
-      ...current,
-      rules: current.rules.map((rule, ruleIndex) => ruleIndex === index ? { ...rule, ...update } : rule),
-    }))
-  }
-
-  const updateRuleState = (index: number, key: keyof InteractionState, value: string) => {
-    setSharingPolicy((current) => ({
-      ...current,
-      rules: current.rules.map((rule, ruleIndex) => ruleIndex === index
-        ? { ...rule, state: { ...rule.state, [key]: value } }
-        : rule),
-    }))
-  }
-
   const saveSharingRules = async () => {
     if (policyDraftError) {
       setNotice(policyDraftError)
@@ -1558,31 +1417,12 @@ function App() {
               <button className="close-button" type="button" aria-label="閉じる" onClick={() => setActiveDialog('')}>×</button>
             </div>
             <p className="modal-copy">予定の内容ではなく、関わりやすさだけに変換して共有します。</p>
-            <div className="rule-list">
-              <div>
-                <label htmlFor="default-availability">基本の公開状態</label>
-                <select
-                  id="default-availability"
-                  value={sharingPolicy.default.availability}
-                  disabled={policyLoading || policySaving}
-                  onChange={(event) => setSharingPolicy((current) => ({
-                    ...current,
-                    default: stateForAvailability(event.target.value as InteractionState['availability']),
-                  }))}
-                >
-                  <option value="available">相談可能</option>
-                  <option value="limited">緊急のみ</option>
-                  <option value="unavailable">対応不可</option>
-                  <option value="unknown">要確認</option>
-                </select>
-              </div>
-              <div><span>勤務時間</span><strong>平日 09:00 — 18:00</strong></div>
-              <div><span>予定中</span><strong>緊急のみ</strong></div>
-              <div><span>集中時間</span><strong>割り込み非推奨</strong></div>
-              <div><span>空き時間</span><strong>相談可能</strong></div>
-              <div><span>勤務時間外</span><strong>対応不可</strong></div>
+            {policyLoading ? <p role="status">共有ルールを読み込んでいます…</p> : null}
+            <SharingPolicyEditor value={sharingPolicy} onChange={setSharingPolicy} disabled={policyLoading || policySaving} />
+            <div className="policy-save-actions">
+              <button className="secondary-button" type="button" disabled={policySaving} onClick={() => setActiveDialog('')}>キャンセル</button>
+              <button className="primary-button" type="button" onClick={saveSharingRules} disabled={policyLoading || policySaving || Boolean(policyDraftError)}>{policySaving ? '保存中…' : '保存して公開状態を更新'}</button>
             </div>
-            <button className="primary-button full-button" type="button" onClick={saveSharingRules} disabled={policyLoading || policySaving}>{policyLoading ? '読み込み中…' : policySaving ? '保存中…' : 'このルールを保存'}</button>
           </section>
         </div>
       ) : null}

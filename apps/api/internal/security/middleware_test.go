@@ -148,6 +148,7 @@ func TestSecurityHeadersAreAlwaysSet(t *testing.T) {
 	for _, name := range []string{
 		"X-Content-Type-Options", "X-Frame-Options", "Referrer-Policy",
 		"Content-Security-Policy", "Permissions-Policy", "Cache-Control",
+		"Strict-Transport-Security",
 	} {
 		if response.Header().Get(name) == "" {
 			t.Fatalf("%s is missing", name)

@@ -1,6 +1,15 @@
 import { type FormEvent, useEffect, useMemo, useState } from 'react'
 import SharingPolicyEditor, { sharingPolicyError, type SharingPolicyDraft } from './SharingPolicyEditor'
 
+const defaultSharingPolicy: SharingPolicyDraft = {
+  default: {
+    availability: 'available', interruptibility: 'normal',
+    requestability: 'open', reschedulability: 'medium',
+  },
+  workingHours: [1, 2, 3, 4, 5].map((weekday) => ({ weekday, startMinute: 9 * 60, endMinute: 18 * 60 })),
+  rules: [],
+}
+
 const demoPrivateEvents = [
   { id: 'demo-1', time: '09:00', label: 'Product Review', size: 'short', details: [] as string[] },
   { id: 'demo-2', time: '10:00', label: 'Customer Meeting', size: 'medium', details: [] as string[] },

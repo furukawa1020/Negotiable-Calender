@@ -510,10 +510,16 @@ func (store *Organization) SwitchWorkspace(ctx context.Context, sessionHash []by
 	return workspace, err
 }
 
-func SeedDemo(ctx context.Context, backend *Backend, now time.Time) error {
-	users := []userRecord{{ID: "demo-manager", Email: "manager@example.invalid", DisplayName: "山田 太郎", Timezone: "Asia/Tokyo", CreatedAt: now, UpdatedAt: now}, {ID: "demo-member", Email: "member@example.invalid", DisplayName: "佐藤 花子", Timezone: "Asia/Tokyo", CreatedAt: now, UpdatedAt: now}}
+func SeedDemo(ctx context.Context, backend *Backend, now time.Time) (bool, error) {
+	marker := backend.Client.Collection("_system").Doc("demo-seed-v1")
+	if _, err := marker.Get(ctx); err == nil {
+		return false, nil
+	} else if !firestoreNotFound(err) {
+		return false, err
+	}
+users := []userRecord{{ID: "demo-manager", Email: "manager@example.invalid", DisplayName: "山田 太郎", Timezone: "Asia/Tokyo", CreatedAt: now, UpdatedAt: now}, {ID: "demo-member", Email: "member@example.invalid", DisplayName: "佐藤 花子", Timezone: "Asia/Tokyo", CreatedAt: now, UpdatedAt: now}}
 	org := organizationRecord{ID: "demo-org", Name: "Product Studio", CreatedAt: now, UpdatedAt: now}
-	batch := backend.Client.Batch()
+	batch := backend.Client.Batch()\n\tbatch.Create(marker, map[string]any{"createdAt": now, "version": 1})
 	batch.Set(backend.Client.Collection("organizations").Doc(org.ID), org)
 	roles := []organization.Role{organization.Manager, organization.Member}
 	for i, user := range users {

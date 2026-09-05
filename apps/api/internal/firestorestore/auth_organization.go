@@ -416,7 +416,11 @@ func (store *Organization) CreateInvitation(ctx context.Context, value organizat
 	if err := doc.DataTo(&member); err != nil || !organization.CanInvite(member.Role, value.Role) {
 		return organization.ErrForbidden
 	}
-	_, err = store.Client.Collection("organizationInvitations").Doc(hashID(value.TokenHash)).Create(ctx, value)
+	event := audit.Event{ID: randomID("audit"), OrganizationID: value.OrganizationID, ActorUserID: value.InvitedBy, Action: audit.InvitationCreated, ResourceType: "invitation", ResourceID: value.ID, CreatedAt: value.CreatedAt}
+	batch := store.Client.Batch()
+	batch.Create(store.Client.Collection("organizationInvitations").Doc(hashID(value.TokenHash)), value)
+	batch.Create(store.Client.Collection("organizations").Doc(value.OrganizationID).Collection("auditLogs").Doc(event.ID), event)
+	_, err = batch.Commit(ctx)
 	return err
 }
 func (store *Organization) PreviewInvitation(ctx context.Context, token []byte, now time.Time) (organization.InvitationPreview, error) {
@@ -449,6 +453,8 @@ func (store *Organization) AcceptInvitation(ctx context.Context, token []byte, u
 	batch.Set(store.Client.Collection("organizations").Doc(workspace.ID).Collection("members").Doc(userID), member)
 	batch.Set(store.Client.Collection("users").Doc(userID).Collection("workspaces").Doc(workspace.ID), workspace)
 	batch.Delete(store.Client.Collection("organizationInvitations").Doc(hashID(token)))
+	event := audit.Event{ID: randomID("audit"), OrganizationID: workspace.ID, ActorUserID: userID, Action: audit.InvitationAccepted, ResourceType: "invitation", ResourceID: preview.ID, CreatedAt: now}
+	batch.Create(store.Client.Collection("organizations").Doc(workspace.ID).Collection("auditLogs").Doc(event.ID), event)
 	_, err = batch.Commit(ctx)
 	return workspace, err
 }

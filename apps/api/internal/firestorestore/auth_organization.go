@@ -17,6 +17,7 @@ import (
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/audit"
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/auth"
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/organization"
+	coordinationrequest "github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/request"
 )
 
 type userRecord struct {
@@ -188,7 +189,158 @@ func (store *Auth) DeleteSession(ctx context.Context, tokenHash []byte) error {
 	return err
 }
 func (store *Auth) DeleteAccount(ctx context.Context, userID string) error {
-	return fmt.Errorf("account deletion on firestore requires organization ownership transfer")
+	userRef := store.Client.Collection("users").Doc(userID)
+	if _, err := userRef.Get(ctx); firestoreNotFound(err) {
+		return auth.ErrNotFound
+	} else if err != nil {
+		return fmt.Errorf("load account: %w", err)
+	}
+	workspaces, err := store.Organization().ListWorkspaces(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("list account workspaces: %w", err)
+	}
+	for _, workspace := range workspaces {
+		if workspace.Role != organization.Owner {
+			continue
+		}
+		iter := store.Client.Collection("organizations").Doc(workspace.ID).Collection("members").Documents(ctx)
+		members, owners := 0, 0
+		for {
+			doc, nextErr := iter.Next()
+			if errors.Is(nextErr, iterator.Done) {
+				break
+			}
+			if nextErr != nil {
+				iter.Stop()
+				return fmt.Errorf("inspect organization owners: %w", nextErr)
+			}
+			members++
+			var member membershipRecord
+			if err := doc.DataTo(&member); err != nil {
+				iter.Stop()
+				return err
+			}
+			if member.Role == organization.Owner {
+				owners++
+			}
+		}
+		iter.Stop()
+		if members > 1 && owners == 1 {
+			return auth.ErrLastOrganizationOwner
+		}
+	}
+	requests := store.Client.Collection("coordinationRequests")
+	requestIter := requests.Documents(ctx)
+	requestIDs := map[string]bool{}
+	for {
+		doc, nextErr := requestIter.Next()
+		if errors.Is(nextErr, iterator.Done) {
+			break
+		}
+		if nextErr != nil {
+			requestIter.Stop()
+			return nextErr
+		}
+		var value coordinationrequest.CoordinationRequest
+		if err := doc.DataTo(&value); err != nil {
+			requestIter.Stop()
+			return err
+		}
+		owned := value.RequesterUserID == userID || value.TargetUserID == userID || value.DelegatedUserID == userID
+		for _, option := range value.Options {
+			owned = owned || option.DelegateUserID == userID
+		}
+		if owned {
+			requestIDs[value.ID] = true
+			if _, err := doc.Ref.Delete(ctx); err != nil {
+				requestIter.Stop()
+				return err
+			}
+		}
+	}
+	requestIter.Stop()
+	for _, workspace := range workspaces {
+		audits := store.Client.Collection("organizations").Doc(workspace.ID).Collection("auditLogs")
+		iter := audits.Documents(ctx)
+		for {
+			doc, nextErr := iter.Next()
+			if errors.Is(nextErr, iterator.Done) {
+				break
+			}
+			if nextErr != nil {
+				iter.Stop()
+				return nextErr
+			}
+			var event audit.Event
+			if err := doc.DataTo(&event); err != nil {
+				iter.Stop()
+				return err
+			}
+			if event.ActorUserID == userID || requestIDs[event.ResourceID] {
+				if _, err := doc.Ref.Delete(ctx); err != nil {
+					iter.Stop()
+					return err
+				}
+			}
+		}
+		iter.Stop()
+	}
+	for _, collection := range []string{"manualOverrides", "scheduleProjections", "notifications", "privateEvents", "workspaces"} {
+		if err := deleteCollection(ctx, store.Client, userRef.Collection(collection), 200); err != nil {
+			return fmt.Errorf("delete account %s: %w", collection, err)
+		}
+	}
+	for _, query := range []firestore.Query{
+		store.Client.Collection("authSessions").Where("UserID", "==", userID),
+		store.Client.Collection("authIdentities").Where("UserID", "==", userID),
+		store.Client.Collection("organizationInvitations").Where("InvitedBy", "==", userID),
+	} {
+		if err := deleteQuery(ctx, query); err != nil {
+			return err
+		}
+	}
+	if _, err := store.Client.Collection("sharingPolicies").Doc(userID).Delete(ctx); err != nil {
+		return err
+	}
+	if _, err := store.Client.Collection("calendarConnections").Doc(userID).Delete(ctx); err != nil {
+		return err
+	}
+	for _, workspace := range workspaces {
+		members := store.Client.Collection("organizations").Doc(workspace.ID).Collection("members")
+		if _, err := members.Doc(userID).Delete(ctx); err != nil {
+			return err
+		}
+		docs, err := members.Limit(1).Documents(ctx).GetAll()
+		if err != nil {
+			return err
+		}
+		if len(docs) == 0 {
+			if _, err := store.Client.Collection("organizations").Doc(workspace.ID).Delete(ctx); err != nil {
+				return err
+			}
+		}
+	}
+	if _, err := userRef.Delete(ctx); err != nil {
+		return err
+	}
+	return nil
+}
+
+func deleteQuery(ctx context.Context, query firestore.Query) error {
+	iter := query.Documents(ctx)
+	defer iter.Stop()
+	for {
+		doc, err := iter.Next()
+		if errors.Is(err, iterator.Done) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if _, err := doc.Ref.Delete(ctx); err != nil {
+			return err
+		}
+	}
 }
 
 func safeDigest(value string) string {

@@ -23,8 +23,8 @@ import (
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/organization"
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/policy"
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/projection"
-	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/security"
 	coordinationrequest "github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/request"
+	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/security"
 )
 
 const defaultPort = "8080"
@@ -42,7 +42,7 @@ func main() {
 	if os.Getenv("STORAGE_BACKEND") == "firestore" {
 		if err := runFirestore(logger); err != nil {
 			logger.Error("run firestore api", "error", err)
-					os.Exit(1)
+			os.Exit(1)
 		}
 		return
 	}
@@ -183,7 +183,6 @@ func main() {
 	}
 	logger.Info("api stopped")
 }
-
 
 func runFirestore(logger *slog.Logger) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)

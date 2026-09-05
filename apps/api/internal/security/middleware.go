@@ -190,7 +190,7 @@ func setSecurityHeaders(header http.Header) {
 	header.Set("X-Frame-Options", "DENY")
 	header.Set("Strict-Transport-Security", "max-age=63072000; includeSubDomains")
 	header.Set("Referrer-Policy", "no-referrer")
-	header.Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'; base-uri 'none'")
+	header.Set("Content-Security-Policy", "default-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self'")
 	header.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
 	header.Set("Cache-Control", "no-store")
 }

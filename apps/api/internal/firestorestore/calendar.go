@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"sort"
 	"time"
 
@@ -14,6 +15,8 @@ import (
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/privateevent"
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/projection"
 )
+
+var errClaimLost = errors.New("calendar connection claim lost")
 
 type privateEventRecord struct {
 	ID, UserID, ProviderEventID, CalendarID string
@@ -165,7 +168,75 @@ func (store *Calendar) Replace(ctx context.Context, userID string, from, to time
 }
 
 func (store *Calendar) ClaimDueConnections(ctx context.Context, now time.Time, limit int, lease time.Duration) ([]calendarintegration.Connection, error) {
-	return []calendarintegration.Connection{}, nil
+	if limit <= 0 {
+		limit = 10
+	}
+	if lease <= 0 {
+		lease = 2 * time.Minute
+	}
+	iter := store.Client.Collection("calendarConnections").Documents(ctx)
+	defer iter.Stop()
+	values := []calendarintegration.Connection{}
+	for {
+		doc, err := iter.Next()
+		if errors.Is(err, iterator.Done) {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("list due calendar connections: %w", err)
+		}
+		var value calendarintegration.Connection
+		if err := doc.DataTo(&value); err != nil {
+			return nil, fmt.Errorf("decode calendar connection: %w", err)
+		}
+		if !value.ReconnectRequired && (value.NextAttemptAt == nil || !value.NextAttemptAt.After(now)) {
+			values = append(values, value)
+		}
+	}
+	sort.Slice(values, func(i, j int) bool {
+		if values[i].NextAttemptAt == nil {
+			return values[j].NextAttemptAt != nil || values[i].UserID < values[j].UserID
+		}
+		if values[j].NextAttemptAt == nil {
+			return false
+		}
+		if values[i].NextAttemptAt.Equal(*values[j].NextAttemptAt) {
+			return values[i].UserID < values[j].UserID
+		}
+		return values[i].NextAttemptAt.Before(*values[j].NextAttemptAt)
+	})
+	if len(values) > limit {
+		values = values[:limit]
+	}
+	claimed := make([]calendarintegration.Connection, 0, len(values))
+	for _, candidate := range values {
+		ref := store.Client.Collection("calendarConnections").Doc(candidate.UserID)
+		var current calendarintegration.Connection
+		err := store.Client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
+			doc, err := tx.Get(ref)
+			if err != nil {
+				return err
+			}
+			if err := doc.DataTo(&current); err != nil {
+				return err
+			}
+			if current.ReconnectRequired || (current.NextAttemptAt != nil && current.NextAttemptAt.After(now)) {
+				return errClaimLost
+			}
+			next := now.Add(lease)
+			current.LastAttemptAt = &now
+			current.NextAttemptAt = &next
+			return tx.Set(ref, current)
+		})
+		if errors.Is(err, errClaimLost) {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("claim calendar connection: %w", err)
+		}
+		claimed = append(claimed, current)
+	}
+	return claimed, nil
 }
 func (store *Calendar) MarkSyncSuccess(ctx context.Context, userID, syncToken string, now, next time.Time) error {
 	_, err := store.Client.Collection("calendarConnections").Doc(userID).Update(ctx, []firestore.Update{{Path: "SyncToken", Value: syncToken}, {Path: "LastSyncedAt", Value: now}, {Path: "LastAttemptAt", Value: now}, {Path: "NextAttemptAt", Value: next}, {Path: "LastErrorCode", Value: ""}, {Path: "FailureCount", Value: 0}, {Path: "ReconnectRequired", Value: false}})

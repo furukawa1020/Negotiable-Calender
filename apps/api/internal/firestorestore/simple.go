@@ -9,6 +9,8 @@ import (
 
 	"cloud.google.com/go/firestore"
 	"google.golang.org/api/iterator"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/audit"
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/notification"
@@ -283,16 +285,7 @@ func (store *Audit) List(ctx context.Context, organizationID string) ([]audit.Ev
 	return values, nil
 }
 
-func firestoreNotFound(err error) bool { return err != nil && stringsContains(err.Error(), "NotFound") }
-
-func stringsContains(value, fragment string) bool {
-	for index := 0; index+len(fragment) <= len(value); index++ {
-		if value[index:index+len(fragment)] == fragment {
-			return true
-		}
-	}
-	return false
-}
+func firestoreNotFound(err error) bool { return status.Code(err) == codes.NotFound }
 
 func deleteCollection(ctx context.Context, client *firestore.Client, collection *firestore.CollectionRef, batchSize int) error {
 	for {

@@ -13,6 +13,7 @@ import (
 
 	calendarintegration "github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/calendar"
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/privateevent"
+	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/projection"
 )
 
 type privateEventRecord struct {

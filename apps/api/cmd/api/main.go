@@ -194,8 +194,10 @@ func runFirestore(logger *slog.Logger) error {
 	defer backend.Close()
 
 	now := time.Now().UTC()
+	demoSeeded := false
 	if os.Getenv("DEMO_MODE") == "true" {
-		if err := firestorestore.SeedDemo(ctx, backend, now); err != nil {
+		demoSeeded, err = firestorestore.SeedDemo(ctx, backend, now)
+		if err != nil {
 			return fmt.Errorf("seed firestore demo: %w", err)
 		}
 	}
@@ -208,7 +210,7 @@ func runFirestore(logger *slog.Logger) error {
 	calendarStore := backend.Calendar()
 	authStore := backend.Auth()
 	projectionRebuilder := projection.NewRebuilder(calendarStore, policyStore)
-	if os.Getenv("DEMO_MODE") == "true" {
+	if demoSeeded {
 		for _, userID := range []string{"demo-manager", "demo-member"} {
 			if err := projectionRebuilder.Rebuild(ctx, userID, now, now.Add(7*24*time.Hour), now); err != nil {
 				return fmt.Errorf("seed firestore projections for %s: %w", userID, err)

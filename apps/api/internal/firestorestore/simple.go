@@ -142,7 +142,7 @@ func (store *Projection) Replace(ctx context.Context, userID string, from, to ti
 	collection := store.Client.Collection("users").Doc(userID).Collection("scheduleProjections")
 	iter := collection.Documents(ctx)
 	defer iter.Stop()
-	batch := store.Client.Batch()
+	writes := newChunkedBatch(store.Client)
 	for {
 		doc, err := iter.Next()
 		if errors.Is(err, iterator.Done) {
@@ -156,13 +156,17 @@ func (store *Projection) Replace(ctx context.Context, userID string, from, to ti
 			return fmt.Errorf("decode replaced projection: %w", err)
 		}
 		if existing.StartAt.Before(to) && existing.EndAt.After(from) {
-			batch.Delete(doc.Ref)
+			if err := writes.Delete(ctx, doc.Ref); err != nil {
+				return fmt.Errorf("delete replaced projections: %w", err)
+			}
 		}
 	}
 	for _, value := range values {
-		batch.Set(collection.Doc(value.ID), value)
+		if err := writes.Set(ctx, collection.Doc(value.ID), value); err != nil {
+			return fmt.Errorf("write replacement projections: %w", err)
+		}
 	}
-	if _, err := batch.Commit(ctx); err != nil {
+	if err := writes.Commit(ctx); err != nil {
 		return fmt.Errorf("replace schedule projections: %w", err)
 	}
 	return nil
@@ -286,6 +290,49 @@ func (store *Audit) List(ctx context.Context, organizationID string) ([]audit.Ev
 }
 
 func firestoreNotFound(err error) bool { return status.Code(err) == codes.NotFound }
+
+const firestoreWriteChunkSize = 400
+
+type chunkedBatch struct {
+	client *firestore.Client
+	batch  *firestore.WriteBatch
+	writes int
+}
+
+func newChunkedBatch(client *firestore.Client) *chunkedBatch {
+	return &chunkedBatch{client: client, batch: client.Batch()}
+}
+
+func (writer *chunkedBatch) Delete(ctx context.Context, ref *firestore.DocumentRef) error {
+	writer.batch.Delete(ref)
+	writer.writes++
+	return writer.commitIfFull(ctx)
+}
+
+func (writer *chunkedBatch) Set(ctx context.Context, ref *firestore.DocumentRef, value any) error {
+	writer.batch.Set(ref, value)
+	writer.writes++
+	return writer.commitIfFull(ctx)
+}
+
+func (writer *chunkedBatch) commitIfFull(ctx context.Context) error {
+	if writer.writes < firestoreWriteChunkSize {
+		return nil
+	}
+	return writer.Commit(ctx)
+}
+
+func (writer *chunkedBatch) Commit(ctx context.Context) error {
+	if writer.writes == 0 {
+		return nil
+	}
+	if _, err := writer.batch.Commit(ctx); err != nil {
+		return err
+	}
+	writer.batch = writer.client.Batch()
+	writer.writes = 0
+	return nil
+}
 
 func deleteCollection(ctx context.Context, client *firestore.Client, collection *firestore.CollectionRef, batchSize int) error {
 	for {

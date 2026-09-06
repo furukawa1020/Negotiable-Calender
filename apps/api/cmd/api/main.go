@@ -274,7 +274,7 @@ func runFirestore(logger *slog.Logger) error {
 
 func checkHealth() error {
 	client := &http.Client{Timeout: 2 * time.Second}
-	response, err := client.Get("http://127.0.0.1:" + envOrDefault("PORT", defaultPort) + "/healthz")
+	response, err := client.Get("http://127.0.0.1:" + envOrDefault("PORT", defaultPort) + "/health")
 	if err != nil {
 		return fmt.Errorf("health request: %w", err)
 	}

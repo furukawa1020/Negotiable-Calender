@@ -1104,8 +1104,8 @@ func TestCoordinationRequestRespondsAsyncAsRecipient(t *testing.T) {
 		t.Fatalf("response did not HTML-escape untrusted message: %s", response.Body.String())
 	}
 	var payload struct {
-		Status coordinationrequest.Status `json:"status"`
-		AsyncMessage string `json:"asyncMessage"`
+		Status       coordinationrequest.Status `json:"status"`
+		AsyncMessage string                     `json:"asyncMessage"`
 	}
 	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode response: %v", err)
@@ -1127,7 +1127,7 @@ func TestCoordinationRequestRespondsAsyncAsRecipient(t *testing.T) {
 func TestCoordinationRequestAsyncRequiresBoundedMessage(t *testing.T) {
 	t.Parallel()
 	for name, message := range map[string]string{
-		"empty": "   ",
+		"empty":    "   ",
 		"too-long": strings.Repeat("あ", coordinationrequest.MaxAsyncMessageRunes+1),
 	} {
 		t.Run(name, func(t *testing.T) {

@@ -40,7 +40,7 @@ type API struct {
 	requests      coordinationrequest.Store
 	notifications notification.Store
 	audits        audit.Store
-	projector      ProjectionRebuilder
+	projector     ProjectionRebuilder
 	webOrigin     string
 	logger        *slog.Logger
 }

@@ -19,7 +19,7 @@ func withStaticFiles(next http.Handler, root string) http.Handler {
 			next.ServeHTTP(response, request)
 			return
 		}
-		if strings.HasPrefix(request.URL.Path, "/api/") || request.URL.Path == "/healthz" || request.URL.Path == "/readyz" {
+		if strings.HasPrefix(request.URL.Path, "/api/") || request.URL.Path == "/health" || request.URL.Path == "/ready" || request.URL.Path == "/healthz" || request.URL.Path == "/readyz" {
 			next.ServeHTTP(response, request)
 			return
 		}

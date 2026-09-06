@@ -418,7 +418,18 @@ func (api *API) asyncCoordinationRequest(response http.ResponseWriter, request *
 }
 
 func (api *API) respondToCoordinationRequest(response http.ResponseWriter, request *http.Request, targetUserID string, status coordinationrequest.Status, optionID string) {
-	err := api.requests.Respond(request.Context(), request.PathValue("requestId"), targetUserID, status, optionID)
+	requestID := request.PathValue("requestId")
+	value, err := api.requests.GetForUser(request.Context(), requestID, targetUserID)
+	if errors.Is(err, coordinationrequest.ErrNotFound) {
+		writeJSON(response, http.StatusConflict, map[string]string{"error": "request cannot be updated"})
+		return
+	}
+	if err != nil {
+		api.logger.Error("load coordination request for response", "error", err)
+		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to update request"})
+		return
+	}
+	err = api.requests.Respond(request.Context(), requestID, targetUserID, status, optionID)
 	if errors.Is(err, coordinationrequest.ErrNotFound) {
 		writeJSON(response, http.StatusConflict, map[string]string{"error": "request cannot be updated"})
 		return
@@ -432,7 +443,7 @@ func (api *API) respondToCoordinationRequest(response http.ResponseWriter, reque
 	if status == coordinationrequest.Declined {
 		kind, message = notification.RequestDeclined, "依頼を辞退しました。"
 	}
-	api.notify(request.Context(), targetUserID, kind, request.PathValue("requestId"), message)
+	api.notify(request.Context(), value.RequesterUserID, kind, requestID, message)
 	auditAction := audit.RequestAccepted
 	if status == coordinationrequest.Declined {
 		auditAction = audit.RequestDeclined

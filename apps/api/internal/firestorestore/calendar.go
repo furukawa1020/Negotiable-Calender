@@ -98,7 +98,7 @@ func (store *Calendar) UserTimezone(ctx context.Context, userID string) (string,
 
 func (store *Calendar) ApplyChanges(ctx context.Context, userID string, changes calendarintegration.ChangeSet, from, to, now time.Time) error {
 	collection := store.Client.Collection("users").Doc(userID).Collection("privateEvents")
-	batch := store.Client.Batch()
+	writes := newChunkedBatch(store.Client)
 	if changes.Full {
 		iter := collection.Documents(ctx)
 		defer iter.Stop()
@@ -115,13 +115,17 @@ func (store *Calendar) ApplyChanges(ctx context.Context, userID string, changes 
 				return err
 			}
 			if value.StartAt.Before(to) && value.EndAt.After(from) {
-				batch.Delete(doc.Ref)
+				if err := writes.Delete(ctx, doc.Ref); err != nil {
+					return fmt.Errorf("delete replaced private events: %w", err)
+				}
 			}
 		}
 	}
 	for _, id := range changes.DeletedProviderEventIDs {
 		if id != "" {
-			batch.Delete(collection.Doc(safeDigest(id)))
+			if err := writes.Delete(ctx, collection.Doc(safeDigest(id))); err != nil {
+				return fmt.Errorf("delete private event changes: %w", err)
+			}
 		}
 	}
 	for _, span := range changes.Upserts {
@@ -130,10 +134,14 @@ func (store *Calendar) ApplyChanges(ctx context.Context, userID string, changes 
 			status = privateevent.Free
 		}
 		value := privateEventRecord{ID: userID + ":" + span.ProviderEventID, UserID: userID, ProviderEventID: span.ProviderEventID, CalendarID: span.CalendarID, StartAt: span.StartAt.UTC(), EndAt: span.EndAt.UTC(), BusyStatus: status, Visibility: privateevent.VisibilityDefault, CreatedAt: now.UTC(), UpdatedAt: now.UTC()}
-		batch.Set(collection.Doc(safeDigest(span.ProviderEventID)), value)
+		if err := writes.Set(ctx, collection.Doc(safeDigest(span.ProviderEventID)), value); err != nil {
+			return fmt.Errorf("write private event changes: %w", err)
+		}
 	}
-	_, err := batch.Commit(ctx)
-	return err
+	if err := writes.Commit(ctx); err != nil {
+		return fmt.Errorf("commit private event changes: %w", err)
+	}
+	return nil
 }
 func (store *Calendar) ListPrivateEvents(ctx context.Context, userID string, from, to time.Time) ([]privateevent.PrivateEvent, error) {
 	iter := store.Client.Collection("users").Doc(userID).Collection("privateEvents").Documents(ctx)

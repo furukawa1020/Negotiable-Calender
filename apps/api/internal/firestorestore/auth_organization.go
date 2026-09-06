@@ -517,17 +517,23 @@ func SeedDemo(ctx context.Context, backend *Backend, now time.Time) (bool, error
 	} else if !firestoreNotFound(err) {
 		return false, err
 	}
-users := []userRecord{{ID: "demo-manager", Email: "manager@example.invalid", DisplayName: "山田 太郎", Timezone: "Asia/Tokyo", CreatedAt: now, UpdatedAt: now}, {ID: "demo-member", Email: "member@example.invalid", DisplayName: "佐藤 花子", Timezone: "Asia/Tokyo", CreatedAt: now, UpdatedAt: now}}
+	users := []userRecord{
+		{ID: "demo-manager", Email: "manager@example.invalid", DisplayName: "山田 太郎", Timezone: "Asia/Tokyo", CreatedAt: now, UpdatedAt: now},
+		{ID: "demo-member", Email: "member@example.invalid", DisplayName: "佐藤 花子", Timezone: "Asia/Tokyo", CreatedAt: now, UpdatedAt: now},
+	}
 	org := organizationRecord{ID: "demo-org", Name: "Product Studio", CreatedAt: now, UpdatedAt: now}
-	batch := backend.Client.Batch()\n\tbatch.Create(marker, map[string]any{"createdAt": now, "version": 1})
+	batch := backend.Client.Batch()
+	batch.Create(marker, map[string]any{"createdAt": now, "version": 1})
 	batch.Set(backend.Client.Collection("organizations").Doc(org.ID), org)
 	roles := []organization.Role{organization.Manager, organization.Member}
-	for i, user := range users {
+	for index, user := range users {
 		batch.Set(backend.Client.Collection("users").Doc(user.ID), user)
-		member := membershipRecord{ID: "demo-membership-" + user.ID, OrganizationID: org.ID, UserID: user.ID, Role: roles[i], CreatedAt: now}
+		member := membershipRecord{ID: "demo-membership-" + user.ID, OrganizationID: org.ID, UserID: user.ID, Role: roles[index], CreatedAt: now}
 		batch.Set(backend.Client.Collection("organizations").Doc(org.ID).Collection("members").Doc(user.ID), member)
-		batch.Set(backend.Client.Collection("users").Doc(user.ID).Collection("workspaces").Doc(org.ID), organization.Workspace{ID: org.ID, Name: org.Name, Role: roles[i]})
+		batch.Set(backend.Client.Collection("users").Doc(user.ID).Collection("workspaces").Doc(org.ID), organization.Workspace{ID: org.ID, Name: org.Name, Role: roles[index]})
 	}
-	_, err := batch.Commit(ctx)
-	return err
+	if _, err := batch.Commit(ctx); err != nil {
+		return false, err
+	}
+	return true, nil
 }

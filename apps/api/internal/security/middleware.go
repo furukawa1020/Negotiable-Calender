@@ -17,7 +17,7 @@ import (
 const sessionCookieName = "negotiable_session"
 
 type Config struct {
-	WebOrigin   string
+	WebOrigin    string
 	RequestLimit int
 	AuthLimit    int
 	Window       time.Duration
@@ -30,15 +30,15 @@ type bucket struct {
 }
 
 type Middleware struct {
-	next          http.Handler
-	webOrigin     string
-	requestLimit  int
-	authLimit     int
-	window        time.Duration
-	maxKeys       int
-	now           func() time.Time
-	mu            sync.Mutex
-	buckets       map[string]bucket
+	next         http.Handler
+	webOrigin    string
+	requestLimit int
+	authLimit    int
+	window       time.Duration
+	maxKeys      int
+	now          func() time.Time
+	mu           sync.Mutex
+	buckets      map[string]bucket
 }
 
 func New(next http.Handler, config Config) http.Handler {

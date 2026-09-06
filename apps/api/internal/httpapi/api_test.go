@@ -993,8 +993,9 @@ func TestTerminalRequestCannotBeCancelled(t *testing.T) {
 
 func TestCoordinationRequestAcceptsSelectedOptionAsTarget(t *testing.T) {
 	t.Parallel()
-	store := &stubRequestStore{}
-	handler := New(stubDatabase{}, &stubPolicyStore{}, &stubProjectionStore{}, &stubOrganizationStore{}, store, "", testLogger())
+	store := &stubRequestStore{value: coordinationrequest.CoordinationRequest{ID: "request-1", RequesterUserID: "member-1", TargetUserID: "manager-1"}}
+	notifications := &stubNotificationStore{}
+	handler := NewWithNotifications(stubDatabase{}, &stubPolicyStore{}, &stubProjectionStore{}, &stubOrganizationStore{}, store, notifications, "", testLogger())
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/requests/request-1/accept", strings.NewReader(`{"optionId":"option-1"}`))
 	request.Header.Set("X-Demo-User-ID", "manager-1")
 	response := httptest.NewRecorder()
@@ -1004,6 +1005,9 @@ func TestCoordinationRequestAcceptsSelectedOptionAsTarget(t *testing.T) {
 	}
 	if store.respondID != "request-1" || store.respondTarget != "manager-1" || store.respondStatus != coordinationrequest.Accepted || store.respondOption != "option-1" {
 		t.Fatalf("unexpected accept call: %#v", store)
+	}
+	if len(notifications.values) != 1 || notifications.values[0].UserID != "member-1" || notifications.values[0].Type != notification.RequestAccepted {
+		t.Fatalf("expected requester notification, got %#v", notifications.values)
 	}
 }
 

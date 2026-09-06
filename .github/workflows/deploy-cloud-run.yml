@@ -15,7 +15,6 @@ concurrency:
 
 env:
   PROJECT_ID: improve-production-management
-  PROJECT_NUMBER: "480760664246"
   REGION: asia-northeast1
   SERVICE: negotiable-calendar
   REPOSITORY: cloud-run-source-deploy
@@ -48,8 +47,8 @@ jobs:
       run:
         working-directory: apps/api
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: apps/api/go.mod
           cache-dependency-path: apps/api/go.sum
@@ -64,8 +63,8 @@ jobs:
       run:
         working-directory: web
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24
           cache: npm
@@ -81,28 +80,28 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - id: auth
         name: Authenticate to Google Cloud without a service-account key
-        uses: google-github-actions/auth@v3
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         with:
           project_id: ${{ env.PROJECT_ID }}
           workload_identity_provider: ${{ env.WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ env.DEPLOYER_SERVICE_ACCOUNT }}
 
-      - uses: google-github-actions/setup-gcloud@v3
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3
         with:
           version: ">= 416.0.0"
 
       - name: Configure Artifact Registry authentication
         run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
 
-      - uses: docker/setup-buildx-action@v4
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4
 
       - id: image
         name: Build and push immutable image
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           context: .
           push: true
@@ -122,6 +121,8 @@ jobs:
             --image="${IMAGE}" \
             --service-account="${RUNTIME_SERVICE_ACCOUNT}" \
             --execution-environment=gen2 \
+            --ingress=all \
+            --port=8080 \
             --cpu=1 \
             --memory=512Mi \
             --concurrency=40 \
@@ -129,6 +130,9 @@ jobs:
             --min=0 \
             --max=1 \
             --cpu-throttling \
+            --no-cpu-boost \
+            --startup-probe="httpGet.path=/ready,initialDelaySeconds=0,timeoutSeconds=2,periodSeconds=5,failureThreshold=12" \
+            --liveness-probe="httpGet.path=/health,initialDelaySeconds=0,timeoutSeconds=2,periodSeconds=30,failureThreshold=3" \
             --allow-unauthenticated \
             --set-env-vars="STORAGE_BACKEND=firestore,GCP_PROJECT_ID=${PROJECT_ID},DEMO_MODE=true,COOKIE_SECURE=true,WEB_ROOT=/app/web,WEB_ORIGIN=${SERVICE_URL}" \
             --quiet

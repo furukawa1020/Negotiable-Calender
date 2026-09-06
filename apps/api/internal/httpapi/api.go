@@ -64,6 +64,8 @@ func NewWithStoresAndRebuilder(database databasePinger, policies policy.Store, p
 func newAPI(database databasePinger, policies policy.Store, projections projection.Store, organizations organization.Store, requests coordinationrequest.Store, notifications notification.Store, audits audit.Store, projector ProjectionRebuilder, webOrigin string, logger *slog.Logger) http.Handler {
 	api := &API{database: database, policies: policies, projections: projections, organizations: organizations, requests: requests, notifications: notifications, audits: audits, projector: projector, webOrigin: webOrigin, logger: logger}
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /health", api.health)
+	mux.HandleFunc("GET /ready", api.ready)
 	mux.HandleFunc("GET /healthz", api.health)
 	mux.HandleFunc("GET /readyz", api.ready)
 	mux.HandleFunc("GET /api/v1/status", api.status)

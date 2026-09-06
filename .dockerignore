@@ -1,0 +1,9 @@
+.git
+.github
+.agents
+.codex
+gha-creds-*.json
+**/node_modules
+**/dist
+**/.env*
+!**/.env.example

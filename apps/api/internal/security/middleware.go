@@ -17,7 +17,7 @@ import (
 const sessionCookieName = "negotiable_session"
 
 type Config struct {
-	WebOrigin   string
+	WebOrigin    string
 	RequestLimit int
 	AuthLimit    int
 	Window       time.Duration
@@ -30,15 +30,15 @@ type bucket struct {
 }
 
 type Middleware struct {
-	next          http.Handler
-	webOrigin     string
-	requestLimit  int
-	authLimit     int
-	window        time.Duration
-	maxKeys       int
-	now           func() time.Time
-	mu            sync.Mutex
-	buckets       map[string]bucket
+	next         http.Handler
+	webOrigin    string
+	requestLimit int
+	authLimit    int
+	window       time.Duration
+	maxKeys      int
+	now          func() time.Time
+	mu           sync.Mutex
+	buckets      map[string]bucket
 }
 
 func New(next http.Handler, config Config) http.Handler {
@@ -190,7 +190,7 @@ func setSecurityHeaders(header http.Header) {
 	header.Set("X-Frame-Options", "DENY")
 	header.Set("Strict-Transport-Security", "max-age=63072000; includeSubDomains")
 	header.Set("Referrer-Policy", "no-referrer")
-	header.Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'; base-uri 'none'")
+	header.Set("Content-Security-Policy", "default-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self'")
 	header.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
 	header.Set("Cache-Control", "no-store")
 }

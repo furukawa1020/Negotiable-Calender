@@ -40,7 +40,7 @@ type API struct {
 	requests      coordinationrequest.Store
 	notifications notification.Store
 	audits        audit.Store
-	projector      ProjectionRebuilder
+	projector     ProjectionRebuilder
 	webOrigin     string
 	logger        *slog.Logger
 }
@@ -64,6 +64,8 @@ func NewWithStoresAndRebuilder(database databasePinger, policies policy.Store, p
 func newAPI(database databasePinger, policies policy.Store, projections projection.Store, organizations organization.Store, requests coordinationrequest.Store, notifications notification.Store, audits audit.Store, projector ProjectionRebuilder, webOrigin string, logger *slog.Logger) http.Handler {
 	api := &API{database: database, policies: policies, projections: projections, organizations: organizations, requests: requests, notifications: notifications, audits: audits, projector: projector, webOrigin: webOrigin, logger: logger}
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /health", api.health)
+	mux.HandleFunc("GET /ready", api.ready)
 	mux.HandleFunc("GET /healthz", api.health)
 	mux.HandleFunc("GET /readyz", api.ready)
 	mux.HandleFunc("GET /api/v1/status", api.status)
@@ -416,7 +418,18 @@ func (api *API) asyncCoordinationRequest(response http.ResponseWriter, request *
 }
 
 func (api *API) respondToCoordinationRequest(response http.ResponseWriter, request *http.Request, targetUserID string, status coordinationrequest.Status, optionID string) {
-	err := api.requests.Respond(request.Context(), request.PathValue("requestId"), targetUserID, status, optionID)
+	requestID := request.PathValue("requestId")
+	value, err := api.requests.GetForUser(request.Context(), requestID, targetUserID)
+	if errors.Is(err, coordinationrequest.ErrNotFound) {
+		writeJSON(response, http.StatusConflict, map[string]string{"error": "request cannot be updated"})
+		return
+	}
+	if err != nil {
+		api.logger.Error("load coordination request for response", "error", err)
+		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to update request"})
+		return
+	}
+	err = api.requests.Respond(request.Context(), requestID, targetUserID, status, optionID)
 	if errors.Is(err, coordinationrequest.ErrNotFound) {
 		writeJSON(response, http.StatusConflict, map[string]string{"error": "request cannot be updated"})
 		return
@@ -430,7 +443,7 @@ func (api *API) respondToCoordinationRequest(response http.ResponseWriter, reque
 	if status == coordinationrequest.Declined {
 		kind, message = notification.RequestDeclined, "依頼を辞退しました。"
 	}
-	api.notify(request.Context(), targetUserID, kind, request.PathValue("requestId"), message)
+	api.notify(request.Context(), value.RequesterUserID, kind, requestID, message)
 	auditAction := audit.RequestAccepted
 	if status == coordinationrequest.Declined {
 		auditAction = audit.RequestDeclined

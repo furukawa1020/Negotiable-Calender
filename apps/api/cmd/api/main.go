@@ -17,13 +17,14 @@ import (
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/audit"
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/auth"
 	calendarintegration "github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/calendar"
+	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/firestorestore"
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/httpapi"
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/notification"
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/organization"
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/policy"
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/projection"
-	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/security"
 	coordinationrequest "github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/request"
+	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/security"
 )
 
 const defaultPort = "8080"
@@ -38,6 +39,13 @@ func main() {
 	}
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	if os.Getenv("STORAGE_BACKEND") == "firestore" {
+		if err := runFirestore(logger); err != nil {
+			logger.Error("run firestore api", "error", err)
+			os.Exit(1)
+		}
+		return
+	}
 	databaseURL := os.Getenv("DATABASE_URL")
 	if databaseURL == "" {
 		logger.Error("DATABASE_URL is required")
@@ -138,7 +146,8 @@ func main() {
 	authHandler := auth.NewHandlerWithAccountRevoker(invitationHandler, auth.NewPostgresStore(db), googleProvider, calendarHandler, auth.HandlerConfig{
 		WebOrigin: os.Getenv("WEB_ORIGIN"), DemoMode: demoMode, SecureCookies: secureCookies,
 	}, logger)
-	handler := security.New(authHandler, security.Config{WebOrigin: os.Getenv("WEB_ORIGIN")})
+	applicationHandler := withStaticFiles(authHandler, os.Getenv("WEB_ROOT"))
+	handler := security.New(applicationHandler, security.Config{WebOrigin: os.Getenv("WEB_ORIGIN")})
 
 	server := &http.Server{
 		Addr:              ":" + port,
@@ -175,9 +184,97 @@ func main() {
 	logger.Info("api stopped")
 }
 
+func runFirestore(logger *slog.Logger) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	backend, err := firestorestore.New(ctx, os.Getenv("GCP_PROJECT_ID"))
+	if err != nil {
+		return err
+	}
+	defer backend.Close()
+
+	now := time.Now().UTC()
+	demoSeeded := false
+	if os.Getenv("DEMO_MODE") == "true" {
+		demoSeeded, err = firestorestore.SeedDemo(ctx, backend, now)
+		if err != nil {
+			return fmt.Errorf("seed firestore demo: %w", err)
+		}
+	}
+	policyStore := backend.Policy()
+	projectionStore := backend.Projection()
+	organizationStore := backend.Organization()
+	requestStore := backend.Request()
+	notificationStore := backend.Notification()
+	auditStore := backend.Audit()
+	calendarStore := backend.Calendar()
+	authStore := backend.Auth()
+	projectionRebuilder := projection.NewRebuilder(calendarStore, policyStore)
+	if demoSeeded {
+		for _, userID := range []string{"demo-manager", "demo-member"} {
+			if err := projectionRebuilder.Rebuild(ctx, userID, now, now.Add(7*24*time.Hour), now); err != nil {
+				return fmt.Errorf("seed firestore projections for %s: %w", userID, err)
+			}
+		}
+	}
+
+	webOrigin := os.Getenv("WEB_ORIGIN")
+	demoMode := os.Getenv("DEMO_MODE") == "true"
+	secureCookies := os.Getenv("COOKIE_SECURE") != "false"
+	googleProvider := auth.NewGoogleProvider(auth.GoogleConfig{
+		ClientID: os.Getenv("GOOGLE_CLIENT_ID"), ClientSecret: os.Getenv("GOOGLE_CLIENT_SECRET"),
+		RedirectURL: os.Getenv("GOOGLE_REDIRECT_URL"),
+	}, &http.Client{Timeout: 10 * time.Second})
+	calendarProvider := calendarintegration.NewGoogleProvider(calendarintegration.GoogleConfig{
+		ClientID: os.Getenv("GOOGLE_CLIENT_ID"), ClientSecret: os.Getenv("GOOGLE_CLIENT_SECRET"),
+		RedirectURL: os.Getenv("GOOGLE_CALENDAR_REDIRECT_URL"),
+	}, &http.Client{Timeout: 10 * time.Second})
+	var calendarCipher *calendarintegration.TokenCipher
+	if encodedKey := os.Getenv("CALENDAR_TOKEN_ENCRYPTION_KEY"); encodedKey != "" {
+		calendarCipher, err = calendarintegration.NewTokenCipher(encodedKey)
+		if err != nil {
+			return fmt.Errorf("configure calendar token encryption: %w", err)
+		}
+	}
+
+	apiHandler := httpapi.NewWithStoresAndRebuilder(backend, policyStore, projectionStore, organizationStore, requestStore, notificationStore, auditStore, projectionRebuilder, webOrigin, logger)
+	calendarHandler := calendarintegration.NewHandler(apiHandler, calendarStore, calendarProvider, calendarCipher, projectionRebuilder, calendarintegration.HandlerConfig{WebOrigin: webOrigin, SecureCookies: secureCookies}, logger)
+	invitationHandler := organization.NewInvitationHandler(calendarHandler, organizationStore, organization.InvitationHandlerConfig{WebOrigin: webOrigin}, logger)
+	authHandler := auth.NewHandlerWithAccountRevoker(invitationHandler, authStore, googleProvider, calendarHandler, auth.HandlerConfig{WebOrigin: webOrigin, DemoMode: demoMode, SecureCookies: secureCookies}, logger)
+	handler := security.New(withStaticFiles(authHandler, os.Getenv("WEB_ROOT")), security.Config{WebOrigin: webOrigin})
+	port := envOrDefault("PORT", defaultPort)
+	server := &http.Server{Addr: ":" + port, Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 60 * time.Second, IdleTimeout: 60 * time.Second}
+
+	shutdownSignal, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	if calendarProvider.Configured() && calendarCipher != nil {
+		worker := calendarintegration.NewWorker(calendarStore, calendarHandler, calendarintegration.WorkerConfig{}, logger)
+		go worker.Run(shutdownSignal)
+	}
+	serveErrors := make(chan error, 1)
+	go func() {
+		logger.Info("api listening", "address", server.Addr, "storage", "firestore")
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serveErrors <- err
+		}
+	}()
+	select {
+	case <-shutdownSignal.Done():
+	case err := <-serveErrors:
+		return fmt.Errorf("serve api: %w", err)
+	}
+	shutdownContext, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
+	if err := server.Shutdown(shutdownContext); err != nil {
+		return fmt.Errorf("shutdown api: %w", err)
+	}
+	logger.Info("api stopped")
+	return nil
+}
+
 func checkHealth() error {
 	client := &http.Client{Timeout: 2 * time.Second}
-	response, err := client.Get("http://127.0.0.1:" + envOrDefault("PORT", defaultPort) + "/healthz")
+	response, err := client.Get("http://127.0.0.1:" + envOrDefault("PORT", defaultPort) + "/health")
 	if err != nil {
 		return fmt.Errorf("health request: %w", err)
 	}

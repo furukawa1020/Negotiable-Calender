@@ -26,7 +26,7 @@ const initialProjections = [
   { time: '15:30 —', label: '15分相談可能', tone: 'available' },
 ]
 
-const apiURL = import.meta.env.VITE_API_URL || 'http://localhost:8080'
+const apiURL = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:8080' : window.location.origin)
 const apiFetch = (input: RequestInfo | URL, init?: RequestInit) => fetch(input, { ...init, credentials: 'include' })
 
 type ProjectionRow = (typeof initialProjections)[number]

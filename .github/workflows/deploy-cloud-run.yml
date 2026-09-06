@@ -1,0 +1,148 @@
+name: Deploy production
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: production
+  cancel-in-progress: false
+
+env:
+  PROJECT_ID: improve-production-management
+  PROJECT_NUMBER: "480760664246"
+  REGION: asia-northeast1
+  SERVICE: negotiable-calendar
+  REPOSITORY: cloud-run-source-deploy
+  RUNTIME_SERVICE_ACCOUNT: negotiable-calendar-run@improve-production-management.iam.gserviceaccount.com
+  DEPLOYER_SERVICE_ACCOUNT: negotiable-calendar-deployer@improve-production-management.iam.gserviceaccount.com
+  WORKLOAD_IDENTITY_PROVIDER: projects/480760664246/locations/global/workloadIdentityPools/github-actions/providers/negotiable-calendar
+  SERVICE_URL: https://negotiable-calendar-480760664246.asia-northeast1.run.app
+
+jobs:
+  api:
+    name: Verify API
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
+    defaults:
+      run:
+        working-directory: apps/api
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: apps/api/go.mod
+          cache-dependency-path: apps/api/go.sum
+      - run: go test -race ./...
+      - run: go vet ./...
+      - run: go build ./cmd/api
+
+  web:
+    name: Verify Web
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+
+  deploy:
+    name: Build, deploy, and smoke test
+    needs: [api, web]
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v6
+
+      - id: auth
+        name: Authenticate to Google Cloud without a service-account key
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+          workload_identity_provider: ${{ env.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.DEPLOYER_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v3
+        with:
+          version: ">= 416.0.0"
+
+      - name: Configure Artifact Registry authentication
+        run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+
+      - uses: docker/setup-buildx-action@v4
+
+      - id: image
+        name: Build and push immutable image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          tags: ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.SERVICE }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: mode=max
+          sbom: true
+
+      - name: Deploy the exact image digest
+        shell: bash
+        run: |
+          IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/${SERVICE}@${{ steps.image.outputs.digest }}"
+          gcloud run deploy "${SERVICE}" \
+            --project="${PROJECT_ID}" \
+            --region="${REGION}" \
+            --image="${IMAGE}" \
+            --service-account="${RUNTIME_SERVICE_ACCOUNT}" \
+            --execution-environment=gen2 \
+            --cpu=1 \
+            --memory=512Mi \
+            --concurrency=40 \
+            --timeout=60 \
+            --min=0 \
+            --max=1 \
+            --cpu-throttling \
+            --allow-unauthenticated \
+            --set-env-vars="STORAGE_BACKEND=firestore,GCP_PROJECT_ID=${PROJECT_ID},DEMO_MODE=true,COOKIE_SECURE=true,WEB_ROOT=/app/web,WEB_ORIGIN=${SERVICE_URL}" \
+            --quiet
+
+      - name: Verify the public revision
+        shell: bash
+        run: |
+          for attempt in {1..12}; do
+            if curl --fail --silent --show-error "${SERVICE_URL}/health" >/dev/null \
+              && curl --fail --silent --show-error "${SERVICE_URL}/ready" >/dev/null \
+              && curl --fail --silent --show-error "${SERVICE_URL}/api/v1/auth/session" \
+                | grep -q '"demoMode":true'; then
+              exit 0
+            fi
+            sleep 5
+          done
+          exit 1

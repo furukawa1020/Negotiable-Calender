@@ -7,7 +7,6 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 concurrency:
   group: production
@@ -75,6 +74,11 @@ jobs:
       - run: npm run build
 
   deploy:
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      id-token: write
+    timeout-minutes: 20
     name: Build, deploy, and smoke test
     needs: [api, web]
     runs-on: ubuntu-latest
@@ -93,6 +97,19 @@ jobs:
       - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3
         with:
           version: ">= 416.0.0"
+
+      - id: configuration
+        name: Validate existing authentication mode
+        shell: bash
+        run: |
+          MODE=$(gcloud run services describe "${SERVICE}" \
+            --project="${PROJECT_ID}" --region="${REGION}" --format=json \
+            | jq -er '[.spec.template.spec.containers[0].env[]? | select(.name == "DEMO_MODE") | .value] | if length == 1 then .[0] else error("Explicit DEMO_MODE required") end')
+          case "$MODE" in
+            true|false) ;;
+            *) echo "::error::DEMO_MODE must explicitly be true or false"; exit 1 ;;
+          esac
+          echo "demo_mode=$MODE" >> "$GITHUB_OUTPUT"
 
       - name: Configure Artifact Registry authentication
         run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
@@ -134,17 +151,20 @@ jobs:
             --startup-probe="httpGet.path=/ready,initialDelaySeconds=0,timeoutSeconds=2,periodSeconds=5,failureThreshold=12" \
             --liveness-probe="httpGet.path=/health,initialDelaySeconds=0,timeoutSeconds=2,periodSeconds=30,failureThreshold=3" \
             --allow-unauthenticated \
-            --set-env-vars="STORAGE_BACKEND=firestore,GCP_PROJECT_ID=${PROJECT_ID},DEMO_MODE=true,COOKIE_SECURE=true,WEB_ROOT=/app/web,WEB_ORIGIN=${SERVICE_URL}" \
+            --update-env-vars="STORAGE_BACKEND=firestore,GCP_PROJECT_ID=${PROJECT_ID},COOKIE_SECURE=true,WEB_ROOT=/app/web,WEB_ORIGIN=${SERVICE_URL}" \
             --quiet
 
       - name: Verify the public revision
+        env:
+          EXPECTED_DEMO_MODE: ${{ steps.configuration.outputs.demo_mode }}
         shell: bash
         run: |
           for attempt in {1..12}; do
-            if curl --fail --silent --show-error "${SERVICE_URL}/health" >/dev/null \
-              && curl --fail --silent --show-error "${SERVICE_URL}/ready" >/dev/null \
-              && curl --fail --silent --show-error "${SERVICE_URL}/api/v1/auth/session" \
-                | grep -q '"demoMode":true'; then
+            if curl --fail --silent --show-error --connect-timeout 5 --max-time 15 "${SERVICE_URL}/health" >/dev/null \
+              && curl --fail --silent --show-error --connect-timeout 5 --max-time 15 "${SERVICE_URL}/ready" >/dev/null \
+              && curl --fail --silent --show-error --connect-timeout 5 --max-time 15 "${SERVICE_URL}/api/v1/auth/session" \
+                | jq -e --argjson expected "$EXPECTED_DEMO_MODE" \
+                  '.authenticated == false and (.demoMode | type == "boolean") and .demoMode == $expected' >/dev/null; then
               exit 0
             fi
             sleep 5

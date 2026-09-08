@@ -32,7 +32,7 @@ overlapping deployments.
 ## Health and rollback
 
 After deployment the workflow requires successful responses from `/health`,
-`/ready`, and the demo-mode session endpoint. Cloud Run also probes `/health`
+`/ready`, and the session endpoint with the configured authentication mode. Cloud Run also probes `/health`
 and `/ready` on the running revision.
 
 To roll back, deploy a known-good digest from Artifact Registry:
@@ -47,3 +47,20 @@ gcloud run deploy negotiable-calendar \
 Do not place OAuth secrets in the repository or workflow. The public deployment
 currently uses demo mode. Enabling real Google OAuth requires creating an OAuth
 client and storing its values in Secret Manager before setting `DEMO_MODE=false`.
+
+## Authentication configuration survives releases
+
+Routine deployments update only infrastructure environment variables. They preserve
+the existing `DEMO_MODE`, OAuth settings, and Secret Manager references. Before
+building an image, the workflow requires an existing service with exactly one explicit
+`DEMO_MODE=true` or `DEMO_MODE=false` value. It fails before deployment if the
+service is missing or the value is invalid. Initial service provisioning is separate.
+
+The post-deploy check parses session JSON and verifies that the configured mode
+was retained and that an anonymous request remains unauthenticated. Each HTTP
+request has connection and total timeouts. OIDC permission is limited to the
+deployment job, which runs only for `main`.
+
+For real-account use, complete Google OAuth client setup and Secret Manager
+configuration before changing `DEMO_MODE` to `false`. A passing demo deployment
+does not verify login or Calendar consent with a real Google account.

@@ -39,6 +39,10 @@ func main() {
 	}
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	if err := validateAuthConfig(os.Getenv); err != nil {
+		logger.Error("invalid authentication configuration", "error", err)
+		os.Exit(1)
+	}
 	if os.Getenv("STORAGE_BACKEND") == "firestore" {
 		if err := runFirestore(logger); err != nil {
 			logger.Error("run firestore api", "error", err)

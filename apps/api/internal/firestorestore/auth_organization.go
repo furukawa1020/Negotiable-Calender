@@ -443,20 +443,74 @@ func (store *Organization) PreviewInvitation(ctx context.Context, token []byte, 
 	return organization.InvitationPreview{ID: value.ID, OrganizationID: org.ID, OrganizationName: org.Name, Role: value.Role, ExpiresAt: value.ExpiresAt}, nil
 }
 func (store *Organization) AcceptInvitation(ctx context.Context, token []byte, userID string, now time.Time) (organization.Workspace, error) {
-	preview, err := store.PreviewInvitation(ctx, token, now)
+	var workspace organization.Workspace
+	if len(token) != 32 || userID == "" {
+		return workspace, organization.ErrInvitationNotFound
+	}
+	invitationRef := store.Client.Collection("organizationInvitations").Doc(hashID(token))
+	userRef := store.Client.Collection("users").Doc(userID)
+	memberID, auditID := randomID("membership"), randomID("audit")
+	err := store.Client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
+		doc, err := tx.Get(invitationRef)
+		if err != nil {
+			return err
+		}
+		var invitation organization.Invitation
+		if err := doc.DataTo(&invitation); err != nil {
+			return err
+		}
+		if invitation.Validate() != nil || !invitation.ExpiresAt.After(now) {
+			return organization.ErrInvitationNotFound
+		}
+		orgRef := store.Client.Collection("organizations").Doc(invitation.OrganizationID)
+		doc, err = tx.Get(orgRef)
+		if err != nil {
+			return err
+		}
+		var org organizationRecord
+		if err := doc.DataTo(&org); err != nil {
+			return err
+		}
+		if _, err := tx.Get(userRef); err != nil {
+			return err
+		}
+		memberRef := orgRef.Collection("members").Doc(userID)
+		member := membershipRecord{ID: memberID, OrganizationID: orgRef.ID, UserID: userID, Role: invitation.Role, CreatedAt: now}
+		existing, err := tx.Get(memberRef)
+		newMember := firestoreNotFound(err)
+		if err != nil && !newMember {
+			return err
+		}
+		if !newMember {
+			if err := existing.DataTo(&member); err != nil {
+				return err
+			}
+			if !member.Role.Valid() {
+				return organization.ErrForbidden
+			}
+		}
+		workspace = organization.Workspace{ID: orgRef.ID, Name: org.Name, Role: member.Role}
+		if newMember {
+			if err := tx.Create(memberRef, member); err != nil {
+				return err
+			}
+		}
+		if err := tx.Set(userRef.Collection("workspaces").Doc(orgRef.ID), workspace); err != nil {
+			return err
+		}
+		if err := tx.Delete(invitationRef); err != nil {
+			return err
+		}
+		event := audit.Event{ID: auditID, OrganizationID: orgRef.ID, ActorUserID: userID, Action: audit.InvitationAccepted, ResourceType: "invitation", ResourceID: invitation.ID, CreatedAt: now}
+		return tx.Create(orgRef.Collection("auditLogs").Doc(auditID), event)
+	})
+	if firestoreNotFound(err) {
+		return organization.Workspace{}, organization.ErrInvitationNotFound
+	}
 	if err != nil {
 		return organization.Workspace{}, err
 	}
-	workspace := organization.Workspace{ID: preview.OrganizationID, Name: preview.OrganizationName, Role: preview.Role}
-	member := membershipRecord{ID: randomID("membership"), OrganizationID: workspace.ID, UserID: userID, Role: workspace.Role, CreatedAt: now}
-	batch := store.Client.Batch()
-	batch.Set(store.Client.Collection("organizations").Doc(workspace.ID).Collection("members").Doc(userID), member)
-	batch.Set(store.Client.Collection("users").Doc(userID).Collection("workspaces").Doc(workspace.ID), workspace)
-	batch.Delete(store.Client.Collection("organizationInvitations").Doc(hashID(token)))
-	event := audit.Event{ID: randomID("audit"), OrganizationID: workspace.ID, ActorUserID: userID, Action: audit.InvitationAccepted, ResourceType: "invitation", ResourceID: preview.ID, CreatedAt: now}
-	batch.Create(store.Client.Collection("organizations").Doc(workspace.ID).Collection("auditLogs").Doc(event.ID), event)
-	_, err = batch.Commit(ctx)
-	return workspace, err
+	return workspace, nil
 }
 func (store *Organization) ListWorkspaces(ctx context.Context, userID string) ([]organization.Workspace, error) {
 	iter := store.Client.Collection("users").Doc(userID).Collection("workspaces").Documents(ctx)

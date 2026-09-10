@@ -540,28 +540,57 @@ func (store *Organization) ListWorkspaces(ctx context.Context, userID string) ([
 }
 func (store *Organization) SwitchWorkspace(ctx context.Context, sessionHash []byte, userID, organizationID string, now time.Time) (organization.Workspace, error) {
 	var workspace organization.Workspace
-	doc, err := store.Client.Collection("users").Doc(userID).Collection("workspaces").Doc(organizationID).Get(ctx)
+	if len(sessionHash) != 32 || userID == "" || organizationID == "" {
+		return workspace, organization.ErrForbidden
+	}
+	orgRef := store.Client.Collection("organizations").Doc(organizationID)
+	sessionRef := store.Client.Collection("authSessions").Doc(hashID(sessionHash))
+	auditID := randomID("audit")
+	err := store.Client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
+		doc, err := tx.Get(orgRef.Collection("members").Doc(userID))
+		if err != nil {
+			return err
+		}
+		var member membershipRecord
+		if err := doc.DataTo(&member); err != nil {
+			return err
+		}
+		if member.UserID != userID || member.OrganizationID != organizationID || !member.Role.Valid() {
+			return organization.ErrForbidden
+		}
+		doc, err = tx.Get(orgRef)
+		if err != nil {
+			return err
+		}
+		var org organizationRecord
+		if err := doc.DataTo(&org); err != nil {
+			return err
+		}
+		doc, err = tx.Get(sessionRef)
+		if err != nil {
+			return err
+		}
+		var session auth.Session
+		if err := doc.DataTo(&session); err != nil {
+			return err
+		}
+		if session.UserID != userID || !session.ExpiresAt.After(now) {
+			return organization.ErrForbidden
+		}
+		workspace = organization.Workspace{ID: organizationID, Name: org.Name, Role: member.Role}
+		if err := tx.Update(sessionRef, []firestore.Update{{Path: "OrganizationID", Value: organizationID}}); err != nil {
+			return err
+		}
+		event := audit.Event{ID: auditID, OrganizationID: organizationID, ActorUserID: userID, Action: audit.WorkspaceSwitched, ResourceType: "workspace", ResourceID: organizationID, CreatedAt: now}
+		return tx.Create(orgRef.Collection("auditLogs").Doc(auditID), event)
+	})
+	if firestoreNotFound(err) {
+		return organization.Workspace{}, organization.ErrForbidden
+	}
 	if err != nil {
-		return workspace, organization.ErrForbidden
+		return organization.Workspace{}, err
 	}
-	if err := doc.DataTo(&workspace); err != nil {
-		return workspace, err
-	}
-	ref := store.Client.Collection("authSessions").Doc(hashID(sessionHash))
-	sessionDoc, err := ref.Get(ctx)
-	if err != nil {
-		return workspace, organization.ErrForbidden
-	}
-	var session auth.Session
-	if err := sessionDoc.DataTo(&session); err != nil || session.UserID != userID || !session.ExpiresAt.After(now) {
-		return workspace, organization.ErrForbidden
-	}
-	_, err = ref.Update(ctx, []firestore.Update{{Path: "OrganizationID", Value: organizationID}})
-	if err == nil {
-		event := audit.Event{ID: randomID("audit"), OrganizationID: organizationID, ActorUserID: userID, Action: audit.WorkspaceSwitched, ResourceType: "workspace", ResourceID: organizationID, CreatedAt: now}
-		_, err = store.Client.Collection("organizations").Doc(organizationID).Collection("auditLogs").Doc(event.ID).Create(ctx, event)
-	}
-	return workspace, err
+	return workspace, nil
 }
 
 func SeedDemo(ctx context.Context, backend *Backend, now time.Time) (bool, error) {

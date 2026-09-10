@@ -1,0 +1,42 @@
+name: Firestore integration
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      FIRESTORE_EMULATOR_HOST: 127.0.0.1:8085
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: apps/api/go.mod
+          cache-dependency-path: apps/api/go.sum
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3
+        with:
+          install_components: cloud-firestore-emulator
+      - name: Start isolated emulator and test storage behavior
+        shell: bash
+        run: |
+          export JAVA_HOME="$JAVA_HOME_21_X64"
+          export PATH="$JAVA_HOME/bin:$PATH"
+          gcloud emulators firestore start --host-port="$FIRESTORE_EMULATOR_HOST" --project=demo-negotiable-test --quiet > "$RUNNER_TEMP/firestore.log" 2>&1 &
+          EMULATOR_PID=$!
+          trap 'kill "$EMULATOR_PID" 2>/dev/null || true' EXIT
+          READY=false
+          for attempt in {1..60}; do
+            if curl --silent --max-time 1 "http://$FIRESTORE_EMULATOR_HOST/" >/dev/null; then
+              READY=true
+              break
+            fi
+            sleep 1
+          done
+          if [ "$READY" != true ]; then cat "$RUNNER_TEMP/firestore.log"; exit 1; fi
+          cd apps/api
+          go test -race -count=1 -v ./internal/firestorestore

@@ -19,3 +19,14 @@ Security properties:
 
 Invitation email delivery is not included. Copy the generated link using the
 account menu and send it through an approved internal channel.
+
+## Firestore integration tests
+
+CI and production delivery run the official Firestore emulator with synthetic data
+and no cloud credentials. Tests verify single-use invitation acceptance under
+concurrent consumers, preservation of an existing OWNER membership, and no writes
+for expired invitations or missing users/organizations.
+
+To run locally, start `gcloud emulators firestore start --host-port=127.0.0.1:8085`,
+set `FIRESTORE_EMULATOR_HOST=127.0.0.1:8085`, then run
+`go test -race -count=1 ./internal/firestorestore` from `apps/api`.

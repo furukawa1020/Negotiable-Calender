@@ -9,6 +9,10 @@ permissions:
   contents: read
 
 jobs:
+  firestore:
+    name: Firestore integration
+    uses: ./.github/workflows/firestore-tests.yml
+
   api:
     name: API
     runs-on: ubuntu-latest

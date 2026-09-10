@@ -30,3 +30,9 @@ for expired invitations or missing users/organizations.
 To run locally, start `gcloud emulators firestore start --host-port=127.0.0.1:8085`,
 set `FIRESTORE_EMULATOR_HOST=127.0.0.1:8085`, then run
 `go test -race -count=1 ./internal/firestorestore` from `apps/api`.
+
+Firestore workspace switching reads the authoritative organization membership,
+organization name, and current unexpired session in one transaction. Denormalized
+workspace copies never authorize a switch or supply its role. Session changes and
+the privacy-safe audit event commit together. Emulator tests cover stale or absent
+workspace copies, removed membership, invalid roles, and expired/mismatched sessions.

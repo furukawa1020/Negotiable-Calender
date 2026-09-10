@@ -23,6 +23,10 @@ env:
   SERVICE_URL: https://negotiable-calendar-480760664246.asia-northeast1.run.app
 
 jobs:
+  firestore:
+    name: Verify Firestore
+    uses: ./.github/workflows/firestore-tests.yml
+
   api:
     name: Verify API
     runs-on: ubuntu-latest
@@ -80,7 +84,7 @@ jobs:
       id-token: write
     timeout-minutes: 20
     name: Build, deploy, and smoke test
-    needs: [api, web]
+    needs: [api, web, firestore]
     runs-on: ubuntu-latest
     environment: production
     steps:

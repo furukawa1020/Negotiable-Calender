@@ -102,11 +102,13 @@ func (backend *Backend) fencedWrite(ctx context.Context, userID string, write fu
 		if err := backend.guardCalendarWrite(txctx, tx, userID); err != nil {
 			return err
 		}
+		if err := backend.guardProjectionWrite(txctx, tx, userID); err != nil { return err }
 		return write(tx)
 	})
 }
 
 func fenceUser(ctx context.Context) (string, bool) {
+	if lease, ok := ctx.Value(projectionLeaseKey{}).(projectionLease); ok { return lease.UserID, true }
 	if lease, ok := ctx.Value(cleanupLeaseKey{}).(cleanupLease); ok {
 		return lease.UserID, true
 	}

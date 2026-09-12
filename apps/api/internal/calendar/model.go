@@ -15,6 +15,8 @@ type TokenSet struct {
 }
 
 type Connection struct {
+	SyncLeaseID string `json:"-"`
+	SyncLeaseUntil *time.Time `json:"-"`
 	UserID             string     `json:"userId"`
 	GrantedScopes      []string   `json:"grantedScopes"`
 	ConnectedAt        time.Time  `json:"connectedAt"`

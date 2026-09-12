@@ -30,7 +30,7 @@ func TestDeleteAccountCalendarFlows(t *testing.T) {
 			}
 			flows := []calendarintegration.Flow{
 				{ID: "alice-active", UserID: "alice", CodeVerifier: "synthetic-active", StateHash: []byte("synthetic-state"), CreatedAt: now, ExpiresAt: now.Add(time.Hour)},
-				{ID: "alice-expired", UserID: "alice", CodeVerifier: "synthetic-expired", StateHash: []byte("synthetic-state"), CreatedAt: now.Add(-2*time.Hour), ExpiresAt: now.Add(-time.Hour)},
+				{ID: "alice-expired", UserID: "alice", CodeVerifier: "synthetic-expired", StateHash: []byte("synthetic-state"), CreatedAt: now.Add(-2 * time.Hour), ExpiresAt: now.Add(-time.Hour)},
 				{ID: "bob-active", UserID: "bob", CodeVerifier: "synthetic-other", StateHash: []byte("synthetic-state"), CreatedAt: now, ExpiresAt: now.Add(time.Hour)},
 			}
 			for _, flow := range flows {

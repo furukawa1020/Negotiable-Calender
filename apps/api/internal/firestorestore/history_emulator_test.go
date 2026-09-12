@@ -25,7 +25,7 @@ func TestHistoryListsBoundedAndIsolated(t *testing.T) {
 			}
 			now := time.Now().UTC().Truncate(time.Microsecond)
 			type entry struct {
-				id string
+				id      string
 				created time.Time
 			}
 			want := make([]entry, 0, limit+9)
@@ -44,7 +44,7 @@ func TestHistoryListsBoundedAndIsolated(t *testing.T) {
 			}
 			// Deliberately undecodable records must never be fetched: one is
 			// beyond the limit, the other belongs to a different principal.
-			batch.Create(collection.Doc("old-invalid"), map[string]any{"ID": 123, "CreatedAt": now.Add(-24*time.Hour)})
+			batch.Create(collection.Doc("old-invalid"), map[string]any{"ID": 123, "CreatedAt": now.Add(-24 * time.Hour)})
 			batch.Create(other.Doc("foreign-invalid"), map[string]any{"ID": 123, "CreatedAt": now.Add(time.Hour)})
 			if _, err := batch.Commit(ctx); err != nil {
 				t.Fatal(err)
@@ -58,9 +58,13 @@ func TestHistoryListsBoundedAndIsolated(t *testing.T) {
 			var got []entry
 			if kind == "notifications" {
 				values, err := b.Notification().List(ctx, "alice")
-				if err != nil { t.Fatal(err) }
+				if err != nil {
+					t.Fatal(err)
+				}
 				for _, value := range values {
-					if value.UserID != "alice" { t.Fatalf("wrong user: %s", value.UserID) }
+					if value.UserID != "alice" {
+						t.Fatalf("wrong user: %s", value.UserID)
+					}
 					got = append(got, entry{value.ID, value.CreatedAt})
 				}
 				empty, err := b.Notification().List(ctx, "empty")
@@ -69,9 +73,13 @@ func TestHistoryListsBoundedAndIsolated(t *testing.T) {
 				}
 			} else {
 				values, err := b.Audit().List(ctx, "org")
-				if err != nil { t.Fatal(err) }
+				if err != nil {
+					t.Fatal(err)
+				}
 				for _, value := range values {
-					if value.OrganizationID != "org" { t.Fatalf("wrong organization: %s", value.OrganizationID) }
+					if value.OrganizationID != "org" {
+						t.Fatalf("wrong organization: %s", value.OrganizationID)
+					}
 					got = append(got, entry{value.ID, value.CreatedAt})
 				}
 				empty, err := b.Audit().List(ctx, "empty")
@@ -79,7 +87,9 @@ func TestHistoryListsBoundedAndIsolated(t *testing.T) {
 					t.Fatalf("empty audits = %v, %v", empty, err)
 				}
 			}
-			if len(got) != limit { t.Fatalf("got %d records, want %d", len(got), limit) }
+			if len(got) != limit {
+				t.Fatalf("got %d records, want %d", len(got), limit)
+			}
 			for i := range got {
 				if got[i].id != want[i].id || !got[i].created.Equal(want[i].created) {
 					t.Fatalf("record %d = %+v, want %+v", i, got[i], want[i])

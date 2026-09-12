@@ -26,10 +26,30 @@ func (value *SyncFailure) Error() string { return value.Code }
 func (value *SyncFailure) Unwrap() error { return value.Cause }
 
 func (handler *Handler) SyncUser(ctx context.Context, userID string) (SyncResult, error) {
+	result, err := handler.syncUser(ctx, userID)
+	if errors.Is(err, ErrSyncLeaseLost) || errors.Is(err, ErrSyncBusy) {
+		return SyncResult{}, syncFailure("sync_conflict", 409, "calendar changed or another sync is running; retry", err)
+	}
+	return result, err
+}
+
+func (handler *Handler) syncUser(ctx context.Context, userID string) (SyncResult, error) {
 	if !handler.provider.Configured() || handler.cipher == nil {
 		return SyncResult{}, syncFailure("not_configured", 503, "google calendar is not configured", nil)
 	}
-	connection, err := handler.store.GetConnection(ctx, userID)
+	var connection Connection
+	var err error
+	if leases, ok := handler.store.(SyncLeaseStore); ok {
+		connection, err = leases.AcquireSync(ctx, userID, handler.now().UTC(), defaultClaimLease)
+		if err == nil {
+			ctx = WithSyncLease(ctx, SyncLease{UserID: userID, ID: connection.SyncLeaseID})
+		}
+	} else {
+		connection, err = handler.store.GetConnection(ctx, userID)
+	}
+	if errors.Is(err, ErrReconnectRequired) {
+		return SyncResult{}, syncFailure("reconnect_required", 409, "calendar reconnect required", err)
+	}
 	if errors.Is(err, ErrNotFound) {
 		return SyncResult{}, syncFailure("connection_required", 409, "calendar connection required", err)
 	}
@@ -46,7 +66,6 @@ func (handler *Handler) SyncUser(ctx context.Context, userID string) (SyncResult
 		reconnect := errors.Is(err, ErrReconnectRequired)
 		handler.markFailure(ctx, connection, failureCode(err), reconnect)
 		if reconnect {
-			_ = handler.store.MarkReconnectRequired(ctx, userID)
 			return SyncResult{}, syncFailure("reconnect_required", 409, "calendar reconnect required", err)
 		}
 		return SyncResult{}, syncFailure("token_refresh_failed", 502, "unable to refresh calendar permission", err)
@@ -67,8 +86,7 @@ func (handler *Handler) SyncUser(ctx context.Context, userID string) (SyncResult
 			reconnect := errors.Is(changeErr, ErrReconnectRequired)
 			handler.markFailure(ctx, connection, failureCode(changeErr), reconnect)
 			if reconnect {
-				_ = handler.store.MarkReconnectRequired(ctx, userID)
-				return SyncResult{}, syncFailure("reconnect_required", 409, "calendar reconnect required", changeErr)
+					return SyncResult{}, syncFailure("reconnect_required", 409, "calendar reconnect required", changeErr)
 			}
 			return SyncResult{}, syncFailure("calendar_read_failed", 502, "unable to read calendar", changeErr)
 		}
@@ -110,6 +128,7 @@ func (handler *Handler) SyncUser(ctx context.Context, userID string) (SyncResult
 func (handler *Handler) markFailure(ctx context.Context, connection Connection, code string, reconnect bool) {
 	store, ok := handler.store.(BackgroundStore)
 	if !ok {
+		if reconnect { _ = handler.store.MarkReconnectRequired(ctx, connection.UserID) }
 		return
 	}
 	next := handler.now().UTC().Add(syncBackoff(connection.UserID, connection.FailureCount))

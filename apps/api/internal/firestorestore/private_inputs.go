@@ -41,7 +41,11 @@ func decodePrivateInputs(doc *firestore.DocumentSnapshot, err error) (privateInp
 }
 
 func (b *Backend) privateInputRevision(ctx context.Context, userID string) (string, error) {
- if deleting,err:=b.accountIsDeleting(ctx,userID);err!=nil{return "",err}else if deleting{return "",errAccountDeleting}
+	if deleting, err := b.accountIsDeleting(ctx, userID); err != nil {
+		return "", err
+	} else if deleting {
+		return "", errAccountDeleting
+	}
 	value, err := decodePrivateInputs(b.privateInputsRef(userID).Get(ctx))
 	if err != nil {
 		return "", err

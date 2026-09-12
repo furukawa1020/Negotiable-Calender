@@ -97,13 +97,19 @@ func (store *Auth) UpsertGoogleIdentity(ctx context.Context, profile auth.Profil
 		}
 	}
 	// A completed deletion never reuses the old user ID. New sign-in may
- // create a fresh account; a pending deletion cannot be bypassed.
- if doc,err := store.accountDeletionRef(userID).Get(ctx); err == nil {
-  var deletion accountDeletion
-  if err := doc.DataTo(&deletion);err != nil { return auth.Identity{},err }
-  if deletion.Phase != "complete" { return auth.Identity{},errAccountDeleting }
-  userID = randomID("user")
- } else if !firestoreNotFound(err) { return auth.Identity{},err }
+	// create a fresh account; a pending deletion cannot be bypassed.
+	if doc, err := store.accountDeletionRef(userID).Get(ctx); err == nil {
+		var deletion accountDeletion
+		if err := doc.DataTo(&deletion); err != nil {
+			return auth.Identity{}, err
+		}
+		if deletion.Phase != "complete" {
+			return auth.Identity{}, errAccountDeleting
+		}
+		userID = randomID("user")
+	} else if !firestoreNotFound(err) {
+		return auth.Identity{}, err
+	}
 	displayName := profile.DisplayName
 	if displayName == "" {
 		displayName = profile.Email
@@ -126,17 +132,28 @@ func (store *Auth) UpsertGoogleIdentity(ctx context.Context, profile auth.Profil
 			identityRecordValue.CreatedAt = prior.CreatedAt
 		}
 	}
-	err := store.fencedWrite(ctx,userID,func(tx *firestore.Transaction) error {
-  current,err := tx.Get(ref)
-  currentUserID := ""
-  if err == nil { var existing identityRecord; if err:=current.DataTo(&existing);err!=nil{return err};currentUserID=existing.UserID
-  } else if !firestoreNotFound(err) { return err }
-  // Avoid competing post-deletion sign-ins creating orphan accounts.
-  if currentUserID != priorIdentityUserID { return errAccountDeleting }
-  if err:=tx.Set(userRef,user);err!=nil{return err}
-  return tx.Set(ref,identityRecordValue)
- })
- if err != nil {
+	err := store.fencedWrite(ctx, userID, func(tx *firestore.Transaction) error {
+		current, err := tx.Get(ref)
+		currentUserID := ""
+		if err == nil {
+			var existing identityRecord
+			if err := current.DataTo(&existing); err != nil {
+				return err
+			}
+			currentUserID = existing.UserID
+		} else if !firestoreNotFound(err) {
+			return err
+		}
+		// Avoid competing post-deletion sign-ins creating orphan accounts.
+		if currentUserID != priorIdentityUserID {
+			return errAccountDeleting
+		}
+		if err := tx.Set(userRef, user); err != nil {
+			return err
+		}
+		return tx.Set(ref, identityRecordValue)
+	})
+	if err != nil {
 		return auth.Identity{}, err
 	}
 	workspaces, err := store.Organization().ListWorkspaces(ctx, userID)
@@ -155,18 +172,22 @@ func (store *Auth) UpsertGoogleIdentity(ctx context.Context, profile auth.Profil
 	return auth.Identity{UserID: userID, OrganizationID: workspace.ID, Email: profile.Email, DisplayName: displayName, AvatarURL: profile.AvatarURL, Role: string(workspace.Role)}, nil
 }
 
-func (store *Auth) createWorkspace(ctx context.Context,userID string,value organization.Workspace,now time.Time) error {
- return store.fencedWrite(ctx,userID,func(tx *firestore.Transaction) error {
-  if err:=tx.Set(store.Client.Collection("organizations").Doc(value.ID),organizationRecord{ID:value.ID,Name:value.Name,CreatedAt:now,UpdatedAt:now});err!=nil{return err}
-  member:=membershipRecord{ID:randomID("membership"),OrganizationID:value.ID,UserID:userID,Role:value.Role,CreatedAt:now}
-  if err:=tx.Set(store.Client.Collection("organizations").Doc(value.ID).Collection("members").Doc(userID),member);err!=nil{return err}
-  return tx.Set(store.Client.Collection("users").Doc(userID).Collection("workspaces").Doc(value.ID),value)
- })
+func (store *Auth) createWorkspace(ctx context.Context, userID string, value organization.Workspace, now time.Time) error {
+	return store.fencedWrite(ctx, userID, func(tx *firestore.Transaction) error {
+		if err := tx.Set(store.Client.Collection("organizations").Doc(value.ID), organizationRecord{ID: value.ID, Name: value.Name, CreatedAt: now, UpdatedAt: now}); err != nil {
+			return err
+		}
+		member := membershipRecord{ID: randomID("membership"), OrganizationID: value.ID, UserID: userID, Role: value.Role, CreatedAt: now}
+		if err := tx.Set(store.Client.Collection("organizations").Doc(value.ID).Collection("members").Doc(userID), member); err != nil {
+			return err
+		}
+		return tx.Set(store.Client.Collection("users").Doc(userID).Collection("workspaces").Doc(value.ID), value)
+	})
 }
 func (store *Auth) CreateSession(ctx context.Context, value auth.Session) error {
-	return store.fencedWrite(ctx,value.UserID,func(tx *firestore.Transaction) error {
- return tx.Create(store.Client.Collection("authSessions").Doc(hashID(value.TokenHash)),value)
- })
+	return store.fencedWrite(ctx, value.UserID, func(tx *firestore.Transaction) error {
+		return tx.Create(store.Client.Collection("authSessions").Doc(hashID(value.TokenHash)), value)
+	})
 }
 func (store *Auth) GetSession(ctx context.Context, tokenHash []byte, now time.Time) (auth.Identity, error) {
 	var session auth.Session
@@ -183,7 +204,11 @@ func (store *Auth) GetSession(ctx context.Context, tokenHash []byte, now time.Ti
 	if !session.ExpiresAt.After(now) {
 		return auth.Identity{}, auth.ErrNotFound
 	}
-	if deleting,err:=store.accountIsDeleting(ctx,session.UserID);err!=nil {return auth.Identity{},err} else if deleting{return auth.Identity{},auth.ErrNotFound}
+	if deleting, err := store.accountIsDeleting(ctx, session.UserID); err != nil {
+		return auth.Identity{}, err
+	} else if deleting {
+		return auth.Identity{}, auth.ErrNotFound
+	}
 	var user userRecord
 	if doc, err = store.Client.Collection("users").Doc(session.UserID).Get(ctx); err != nil {
 		return auth.Identity{}, auth.ErrNotFound
@@ -204,13 +229,19 @@ func (store *Auth) DeleteSession(ctx context.Context, tokenHash []byte) error {
 	_, err := store.Client.Collection("authSessions").Doc(hashID(tokenHash)).Delete(ctx)
 	return err
 }
-func (store *Auth) DeleteAccount(ctx context.Context,userID string) error {
- deletion,err:=store.beginAccountDeletion(ctx,userID)
- if err!=nil{return err}
- if deletion.Phase=="complete"{return nil}
- userRef:=store.Client.Collection("users").Doc(userID)
- workspaces:=make([]organization.Workspace,0,len(deletion.OrganizationIDs))
- for _,id:=range deletion.OrganizationIDs {workspaces=append(workspaces,organization.Workspace{ID:id})}
+func (store *Auth) DeleteAccount(ctx context.Context, userID string) error {
+	deletion, err := store.beginAccountDeletion(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if deletion.Phase == "complete" {
+		return nil
+	}
+	userRef := store.Client.Collection("users").Doc(userID)
+	workspaces := make([]organization.Workspace, 0, len(deletion.OrganizationIDs))
+	for _, id := range deletion.OrganizationIDs {
+		workspaces = append(workspaces, organization.Workspace{ID: id})
+	}
 	requests := store.Client.Collection("coordinationRequests")
 	requestIter := requests.Documents(ctx)
 	requestIDs := map[string]bool{}
@@ -303,11 +334,13 @@ func (store *Auth) DeleteAccount(ctx context.Context,userID string) error {
 			}
 		}
 	}
-	return store.Client.RunTransaction(ctx,func(ctx context.Context,tx *firestore.Transaction) error {
-  if err:=tx.Delete(userRef);err!=nil{return err}
-  // Keep only a non-PII lifecycle marker; stale user IDs remain fenced.
-  return tx.Set(store.accountDeletionRef(userID),accountDeletion{Phase:"complete",StartedAt:deletion.StartedAt})
- })
+	return store.Client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
+		if err := tx.Delete(userRef); err != nil {
+			return err
+		}
+		// Keep only a non-PII lifecycle marker; stale user IDs remain fenced.
+		return tx.Set(store.accountDeletionRef(userID), accountDeletion{Phase: "complete", StartedAt: deletion.StartedAt})
+	})
 }
 
 func deleteQuery(ctx context.Context, query firestore.Query) error {
@@ -435,7 +468,9 @@ func (store *Organization) AcceptInvitation(ctx context.Context, token []byte, u
 	userRef := store.Client.Collection("users").Doc(userID)
 	memberID, auditID := randomID("membership"), randomID("audit")
 	err := store.Client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
-		if err:=store.guardAccountActive(ctx,tx,userID);err!=nil{return err}
+		if err := store.guardAccountActive(ctx, tx, userID); err != nil {
+			return err
+		}
 		doc, err := tx.Get(invitationRef)
 		if err != nil {
 			return err

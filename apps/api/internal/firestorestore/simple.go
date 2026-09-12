@@ -249,9 +249,9 @@ func (store *Projection) DeleteForUser(ctx context.Context, userID string) error
 }
 
 func (store *Notification) Create(ctx context.Context, value notification.Notification) error {
-	err := store.fencedWrite(ctx,value.UserID,func(tx *firestore.Transaction) error{
- return tx.Create(store.Client.Collection("users").Doc(value.UserID).Collection("notifications").Doc(value.ID),value)
- })
+	err := store.fencedWrite(ctx, value.UserID, func(tx *firestore.Transaction) error {
+		return tx.Create(store.Client.Collection("users").Doc(value.UserID).Collection("notifications").Doc(value.ID), value)
+	})
 	if err != nil {
 		return fmt.Errorf("create notification: %w", err)
 	}

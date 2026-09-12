@@ -43,7 +43,7 @@ describe('App', () => {
 
   it('loads the owners real calendar across day week and month views', async () => {
     window.history.replaceState({}, '', '/?calendar=connected')
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
       const url = String(input)
       if (url.includes('/api/v1/auth/session')) {
         return new Response(JSON.stringify({
@@ -52,6 +52,7 @@ describe('App', () => {
         }), { status: 200 })
       }
       if (url.includes('/api/v1/calendar/connection')) {
+        if (init?.method === 'DELETE') return new Response(null, { status: 204 })
         return new Response(JSON.stringify({
           connected: true,
           connection: {
@@ -110,6 +111,16 @@ describe('App', () => {
       expect.stringContaining('/api/v1/me/private-events?'),
       expect.objectContaining({ credentials: 'include' }),
     )
+    expect(screen.queryByText(/前回の自動同期に失敗しました/)).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Calendar接続を解除' }))
+    expect(await screen.findByText('Google Calendarの接続と同期済みbusy時間を削除しました。')).toBeInTheDocument()
+    expect(screen.queryByText('Confidential board meeting')).not.toBeInTheDocument()
+    expect(screen.queryByText(/Secret room/)).not.toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/v1/calendar/connection'),
+      expect.objectContaining({ method: 'DELETE', credentials: 'include' }),
+    )
+
   })
 
   it('previews and accepts a Workspace invitation, then switches the session', async () => {

@@ -38,6 +38,7 @@ func (store *backgroundStubStore) MarkSyncSuccess(_ context.Context, _ string, t
 }
 func (store *backgroundStubStore) MarkSyncFailure(_ context.Context, _ string, code string, next time.Time, reconnect bool) error {
 	store.failureCode, store.nextAttempt, store.reconnect = code, next, reconnect
+	store.connection.ReconnectRequired = reconnect
 	return nil
 }
 

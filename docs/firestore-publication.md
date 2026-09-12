@@ -173,7 +173,7 @@ The authoritative last-OWNER transaction resolves #85. See
 [account-deletion.md](account-deletion.md) for resume-only operator cleanup,
 fresh-ID re-registration and the retained lifecycle marker.
 
-#94 still tracks coordination-request/audit replay safety, automatic retries and
+#94 still tracks pre-existing orphan audit remediation, automatic retries and
 lifecycle-record retention review. Keep #88 open for final cross-path verification;
 the implemented writer fencing is not a claim that all deletion or security work
 is complete.

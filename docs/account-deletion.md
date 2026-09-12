@@ -19,6 +19,10 @@ the fence. Public projection reads become empty immediately; private-input reads
 and rebuilds reject the account. Every fenced sync/publication batch, sync acquire,
 calendar OAuth flow/save, policy update, notification, session creation, workspace
 creation/switch and invitation acceptance checks the marker transactionally.
+Request creation and mutation also check every participant, including option
+delegates before and after mutation. Request audit writes read the request and
+all its participant markers in the same transaction, even when the caller
+supplies an organization ID. A mismatched organization is rejected.
 
 Existing sessions are rejected while deletion is pending. A callback already
 exchanging a Google token still cannot save to the old user ID. Completion deletes
@@ -50,6 +54,17 @@ does not enumerate accounts, and never accepts a collection/path as its target.
 Do not run it against real accounts without checking the exact authorized target.
 The implementation/tests do not execute production account cleanup.
 
+## Request and audit cleanup
+
+Request cleanup first deletes request-specific audit events in the request's
+own organization, then deletes the request. Until that audit sweep succeeds,
+the request itself is the durable retry reference; no growing ID array or
+additional retained ledger is needed. Actor-specific audit cleanup follows.
+Failures during either sweep or the request delete can be replayed safely.
+Other resource types and other organizations are not selected by request ID.
+The write fences prevent delayed handlers from recreating these audit events.
+This does not recover orphan audit events already left by an older binary.
+
 ## New sign-in and migration
 
 Sign-in is denied during pending deletion. After completion, a new Google sign-in
@@ -68,9 +83,13 @@ Required emulator CI covers stale sync/OAuth/session writes, 405-row cleanup,
 failure after the first 200-row delete batch, hidden publication during failure,
 retry, stale/missing workspace caches, simultaneous OWNER deletions, and fresh
 sign-in after completed deletion. All fixtures are synthetic.
+Request/audit tests additionally inject failures after a committed audit delete,
+at request deletion, and during the later actor audit sweep; they verify retry
+completion, organization/resource-type isolation, participant fencing and a
+mutation that attempts to introduce a deleting delegate.
 
-The broader coordination-request/audit cleanup is still multi-pass. Replay safety
-when request rows disappear before their related audit stage, background retries,
+Request/audit cleanup remains multi-pass but preserves its retry references.
+Background retries, pre-existing orphan audit remediation,
 and lifecycle-record retention need additional review. Keep #94/#88 open for these
 cross-path checks. PostgreSQL deletion concurrency is not changed by this
 Firestore-specific implementation; do not infer its safety from these tests.

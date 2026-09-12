@@ -18,7 +18,12 @@ func (store *Request) Create(ctx context.Context, value coordinationrequest.Coor
 	if err := value.Validate(); err != nil {
 		return err
 	}
-	_, err := store.Client.Collection("coordinationRequests").Doc(value.ID).Create(ctx, value)
+	err := store.Client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
+		if err := store.guardRequestAccounts(ctx, tx, value); err != nil {
+			return err
+		}
+		return tx.Create(store.Client.Collection("coordinationRequests").Doc(value.ID), value)
+	})
 	if err != nil {
 		return fmt.Errorf("create coordination request: %w", err)
 	}
@@ -209,7 +214,14 @@ func (store *Request) mutate(ctx context.Context, id string, update func(*coordi
 		if err := doc.DataTo(&value); err != nil {
 			return err
 		}
+		if err := store.guardRequestAccounts(ctx, tx, value); err != nil {
+			return err
+		}
 		if err := update(&value, tx); err != nil {
+			return err
+		}
+		// The mutation may introduce a new delegate.
+		if err := store.guardRequestAccounts(ctx, tx, value); err != nil {
 			return err
 		}
 		return tx.Set(ref, value)
@@ -218,6 +230,24 @@ func (store *Request) mutate(ctx context.Context, id string, update func(*coordi
 		return coordinationrequest.ErrNotFound
 	}
 	return err
+}
+
+func (store *Backend) guardRequestAccounts(ctx context.Context, tx *firestore.Transaction, value coordinationrequest.CoordinationRequest) error {
+	users := []string{value.RequesterUserID, value.TargetUserID, value.DelegatedUserID}
+	for _, option := range value.Options {
+		users = append(users, option.DelegateUserID)
+	}
+	seen := map[string]bool{}
+	for _, userID := range users {
+		if userID == "" || seen[userID] {
+			continue
+		}
+		seen[userID] = true
+		if err := store.guardAccountActive(ctx, tx, userID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func oneOf(value coordinationrequest.Status, options ...coordinationrequest.Status) bool {

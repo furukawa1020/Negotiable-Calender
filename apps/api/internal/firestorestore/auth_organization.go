@@ -244,7 +244,6 @@ func (store *Auth) DeleteAccount(ctx context.Context, userID string) error {
 	}
 	requests := store.Client.Collection("coordinationRequests")
 	requestIter := requests.Documents(ctx)
-	requestIDs := map[string]bool{}
 	for {
 		doc, nextErr := requestIter.Next()
 		if errors.Is(nextErr, iterator.Done) {
@@ -264,7 +263,12 @@ func (store *Auth) DeleteAccount(ctx context.Context, userID string) error {
 			owned = owned || option.DelegateUserID == userID
 		}
 		if owned {
-			requestIDs[value.ID] = true
+			// Keep the request as a durable cleanup reference until its audit
+			// sweep succeeds. Account fences prevent new related audit writes.
+			if err := store.deleteRequestAudits(ctx, value.OrganizationID, doc.Ref.ID); err != nil {
+				requestIter.Stop()
+				return err
+			}
 			if _, err := doc.Ref.Delete(ctx); err != nil {
 				requestIter.Stop()
 				return err
@@ -289,7 +293,7 @@ func (store *Auth) DeleteAccount(ctx context.Context, userID string) error {
 				iter.Stop()
 				return err
 			}
-			if event.ActorUserID == userID || requestIDs[event.ResourceID] {
+			if event.ActorUserID == userID {
 				if _, err := doc.Ref.Delete(ctx); err != nil {
 					iter.Stop()
 					return err
@@ -356,6 +360,33 @@ func deleteQuery(ctx context.Context, query firestore.Query) error {
 		}
 		if _, err := doc.Ref.Delete(ctx); err != nil {
 			return err
+		}
+	}
+}
+
+func (store *Auth) deleteRequestAudits(ctx context.Context, organizationID, requestID string) error {
+	if organizationID == "" {
+		return fmt.Errorf("cleanup request organization is required")
+	}
+	query := store.Client.Collection("organizations").Doc(organizationID).Collection("auditLogs").Where("ResourceID", "==", requestID)
+	iter := query.Documents(ctx)
+	defer iter.Stop()
+	for {
+		doc, err := iter.Next()
+		if errors.Is(err, iterator.Done) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		var event audit.Event
+		if err := doc.DataTo(&event); err != nil {
+			return err
+		}
+		if event.ResourceType == "request" {
+			if _, err := doc.Ref.Delete(ctx); err != nil {
+				return err
+			}
 		}
 	}
 }

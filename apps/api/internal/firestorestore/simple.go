@@ -16,6 +16,7 @@ import (
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/notification"
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/policy"
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/projection"
+	coordinationrequest "github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/request"
 )
 
 func (store *Policy) Get(ctx context.Context, userID string) (policy.SharingPolicy, error) {
@@ -309,18 +310,37 @@ func (store *Notification) MarkRead(ctx context.Context, id, userID string, now 
 }
 
 func (store *Audit) Create(ctx context.Context, value audit.Event) error {
-	if value.OrganizationID == "" {
-		var request struct{ OrganizationID string }
-		doc, err := store.Client.Collection("coordinationRequests").Doc(value.ResourceID).Get(ctx)
-		if err != nil {
-			return fmt.Errorf("audit resource not found")
+	err := store.Client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
+		event := value // Transaction retries must not reuse inferred state.
+		if event.ActorUserID == "" {
+			return fmt.Errorf("audit actor is required")
 		}
-		if err := doc.DataTo(&request); err != nil {
-			return fmt.Errorf("decode audit resource: %w", err)
+		if err := store.guardAccountActive(ctx, tx, event.ActorUserID); err != nil {
+			return err
 		}
-		value.OrganizationID = request.OrganizationID
-	}
-	_, err := store.Client.Collection("organizations").Doc(value.OrganizationID).Collection("auditLogs").Doc(value.ID).Create(ctx, value)
+		if event.ResourceType == "request" || event.OrganizationID == "" {
+			if event.ResourceID == "" {
+				return fmt.Errorf("audit resource is required")
+			}
+			var request coordinationrequest.CoordinationRequest
+			doc, err := tx.Get(store.Client.Collection("coordinationRequests").Doc(event.ResourceID))
+			if err != nil {
+				return fmt.Errorf("audit resource not found: %w", err)
+			}
+			if err := doc.DataTo(&request); err != nil {
+				return fmt.Errorf("decode audit resource: %w", err)
+			}
+			if event.OrganizationID != "" && event.OrganizationID != request.OrganizationID {
+				return fmt.Errorf("audit organization mismatch")
+			}
+			if err := store.guardRequestAccounts(ctx, tx, request); err != nil {
+				return err
+			}
+			event.OrganizationID = request.OrganizationID
+			event.ResourceType = "request"
+		}
+		return tx.Create(store.Client.Collection("organizations").Doc(event.OrganizationID).Collection("auditLogs").Doc(event.ID), event)
+	})
 	if err != nil {
 		return fmt.Errorf("create audit event: %w", err)
 	}

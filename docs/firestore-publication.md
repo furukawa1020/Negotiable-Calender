@@ -72,9 +72,42 @@ Run with FIRESTORE_EMULATOR_HOST set, then:
 
 The privateEvents input collection still uses multi-batch changes without a
 committed-input snapshot. A concurrent policy-triggered rebuild can therefore
-read incomplete synchronization inputs. Policy/manual-override revision capture,
-atomic invalidation at policy change, and rejecting rebuilds computed from stale
-policy revisions also remain. The projection gate alone does not prove these
-end-to-end privacy and synchronization properties. Keep #88 open until those
+read incomplete synchronization inputs. Policy/manual-override revision fencing is now implemented for Firestore as
+specified below. It does not make private-event inputs atomic. The projection
+gate alone does not prove these end-to-end synchronization properties. Keep #88 open until those
 paths, automatic recovery for moving synchronization windows, and their failure
 tests are implemented.
+
+## Policy and manual-override revision fencing
+
+Firestore policy upserts and manual-override creation atomically write a fresh
+policyRevision control ID with the setting change. Duplicate override creation
+rolls back both writes. Public reads compare the completed projection's policy
+revision with this control, so an old snapshot becomes hidden as soon as a
+setting change commits, even if regeneration never starts or fails.
+
+The real Rebuilder captures the revision before reading settings and overrides.
+Every publication batch and completion transaction checks it again. Initial
+default-policy creation recaptures the revision BEFORE reloading the policy;
+concurrent user edits cannot be replaced in the published result by stale defaults.
+Changes during a multi-batch publication prevent remaining batches and completion.
+Abandonment may release the publication lease after a policy change, but cannot
+make the incomplete collection visible.
+
+When a new policy revision is published, all generated rows from older policy
+revisions are deleted, including rows outside the requested regeneration window.
+Only the regenerated window is reopened. Ordinary same-policy window replacement
+retains the existing window behavior. This is intentionally fail-closed.
+
+Missing policyRevision is the legacy empty revision. Existing projections remain
+readable until a policy mutation creates a revision. A malformed revision fails
+closed. Do not delete revision controls independently to bypass invalidation.
+No new collection or index is required; account deletion already includes
+projectionControls. Old binaries ignoring policyRevision are not safe rollback
+targets after settings change; use the serving-disabled recovery procedure above.
+
+Regression tests include a paused real Rebuilder with concurrent policy edit,
+stale batches/completion after 400 writes, immediate invalidation, narrow-window
+regeneration, manual overrides, duplicate-write rollback and cross-user isolation.
+This does not implement PostgreSQL policy revision fencing or committed snapshots
+for Firestore privateEvents; those remain separate work.

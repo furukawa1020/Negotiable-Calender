@@ -81,6 +81,9 @@ func (store *Auth) beginAccountDeletion(ctx context.Context, userID string) (acc
 			if err := memberDoc.DataTo(&membership); err != nil {
 				return err
 			}
+			if !membership.Role.Valid() {
+				return organization.ErrForbidden
+			}
 			value.OrganizationIDs = append(value.OrganizationIDs, org.Ref.ID)
 			if membership.Role != organization.Owner {
 				continue
@@ -120,4 +123,24 @@ func (store *Auth) beginAccountDeletion(ctx context.Context, userID string) (acc
 		return tx.Delete(store.Client.Collection("calendarConnections").Doc(userID))
 	})
 	return value, err
+}
+
+// ResumeAccountDeletion cannot initiate a new deletion. It is intended for an
+// authenticated operator after an interrupted, already-authorized cleanup.
+func (store *Auth) ResumeAccountDeletion(ctx context.Context, userID string) error {
+	doc, err := store.accountDeletionRef(userID).Get(ctx)
+	if err != nil {
+		return err
+	}
+	var value accountDeletion
+	if err := doc.DataTo(&value); err != nil {
+		return err
+	}
+	if value.Phase == "complete" {
+		return nil
+	}
+	if value.Phase != "deleting" {
+		return errAccountDeleting
+	}
+	return store.DeleteAccount(ctx, userID)
 }

@@ -164,11 +164,16 @@ a paused real Rebuilder across input revision changes, cancellation, overlapping
 writers, expired leases and stale writes/completion after disconnect. Google data
 and failures are synthetic. These are not real-account OAuth acceptance tests.
 
-### Known account-deletion gap (#94)
+### Account-deletion lifecycle and remaining checks (#94)
 
-Auth.DeleteAccount still directly deletes collections before revoking all session,
-OAuth and calendar writers. Its multi-step lifecycle is not covered by the sync /
-disconnect protocol above. #94 tracks a durable deletion marker, writer rejection,
-retry and final cleanup, coordinated with the last-OWNER guard in #85. Keep #88
-open for final cross-path verification; this change is not a claim that all
-account-deletion concurrency or security work is complete.
+Auth.DeleteAccount now commits an external deletion marker and revokes the
+calendar grant before collection cleanup. Sync, OAuth, session and publication
+writers check that marker, which remains after the user subcollections are gone.
+The authoritative last-OWNER transaction resolves #85. See
+[account-deletion.md](account-deletion.md) for resume-only operator cleanup,
+fresh-ID re-registration and the retained lifecycle marker.
+
+#94 still tracks coordination-request/audit replay safety, automatic retries and
+lifecycle-record retention review. Keep #88 open for final cross-path verification;
+the implemented writer fencing is not a claim that all deletion or security work
+is complete.

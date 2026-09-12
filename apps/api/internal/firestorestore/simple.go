@@ -111,7 +111,9 @@ func (store *Projection) list(ctx context.Context, userID string, from, to time.
 	if err != nil {
 		return nil, fmt.Errorf("check projection publication: %w", err)
 	}
-	if !ready { return []projection.ScheduleProjection{}, nil }
+	if !ready {
+		return []projection.ScheduleProjection{}, nil
+	}
 	iter := store.Client.Collection("users").Doc(userID).Collection("scheduleProjections").Documents(ctx)
 	defer iter.Stop()
 	now := time.Now().UTC()
@@ -133,8 +135,12 @@ func (store *Projection) list(ctx context.Context, userID string, from, to time.
 		}
 	}
 	currentRevision, stillReady, err := store.projectionReadRevision(ctx, userID)
-	if err != nil { return nil, fmt.Errorf("recheck projection publication: %w", err) }
-	if !stillReady || currentRevision != revision { return []projection.ScheduleProjection{}, nil }
+	if err != nil {
+		return nil, fmt.Errorf("recheck projection publication: %w", err)
+	}
+	if !stillReady || currentRevision != revision {
+		return []projection.ScheduleProjection{}, nil
+	}
 	sort.Slice(values, func(i, j int) bool {
 		if values[i].StartAt.Equal(values[j].StartAt) {
 			return values[i].ID < values[j].ID
@@ -145,7 +151,9 @@ func (store *Projection) list(ctx context.Context, userID string, from, to time.
 }
 
 func (store *Projection) Replace(ctx context.Context, userID string, from, to time.Time, values []projection.ScheduleProjection) error {
-	if !from.Before(to) { return fmt.Errorf("invalid projection replacement range") }
+	if !from.Before(to) {
+		return fmt.Errorf("invalid projection replacement range")
+	}
 	for _, value := range values {
 		if err := value.Validate(); err != nil {
 			return fmt.Errorf("validate replacement projection: %w", err)
@@ -153,12 +161,20 @@ func (store *Projection) Replace(ctx context.Context, userID string, from, to ti
 		if value.UserID != userID {
 			return fmt.Errorf("replacement projection user mismatch")
 		}
-		if !value.StartAt.Before(to) || !value.EndAt.After(from) { return fmt.Errorf("replacement projection outside affected range") }
+		if !value.StartAt.Before(to) || !value.EndAt.After(from) {
+			return fmt.Errorf("replacement projection outside affected range")
+		}
 	}
 	ctx, err := store.beginProjectionWrite(ctx, userID, from, to, false)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	completed := false
-	defer func() { if !completed { store.abandonProjectionWrite(ctx, userID) } }()
+	defer func() {
+		if !completed {
+			store.abandonProjectionWrite(ctx, userID)
+		}
+	}()
 	collection := store.Client.Collection("users").Doc(userID).Collection("scheduleProjections")
 	iter := collection.Documents(ctx)
 	defer iter.Stop()
@@ -189,18 +205,30 @@ func (store *Projection) Replace(ctx context.Context, userID string, from, to ti
 	if err := writes.Commit(ctx); err != nil {
 		return fmt.Errorf("replace schedule projections: %w", err)
 	}
-	if err := store.finishProjectionWrite(ctx, userID, true); err != nil { return err }
+	if err := store.finishProjectionWrite(ctx, userID, true); err != nil {
+		return err
+	}
 	completed = true
 	return nil
 }
 
 func (store *Projection) DeleteForUser(ctx context.Context, userID string) error {
 	ctx, err := store.beginProjectionWrite(ctx, userID, time.Time{}, time.Time{}, true)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	completed := false
-	defer func() { if !completed { store.abandonProjectionWrite(ctx, userID) } }()
-	if err := deleteCollection(ctx, store.Client, store.Client.Collection("users").Doc(userID).Collection("scheduleProjections"), 200); err != nil { return err }
-	if err := store.finishProjectionWrite(ctx, userID, false); err != nil { return err }
+	defer func() {
+		if !completed {
+			store.abandonProjectionWrite(ctx, userID)
+		}
+	}()
+	if err := deleteCollection(ctx, store.Client, store.Client.Collection("users").Doc(userID).Collection("scheduleProjections"), 200); err != nil {
+		return err
+	}
+	if err := store.finishProjectionWrite(ctx, userID, false); err != nil {
+		return err
+	}
 	completed = true
 	return nil
 }

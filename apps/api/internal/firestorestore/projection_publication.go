@@ -12,11 +12,13 @@ import (
 var errProjectionRepairRequired = errors.New("incomplete projection update requires replacement of the entire affected range or deletion")
 
 type projectionLeaseKey struct{}
+type projectionClearAllKey struct{}
 type projectionLease struct{ UserID, ID string }
 
 // A durable gate covers every batch. Failed updates stay hidden until their
 // entire affected range is repaired. Lease expiry never reopens publication.
 type projectionPublication struct {
+ PolicyRevision string
 	ID            string
 	Ready         bool
 	Dirty         bool
@@ -30,6 +32,13 @@ func (b *Backend) projectionPublicationRef(userID string) *firestore.DocumentRef
 }
 
 func (b *Backend) beginProjectionWrite(ctx context.Context, userID string, from, to time.Time, deleting bool) (context.Context, error) {
+ if deleting { ctx = context.WithValue(ctx, projectionInputsKey{}, nil) } else if _, ok := ctx.Value(projectionInputsKey{}).(projectionInputs); !ok {
+ var err error
+ ctx, err = b.Calendar().BeginRebuild(ctx, userID)
+ if err != nil { return nil, err }
+ }
+ clearAll := false
+ inputs, _ := ctx.Value(projectionInputsKey{}).(projectionInputs)
 	id := calendarintegration.NewSyncLeaseID()
 	err := b.fencedWrite(ctx, userID, func(tx *firestore.Transaction) error {
 		doc, err := tx.Get(b.projectionPublicationRef(userID))
@@ -41,13 +50,14 @@ func (b *Backend) beginProjectionWrite(ctx context.Context, userID string, from,
 		} else if !firestoreNotFound(err) {
 			return err
 		}
+		clearAll = previous.PolicyRevision != inputs.Revision
 		now := time.Now().UTC()
 		// Deletion revokes an in-flight replacement before removing any rows.
 		if !deleting {
 			if previous.LeaseUntil != nil && previous.LeaseUntil.After(now) {
 				return calendarintegration.ErrSyncBusy
 			}
-			if previous.Dirty && (previous.ClearRequired || from.After(previous.From) || to.Before(previous.To)) {
+			if previous.Dirty && !clearAll && (previous.ClearRequired || from.After(previous.From) || to.Before(previous.To)) {
 				return errProjectionRepairRequired
 			}
 		}
@@ -57,7 +67,8 @@ func (b *Backend) beginProjectionWrite(ctx context.Context, userID string, from,
 	if err != nil {
 		return nil, err
 	}
-	return context.WithValue(ctx, projectionLeaseKey{}, projectionLease{UserID: userID, ID: id}), nil
+	ctx = context.WithValue(ctx, projectionClearAllKey{}, clearAll)
+ return context.WithValue(ctx, projectionLeaseKey{}, projectionLease{UserID: userID, ID: id}), nil
 }
 
 func (b *Backend) guardProjectionWrite(ctx context.Context, tx *firestore.Transaction, userID string) error {
@@ -87,12 +98,14 @@ func (b *Backend) guardProjectionWrite(ctx context.Context, tx *firestore.Transa
 
 func (b *Backend) finishProjectionWrite(ctx context.Context, userID string, ready bool) error {
 	lease, _ := ctx.Value(projectionLeaseKey{}).(projectionLease)
+ inputs, _ := ctx.Value(projectionInputsKey{}).(projectionInputs)
 	return b.fencedWrite(ctx, userID, func(tx *firestore.Transaction) error {
-		return tx.Set(b.projectionPublicationRef(userID), projectionPublication{ID: lease.ID, Ready: ready})
+		return tx.Set(b.projectionPublicationRef(userID), projectionPublication{ID: lease.ID, Ready: ready, PolicyRevision:inputs.Revision})
 	})
 }
 
 func (b *Backend) abandonProjectionWrite(ctx context.Context, userID string) {
+ ctx = context.WithValue(ctx, projectionInputsKey{}, nil)
 	// Cancellation must not reopen publication. Release only this writer's lease;
 	// process crashes remain recoverable after lease expiry.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
@@ -112,15 +125,14 @@ func (b *Backend) projectionReadRevision(ctx context.Context, userID string) (st
 		return "", false, err
 	}
 	doc, err := b.projectionPublicationRef(userID).Get(ctx)
-	if firestoreNotFound(err) {
-		return "", true, nil
-	}
-	if err != nil {
-		return "", false, err
-	}
-	var value projectionPublication
-	if err := doc.DataTo(&value); err != nil {
-		return "", false, err
-	}
-	return value.ID, value.Ready && !value.Dirty && value.LeaseUntil == nil, nil
+ legacy := firestoreNotFound(err)
+ if err != nil && !legacy { return "", false, err }
+ var value projectionPublication
+ if !legacy {
+  if err := doc.DataTo(&value); err != nil { return "", false, err }
+ }
+ revision, err := decodePolicyRevision(b.policyRevisionRef(userID).Get(ctx))
+ if err != nil { return "", false, err }
+ if legacy { return "", revision == "", nil }
+ return value.ID, value.PolicyRevision == revision && value.Ready && !value.Dirty && value.LeaseUntil == nil, nil
 }

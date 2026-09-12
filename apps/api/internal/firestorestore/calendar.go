@@ -52,24 +52,30 @@ func (store *Calendar) ConsumeFlow(ctx context.Context, id, userID string, state
 	return value, err
 }
 func (store *Calendar) SaveConnection(ctx context.Context, value calendarintegration.Connection) error {
-	value.ReconnectRequired=false
-	value.LastErrorCode=""
-	value.FailureCount=0
-	value.SyncToken=""
-	value.SyncLeaseID=""
-	value.SyncLeaseUntil=nil
-	value.LastSyncedAt=nil
-	next:=value.ConnectedAt
-	value.NextAttemptAt=&next
-	return store.Client.RunTransaction(ctx,func(ctx context.Context,tx *firestore.Transaction)error {
-		doc,err:=tx.Get(store.projectionBlock(value.UserID))
-		if err!=nil && !firestoreNotFound(err) { return err }
-		if err==nil {
-			var control publicationControl
-			if err:=doc.DataTo(&control);err!=nil { return err }
-			if control.InProgress { return calendarintegration.ErrSyncBusy }
+	value.ReconnectRequired = false
+	value.LastErrorCode = ""
+	value.FailureCount = 0
+	value.SyncToken = ""
+	value.SyncLeaseID = ""
+	value.SyncLeaseUntil = nil
+	value.LastSyncedAt = nil
+	next := value.ConnectedAt
+	value.NextAttemptAt = &next
+	return store.Client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
+		doc, err := tx.Get(store.projectionBlock(value.UserID))
+		if err != nil && !firestoreNotFound(err) {
+			return err
 		}
-		return tx.Set(store.Client.Collection("calendarConnections").Doc(value.UserID),value)
+		if err == nil {
+			var control publicationControl
+			if err := doc.DataTo(&control); err != nil {
+				return err
+			}
+			if control.InProgress {
+				return calendarintegration.ErrSyncBusy
+			}
+		}
+		return tx.Set(store.Client.Collection("calendarConnections").Doc(value.UserID), value)
 	})
 }
 func (store *Calendar) GetConnection(ctx context.Context, userID string) (calendarintegration.Connection, error) {
@@ -88,36 +94,50 @@ func (store *Calendar) ReplaceBusySpans(ctx context.Context, userID string, span
 	changes := calendarintegration.ChangeSet{Full: true, Upserts: spans}
 	return store.ApplyChanges(ctx, userID, changes, from, to, now)
 }
-func (store *Calendar) MarkSynced(ctx context.Context,userID string,now time.Time)error {
-	return store.MarkSyncSuccess(ctx,userID,"",now,now.Add(15*time.Minute))
+func (store *Calendar) MarkSynced(ctx context.Context, userID string, now time.Time) error {
+	return store.MarkSyncSuccess(ctx, userID, "", now, now.Add(15*time.Minute))
 }
-func (store *Calendar) MarkReconnectRequired(ctx context.Context,userID string)error {
-	return store.fencedWrite(ctx,userID,func(tx *firestore.Transaction)error {
-		return tx.Update(store.Client.Collection("calendarConnections").Doc(userID),[]firestore.Update{{Path:"ReconnectRequired",Value:true}})
+func (store *Calendar) MarkReconnectRequired(ctx context.Context, userID string) error {
+	return store.fencedWrite(ctx, userID, func(tx *firestore.Transaction) error {
+		return tx.Update(store.Client.Collection("calendarConnections").Doc(userID), []firestore.Update{{Path: "ReconnectRequired", Value: true}})
 	})
 }
-func (store *Calendar) DeleteConnection(ctx context.Context,userID string)error {
-	id:=calendarintegration.NewSyncLeaseID()
-	err:=store.Client.RunTransaction(ctx,func(ctx context.Context,tx *firestore.Transaction)error {
-		doc,err:=tx.Get(store.projectionBlock(userID))
-		if err!=nil && !firestoreNotFound(err) { return err }
-		now:=time.Now().UTC()
-		if err==nil {
-			var control publicationControl
-			if err:=doc.DataTo(&control);err!=nil { return err }
-			if control.InProgress && control.CleanupUntil!=nil && control.CleanupUntil.After(now) { return calendarintegration.ErrSyncBusy }
+func (store *Calendar) DeleteConnection(ctx context.Context, userID string) error {
+	id := calendarintegration.NewSyncLeaseID()
+	err := store.Client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
+		doc, err := tx.Get(store.projectionBlock(userID))
+		if err != nil && !firestoreNotFound(err) {
+			return err
 		}
-		until:=now.Add(2*time.Minute)
-		if err:=tx.Set(store.projectionBlock(userID),publicationControl{BlockedAt:now,CleanupID:id,CleanupUntil:&until,InProgress:true});err!=nil { return err }
+		now := time.Now().UTC()
+		if err == nil {
+			var control publicationControl
+			if err := doc.DataTo(&control); err != nil {
+				return err
+			}
+			if control.InProgress && control.CleanupUntil != nil && control.CleanupUntil.After(now) {
+				return calendarintegration.ErrSyncBusy
+			}
+		}
+		until := now.Add(2 * time.Minute)
+		if err := tx.Set(store.projectionBlock(userID), publicationControl{BlockedAt: now, CleanupID: id, CleanupUntil: &until, InProgress: true}); err != nil {
+			return err
+		}
 		// Invalidates every old sync before any destructive cleanup begins.
 		return tx.Delete(store.Client.Collection("calendarConnections").Doc(userID))
 	})
-	if err!=nil { return err }
-	ctx=context.WithValue(ctx,cleanupLeaseKey{},cleanupLease{UserID:userID,ID:id})
-	if err:=store.Projection().DeleteForUser(ctx,userID);err!=nil { return err }
-	if err:=deleteCollection(ctx,store.Client,store.Client.Collection("users").Doc(userID).Collection("privateEvents"),200);err!=nil { return err }
-	return store.fencedWrite(ctx,userID,func(tx *firestore.Transaction)error {
-		return tx.Update(store.projectionBlock(userID),[]firestore.Update{{Path:"InProgress",Value:false},{Path:"CleanupUntil",Value:nil}})
+	if err != nil {
+		return err
+	}
+	ctx = context.WithValue(ctx, cleanupLeaseKey{}, cleanupLease{UserID: userID, ID: id})
+	if err := store.Projection().DeleteForUser(ctx, userID); err != nil {
+		return err
+	}
+	if err := deleteCollection(ctx, store.Client, store.Client.Collection("users").Doc(userID).Collection("privateEvents"), 200); err != nil {
+		return err
+	}
+	return store.fencedWrite(ctx, userID, func(tx *firestore.Transaction) error {
+		return tx.Update(store.projectionBlock(userID), []firestore.Update{{Path: "InProgress", Value: false}, {Path: "CleanupUntil", Value: nil}})
 	})
 }
 func (store *Calendar) UserTimezone(ctx context.Context, userID string) (string, error) {
@@ -126,7 +146,7 @@ func (store *Calendar) UserTimezone(ctx context.Context, userID string) (string,
 
 func (store *Calendar) ApplyChanges(ctx context.Context, userID string, changes calendarintegration.ChangeSet, from, to, now time.Time) error {
 	collection := store.Client.Collection("users").Doc(userID).Collection("privateEvents")
-	writes := newChunkedBatch(store.Client,userID)
+	writes := newChunkedBatch(store.Client, userID)
 	if changes.Full {
 		iter := collection.Documents(ctx)
 		defer iter.Stop()
@@ -274,15 +294,19 @@ func (store *Calendar) ClaimDueConnections(ctx context.Context, now time.Time, l
 	}
 	return claimed, nil
 }
-func (store *Calendar) MarkSyncSuccess(ctx context.Context,userID,syncToken string,now,next time.Time)error {
-	return store.fencedWrite(ctx,userID,func(tx *firestore.Transaction)error {
-		if err:=tx.Update(store.Client.Collection("calendarConnections").Doc(userID),[]firestore.Update{{Path:"SyncToken",Value:syncToken},{Path:"LastSyncedAt",Value:now},{Path:"LastAttemptAt",Value:now},{Path:"NextAttemptAt",Value:next},{Path:"LastErrorCode",Value:""},{Path:"FailureCount",Value:0},{Path:"ReconnectRequired",Value:false},{Path:"SyncLeaseID",Value:""},{Path:"SyncLeaseUntil",Value:nil}});err!=nil { return err }
+func (store *Calendar) MarkSyncSuccess(ctx context.Context, userID, syncToken string, now, next time.Time) error {
+	return store.fencedWrite(ctx, userID, func(tx *firestore.Transaction) error {
+		if err := tx.Update(store.Client.Collection("calendarConnections").Doc(userID), []firestore.Update{{Path: "SyncToken", Value: syncToken}, {Path: "LastSyncedAt", Value: now}, {Path: "LastAttemptAt", Value: now}, {Path: "NextAttemptAt", Value: next}, {Path: "LastErrorCode", Value: ""}, {Path: "FailureCount", Value: 0}, {Path: "ReconnectRequired", Value: false}, {Path: "SyncLeaseID", Value: ""}, {Path: "SyncLeaseUntil", Value: nil}}); err != nil {
+			return err
+		}
 		return tx.Delete(store.projectionBlock(userID))
 	})
 }
-func (store *Calendar) MarkSyncFailure(ctx context.Context,userID,code string,next time.Time,reconnect bool)error {
-	if code=="" { code="temporary_failure" }
-	return store.fencedWrite(ctx,userID,func(tx *firestore.Transaction)error {
-		return tx.Update(store.Client.Collection("calendarConnections").Doc(userID),[]firestore.Update{{Path:"NextAttemptAt",Value:next},{Path:"LastErrorCode",Value:code},{Path:"FailureCount",Value:firestore.Increment(1)},{Path:"ReconnectRequired",Value:reconnect},{Path:"SyncLeaseID",Value:""},{Path:"SyncLeaseUntil",Value:nil}})
+func (store *Calendar) MarkSyncFailure(ctx context.Context, userID, code string, next time.Time, reconnect bool) error {
+	if code == "" {
+		code = "temporary_failure"
+	}
+	return store.fencedWrite(ctx, userID, func(tx *firestore.Transaction) error {
+		return tx.Update(store.Client.Collection("calendarConnections").Doc(userID), []firestore.Update{{Path: "NextAttemptAt", Value: next}, {Path: "LastErrorCode", Value: code}, {Path: "FailureCount", Value: firestore.Increment(1)}, {Path: "ReconnectRequired", Value: reconnect}, {Path: "SyncLeaseID", Value: ""}, {Path: "SyncLeaseUntil", Value: nil}})
 	})
 }

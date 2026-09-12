@@ -37,8 +37,8 @@ func (store *Policy) Upsert(ctx context.Context, value policy.SharingPolicy) err
 	if err := value.Validate(); err != nil {
 		return err
 	}
-	err := store.fencedWrite(ctx,value.UserID,func(tx *firestore.Transaction)error {
-		return tx.Set(store.Client.Collection("sharingPolicies").Doc(value.UserID),value)
+	err := store.fencedWrite(ctx, value.UserID, func(tx *firestore.Transaction) error {
+		return tx.Set(store.Client.Collection("sharingPolicies").Doc(value.UserID), value)
 	})
 	if err != nil {
 		return fmt.Errorf("upsert sharing policy: %w", err)
@@ -293,27 +293,27 @@ func firestoreNotFound(err error) bool { return status.Code(err) == codes.NotFou
 const firestoreWriteChunkSize = 400
 
 type chunkedBatch struct {
-	client *firestore.Client
-	batch  *firestore.WriteBatch
-	writes int
-	userID string
-	operations []func(*firestore.Transaction)error
+	client     *firestore.Client
+	batch      *firestore.WriteBatch
+	writes     int
+	userID     string
+	operations []func(*firestore.Transaction) error
 }
 
 func newChunkedBatch(client *firestore.Client, userID string) *chunkedBatch {
-	return &chunkedBatch{client: client, batch: client.Batch(), userID:userID}
+	return &chunkedBatch{client: client, batch: client.Batch(), userID: userID}
 }
 
 func (writer *chunkedBatch) Delete(ctx context.Context, ref *firestore.DocumentRef) error {
 	writer.batch.Delete(ref)
-	writer.operations=append(writer.operations,func(tx *firestore.Transaction)error { return tx.Delete(ref) })
+	writer.operations = append(writer.operations, func(tx *firestore.Transaction) error { return tx.Delete(ref) })
 	writer.writes++
 	return writer.commitIfFull(ctx)
 }
 
 func (writer *chunkedBatch) Set(ctx context.Context, ref *firestore.DocumentRef, value any) error {
 	writer.batch.Set(ref, value)
-	writer.operations=append(writer.operations,func(tx *firestore.Transaction)error { return tx.Set(ref,value) })
+	writer.operations = append(writer.operations, func(tx *firestore.Transaction) error { return tx.Set(ref, value) })
 	writer.writes++
 	return writer.commitIfFull(ctx)
 }
@@ -329,16 +329,24 @@ func (writer *chunkedBatch) Commit(ctx context.Context) error {
 	if writer.writes == 0 {
 		return nil
 	}
-	if _,fenced:=fenceUser(ctx);fenced {
-		backend:=&Backend{Client:writer.client}
-		if err:=backend.fencedWrite(ctx,writer.userID,func(tx *firestore.Transaction)error {
-			for _,operation:=range writer.operations { if err:=operation(tx);err!=nil { return err } }
+	if _, fenced := fenceUser(ctx); fenced {
+		backend := &Backend{Client: writer.client}
+		if err := backend.fencedWrite(ctx, writer.userID, func(tx *firestore.Transaction) error {
+			for _, operation := range writer.operations {
+				if err := operation(tx); err != nil {
+					return err
+				}
+			}
 			return nil
-		});err!=nil { return err }
-	} else if _,err:=writer.batch.Commit(ctx);err!=nil { return err }
+		}); err != nil {
+			return err
+		}
+	} else if _, err := writer.batch.Commit(ctx); err != nil {
+		return err
+	}
 	writer.batch = writer.client.Batch()
 	writer.writes = 0
-	writer.operations=nil
+	writer.operations = nil
 	return nil
 }
 
@@ -351,12 +359,14 @@ func deleteCollection(ctx context.Context, client *firestore.Client, collection 
 		if len(docs) == 0 {
 			return nil
 		}
-		userID,_:=fenceUser(ctx)
-		batch:=newChunkedBatch(client,userID)
-		for _,doc:=range docs {
-			if err:=batch.Delete(ctx,doc.Ref);err!=nil { return err }
+		userID, _ := fenceUser(ctx)
+		batch := newChunkedBatch(client, userID)
+		for _, doc := range docs {
+			if err := batch.Delete(ctx, doc.Ref); err != nil {
+				return err
+			}
 		}
-		if err:=batch.Commit(ctx);err!=nil {
+		if err := batch.Commit(ctx); err != nil {
 			return err
 		}
 	}

@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/policy"
 	calendarintegration "github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/calendar"
+	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/policy"
 )
 
 type Store interface {
@@ -85,7 +85,9 @@ func (store *PostgresStore) Replace(ctx context.Context, userID string, from, to
 		return fmt.Errorf("begin projection replacement: %w", err)
 	}
 	defer transaction.Rollback()
-	if err := calendarintegration.GuardSyncTransaction(ctx,transaction,userID); err != nil { return err }
+	if err := calendarintegration.GuardSyncTransaction(ctx, transaction, userID); err != nil {
+		return err
+	}
 	if _, err := transaction.ExecContext(ctx, `
 DELETE FROM schedule_projections
 WHERE user_id = $1 AND start_at < $3 AND end_at > $2

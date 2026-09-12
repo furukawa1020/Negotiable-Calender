@@ -118,7 +118,9 @@ func (store *PostgresStore) ApplyChanges(ctx context.Context, userID string, cha
 		return fmt.Errorf("begin incremental calendar sync: %w", err)
 	}
 	defer tx.Rollback()
-	if err := GuardSyncTransaction(ctx, tx, userID); err != nil { return err }
+	if err := GuardSyncTransaction(ctx, tx, userID); err != nil {
+		return err
+	}
 
 	if changes.Full {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM private_events WHERE user_id=$1 AND start_at<$3 AND end_at>$2`, userID, from.UTC(), to.UTC()); err != nil {
@@ -156,20 +158,30 @@ busy_status=EXCLUDED.busy_status,visibility=EXCLUDED.visibility,updated_at=EXCLU
 }
 
 func (store *PostgresStore) MarkSyncSuccess(ctx context.Context, userID, syncToken string, now, next time.Time) error {
-	return store.syncWrite(ctx,userID,func(tx *sql.Tx) error {
-		result,err := tx.ExecContext(ctx, `UPDATE calendar_connections SET sync_token=$2,last_synced_at=$3,last_attempt_at=$3,next_attempt_at=$4,last_error_code='',failure_count=0,reconnect_required=false,sync_lease_id='',sync_lease_until=NULL WHERE user_id=$1`,userID,syncToken,now.UTC(),next.UTC())
-		if err != nil { return err }
-		if n,err:=result.RowsAffected(); err!=nil || n!=1 { return ErrSyncLeaseLost }
+	return store.syncWrite(ctx, userID, func(tx *sql.Tx) error {
+		result, err := tx.ExecContext(ctx, `UPDATE calendar_connections SET sync_token=$2,last_synced_at=$3,last_attempt_at=$3,next_attempt_at=$4,last_error_code='',failure_count=0,reconnect_required=false,sync_lease_id='',sync_lease_until=NULL WHERE user_id=$1`, userID, syncToken, now.UTC(), next.UTC())
+		if err != nil {
+			return err
+		}
+		if n, err := result.RowsAffected(); err != nil || n != 1 {
+			return ErrSyncLeaseLost
+		}
 		return nil
 	})
 }
 
 func (store *PostgresStore) MarkSyncFailure(ctx context.Context, userID, code string, next time.Time, reconnect bool) error {
-	if code=="" { code="temporary_failure" }
-	return store.syncWrite(ctx,userID,func(tx *sql.Tx) error {
-		result,err := tx.ExecContext(ctx,`UPDATE calendar_connections SET next_attempt_at=$3,last_error_code=$2,failure_count=failure_count+1,reconnect_required=$4,sync_lease_id='',sync_lease_until=NULL WHERE user_id=$1`,userID,code,next.UTC(),reconnect)
-		if err!=nil { return err }
-		if n,err:=result.RowsAffected();err!=nil || n!=1 { return ErrSyncLeaseLost }
+	if code == "" {
+		code = "temporary_failure"
+	}
+	return store.syncWrite(ctx, userID, func(tx *sql.Tx) error {
+		result, err := tx.ExecContext(ctx, `UPDATE calendar_connections SET next_attempt_at=$3,last_error_code=$2,failure_count=failure_count+1,reconnect_required=$4,sync_lease_id='',sync_lease_until=NULL WHERE user_id=$1`, userID, code, next.UTC(), reconnect)
+		if err != nil {
+			return err
+		}
+		if n, err := result.RowsAffected(); err != nil || n != 1 {
+			return ErrSyncLeaseLost
+		}
 		return nil
 	})
 }

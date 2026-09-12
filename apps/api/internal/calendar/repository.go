@@ -90,10 +90,14 @@ RETURNING id,user_id,state_hash,code_verifier,expires_at,created_at`,
 }
 
 func (store *PostgresStore) SaveConnection(ctx context.Context, value Connection) error {
-	tx, err := store.database.BeginTx(ctx,nil)
-	if err != nil { return err }
+	tx, err := store.database.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
 	defer tx.Rollback()
-	if err := LockCalendarTransaction(ctx,tx,value.UserID); err != nil { return err }
+	if err := LockCalendarTransaction(ctx, tx, value.UserID); err != nil {
+		return err
+	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO calendar_connections
 (user_id,refresh_token_cipher,granted_scopes,connected_at,last_synced_at,reconnect_required,next_attempt_at,last_error_code,failure_count,sync_token)
 VALUES ($1,$2,$3,$4,$5,$6,$4,'',0,'')
@@ -132,7 +136,9 @@ func (store *PostgresStore) ReplaceBusySpans(ctx context.Context, userID string,
 		return fmt.Errorf("begin calendar sync: %w", err)
 	}
 	defer tx.Rollback()
-	if err := GuardSyncTransaction(ctx,tx,userID); err != nil { return err }
+	if err := GuardSyncTransaction(ctx, tx, userID); err != nil {
+		return err
+	}
 	if _, err = tx.ExecContext(ctx, `DELETE FROM private_events WHERE user_id=$1 AND start_at<$3 AND end_at>$2`, userID, from, to); err != nil {
 		return fmt.Errorf("clear calendar sync window: %w", err)
 	}
@@ -155,11 +161,11 @@ VALUES ($1,$2,$3,$4,$5,$6,'default',$7,$7)`, userID, span.ProviderEventID, span.
 }
 
 func (store *PostgresStore) MarkSynced(ctx context.Context, userID string, now time.Time) error {
-	return store.MarkSyncSuccess(ctx,userID,"",now,now.Add(defaultSyncInterval))
+	return store.MarkSyncSuccess(ctx, userID, "", now, now.Add(defaultSyncInterval))
 }
 func (store *PostgresStore) MarkReconnectRequired(ctx context.Context, userID string) error {
-	return store.syncWrite(ctx,userID,func(tx *sql.Tx) error {
-		_,err:=tx.ExecContext(ctx,"UPDATE calendar_connections SET reconnect_required=true WHERE user_id=$1",userID)
+	return store.syncWrite(ctx, userID, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "UPDATE calendar_connections SET reconnect_required=true WHERE user_id=$1", userID)
 		return err
 	})
 }
@@ -170,7 +176,9 @@ func (store *PostgresStore) DeleteConnection(ctx context.Context, userID string)
 		return fmt.Errorf("begin calendar disconnect: %w", err)
 	}
 	defer tx.Rollback()
-	if err := LockCalendarTransaction(ctx,tx,userID); err != nil { return err }
+	if err := LockCalendarTransaction(ctx, tx, userID); err != nil {
+		return err
+	}
 	if _, err = tx.ExecContext(ctx, `DELETE FROM schedule_projections WHERE user_id=$1`, userID); err != nil {
 		return fmt.Errorf("delete calendar projections: %w", err)
 	}

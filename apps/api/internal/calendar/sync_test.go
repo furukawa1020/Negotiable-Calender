@@ -12,14 +12,14 @@ import (
 
 type backgroundStubStore struct {
 	stubStore
-	changes       ChangeSet
-	successToken  string
-	successAt     time.Time
-	nextAttempt   time.Time
-	failureCode   string
-	reconnect     bool
-	claimed       []Connection
-	claimCount    int
+	changes      ChangeSet
+	successToken string
+	successAt    time.Time
+	nextAttempt  time.Time
+	failureCode  string
+	reconnect    bool
+	claimed      []Connection
+	claimCount   int
 }
 
 func (store *backgroundStubStore) ClaimDueConnections(context.Context, time.Time, int, time.Duration) ([]Connection, error) {
@@ -74,7 +74,7 @@ func TestSyncUserAppliesIncrementalChangesBeforeAdvancingCursor(t *testing.T) {
 		UserID: "user-1", RefreshTokenCipher: encrypted, SyncToken: "sync-old",
 	}}}
 	provider := &incrementalStubProvider{results: []ChangeSet{{
-		Upserts: []BusySpan{{ProviderEventID: "changed", StartAt: now, EndAt: now.Add(time.Hour), Busy: true}},
+		Upserts:                 []BusySpan{{ProviderEventID: "changed", StartAt: now, EndAt: now.Add(time.Hour), Busy: true}},
 		DeletedProviderEventIDs: []string{"deleted"}, NextSyncToken: "sync-new",
 	}}}
 	projector := &stubProjector{}
@@ -104,7 +104,7 @@ func TestSyncUserFallsBackToFullSyncWhenCursorExpired(t *testing.T) {
 		UserID: "user-1", RefreshTokenCipher: encrypted, SyncToken: "expired",
 	}}}
 	provider := &incrementalStubProvider{
-		errs: []error{ErrSyncTokenExpired, nil},
+		errs:    []error{ErrSyncTokenExpired, nil},
 		results: []ChangeSet{{}, {Full: true, NextSyncToken: "fresh"}},
 	}
 	handler := NewHandler(http.NotFoundHandler(), store, provider, cipher, &stubProjector{}, HandlerConfig{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
@@ -121,7 +121,7 @@ func TestSyncUserFallsBackToFullSyncWhenCursorExpired(t *testing.T) {
 
 type revokedProvider struct{}
 
-func (*revokedProvider) Configured() bool { return true }
+func (*revokedProvider) Configured() bool                       { return true }
 func (*revokedProvider) AuthorizationURL(string, string) string { return "" }
 func (*revokedProvider) Exchange(context.Context, string, string) (TokenSet, error) {
 	return TokenSet{}, nil

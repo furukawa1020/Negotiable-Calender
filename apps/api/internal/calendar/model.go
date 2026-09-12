@@ -15,8 +15,8 @@ type TokenSet struct {
 }
 
 type Connection struct {
-	SyncLeaseID string `json:"-"`
-	SyncLeaseUntil *time.Time `json:"-"`
+	SyncLeaseID        string     `json:"-"`
+	SyncLeaseUntil     *time.Time `json:"-"`
 	UserID             string     `json:"userId"`
 	GrantedScopes      []string   `json:"grantedScopes"`
 	ConnectedAt        time.Time  `json:"connectedAt"`
@@ -37,14 +37,12 @@ type BusySpan struct {
 	Busy            bool
 }
 
-
 type ChangeSet struct {
 	Upserts                 []BusySpan
 	DeletedProviderEventIDs []string
 	NextSyncToken           string
 	Full                    bool
 }
-
 
 type PrivateEventView struct {
 	ID            string     `json:"id"`

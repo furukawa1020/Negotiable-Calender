@@ -17,6 +17,10 @@ type RebuildStore interface {
 	Replace(context.Context, string, time.Time, time.Time, []ScheduleProjection) error
 }
 
+type rebuildSnapshotStore interface {
+	BeginRebuild(context.Context, string) (context.Context, error)
+}
+
 type Rebuilder struct {
 	store    RebuildStore
 	policies policy.Store
@@ -28,6 +32,13 @@ func NewRebuilder(store RebuildStore, policies policy.Store) *Rebuilder {
 }
 
 func (rebuilder *Rebuilder) Rebuild(ctx context.Context, userID string, from, to, now time.Time) error {
+	if snapshots, ok := rebuilder.store.(rebuildSnapshotStore); ok {
+		var err error
+		ctx, err = snapshots.BeginRebuild(ctx, userID)
+		if err != nil {
+			return fmt.Errorf("capture projection inputs: %w", err)
+		}
+	}
 	timezone, err := rebuilder.store.UserTimezone(ctx, userID)
 	if err != nil {
 		return fmt.Errorf("load projection timezone: %w", err)
@@ -37,6 +48,18 @@ func (rebuilder *Rebuilder) Rebuild(ctx context.Context, userID string, from, to
 		value = defaultPolicy(userID, now)
 		if err := rebuilder.policies.Upsert(ctx, value); err != nil {
 			return fmt.Errorf("create default sharing policy: %w", err)
+		}
+		// Default creation changes the revision. Recapture BEFORE reloading so a
+		// concurrent edit cannot publish stale defaults.
+		if snapshots, ok := rebuilder.store.(rebuildSnapshotStore); ok {
+			ctx, err = snapshots.BeginRebuild(ctx, userID)
+			if err != nil {
+				return fmt.Errorf("capture default policy inputs: %w", err)
+			}
+			value, err = rebuilder.policies.Get(ctx, userID)
+			if err != nil {
+				return fmt.Errorf("reload default sharing policy: %w", err)
+			}
 		}
 	} else if err != nil {
 		return fmt.Errorf("load sharing policy: %w", err)

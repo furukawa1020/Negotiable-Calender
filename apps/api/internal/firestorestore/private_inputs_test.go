@@ -53,11 +53,13 @@ func TestPrivateInputsFailureAfter400AndFullRecovery(t *testing.T) {
 		return invoke(ctx, method, req, reply, cc, opts...)
 	}
 	// The SDK's emulator path creates its own connection and ignores dial options.
- // Supply the intercepted connection explicitly so the failure reaches Commit.
- conn,err := grpc.NewClient(os.Getenv("FIRESTORE_EMULATOR_HOST"),grpc.WithTransportCredentials(insecure.NewCredentials()),grpc.WithUnaryInterceptor(intercept))
- if err != nil { t.Fatal(err) }
- t.Cleanup(func(){_ = conn.Close()})
- client, err := firestore.NewClient(ctx, "demo-nc-"+safeDigest(t.Name())[:16], option.WithGRPCConn(conn))
+	// Supply the intercepted connection explicitly so the failure reaches Commit.
+	conn, err := grpc.NewClient(os.Getenv("FIRESTORE_EMULATOR_HOST"), grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithUnaryInterceptor(intercept))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	client, err := firestore.NewClient(ctx, "demo-nc-"+safeDigest(t.Name())[:16], option.WithGRPCConn(conn))
 	if err != nil {
 		t.Fatal(err)
 	}

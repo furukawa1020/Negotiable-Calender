@@ -41,6 +41,13 @@ func (store *Calendar) AcquireSync(ctx context.Context, userID string, now time.
 		if value.SyncLeaseID != "" && value.SyncLeaseUntil != nil && value.SyncLeaseUntil.After(now) {
 			return calendarintegration.ErrSyncBusy
 		}
+		inputs, err := decodePrivateInputs(tx.Get(store.privateInputsRef(userID)))
+		if err != nil {
+			return err
+		}
+		if !inputs.Ready {
+			value.SyncToken = ""
+		}
 		until := now.Add(duration)
 		value.SyncLeaseID, value.SyncLeaseUntil = id, &until
 		value.LastAttemptAt, value.NextAttemptAt = &now, &until
@@ -108,11 +115,17 @@ func (backend *Backend) fencedWrite(ctx context.Context, userID string, write fu
 		if err := backend.guardProjectionInputs(txctx, tx, userID); err != nil {
 			return err
 		}
+		if err := backend.guardPrivateInputs(txctx, tx, userID); err != nil {
+			return err
+		}
 		return write(tx)
 	})
 }
 
 func fenceUser(ctx context.Context) (string, bool) {
+	if lease, ok := ctx.Value(privateInputsLeaseKey{}).(privateInputsLease); ok {
+		return lease.UserID, true
+	}
 	if lease, ok := ctx.Value(projectionLeaseKey{}).(projectionLease); ok {
 		return lease.UserID, true
 	}

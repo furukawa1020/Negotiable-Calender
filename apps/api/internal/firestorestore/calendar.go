@@ -123,6 +123,9 @@ func (store *Calendar) DeleteConnection(ctx context.Context, userID string) erro
 		if err := tx.Set(store.projectionBlock(userID), publicationControl{BlockedAt: now, CleanupID: id, CleanupUntil: &until, InProgress: true}); err != nil {
 			return err
 		}
+		if err := tx.Set(store.privateInputsRef(userID), privateInputsControl{ID: id}); err != nil {
+			return err
+		}
 		// Invalidates every old sync before any destructive cleanup begins.
 		return tx.Delete(store.Client.Collection("calendarConnections").Doc(userID))
 	})
@@ -137,6 +140,9 @@ func (store *Calendar) DeleteConnection(ctx context.Context, userID string) erro
 		return err
 	}
 	return store.fencedWrite(ctx, userID, func(tx *firestore.Transaction) error {
+		if err := tx.Set(store.privateInputsRef(userID), privateInputsControl{ID: id, Ready: true}); err != nil {
+			return err
+		}
 		return tx.Update(store.projectionBlock(userID), []firestore.Update{{Path: "InProgress", Value: false}, {Path: "CleanupUntil", Value: nil}})
 	})
 }
@@ -145,30 +151,33 @@ func (store *Calendar) UserTimezone(ctx context.Context, userID string) (string,
 }
 
 func (store *Calendar) ApplyChanges(ctx context.Context, userID string, changes calendarintegration.ChangeSet, from, to, now time.Time) error {
-	collection := store.Client.Collection("users").Doc(userID).Collection("privateEvents")
-	writes := newChunkedBatch(store.Client, userID)
-	if changes.Full {
-		iter := collection.Documents(ctx)
-		defer iter.Stop()
-		for {
-			doc, err := iter.Next()
-			if errors.Is(err, iterator.Done) {
-				break
-			}
-			if err != nil {
-				return err
-			}
-			var value privateEventRecord
-			if err := doc.DataTo(&value); err != nil {
-				return err
-			}
-			if value.StartAt.Before(to) && value.EndAt.After(from) {
-				if err := writes.Delete(ctx, doc.Ref); err != nil {
-					return fmt.Errorf("delete replaced private events: %w", err)
-				}
-			}
+	if !from.Before(to) {
+		return fmt.Errorf("invalid calendar sync range")
+	}
+	for _, span := range changes.Upserts {
+		if span.ProviderEventID == "" || span.CalendarID == "" || !span.StartAt.Before(span.EndAt) {
+			return fmt.Errorf("invalid calendar change")
 		}
 	}
+	ctx, err := store.beginPrivateInputs(ctx, userID, changes.Full)
+	if err != nil {
+		return err
+	}
+	completed := false
+	defer func() {
+		if !completed {
+			store.abandonPrivateInputs(ctx, userID)
+		}
+	}()
+	collection := store.Client.Collection("users").Doc(userID).Collection("privateEvents")
+	// Full responses replace the whole cache, so shifted-window recovery cannot
+	// retain partial rows from an earlier failed attempt.
+	if changes.Full {
+		if err := deleteCollection(ctx, store.Client, collection, 200); err != nil {
+			return err
+		}
+	}
+	writes := newChunkedBatch(store.Client, userID)
 	for _, id := range changes.DeletedProviderEventIDs {
 		if id != "" {
 			if err := writes.Delete(ctx, collection.Doc(safeDigest(id))); err != nil {
@@ -189,9 +198,20 @@ func (store *Calendar) ApplyChanges(ctx context.Context, userID string, changes 
 	if err := writes.Commit(ctx); err != nil {
 		return fmt.Errorf("commit private event changes: %w", err)
 	}
+	if err := store.finishPrivateInputs(ctx, userID); err != nil {
+		return err
+	}
+	completed = true
 	return nil
 }
 func (store *Calendar) ListPrivateEvents(ctx context.Context, userID string, from, to time.Time) ([]privateevent.PrivateEvent, error) {
+	revision, err := store.privateInputRevision(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if inputs, ok := ctx.Value(projectionInputsKey{}).(projectionInputs); ok && (inputs.UserID != userID || inputs.PrivateRevision != revision) {
+		return nil, errProjectionInputsChanged
+	}
 	iter := store.Client.Collection("users").Doc(userID).Collection("privateEvents").Documents(ctx)
 	defer iter.Stop()
 	values := []privateevent.PrivateEvent{}
@@ -210,6 +230,13 @@ func (store *Calendar) ListPrivateEvents(ctx context.Context, userID string, fro
 		if value.StartAt.Before(to) && value.EndAt.After(from) {
 			values = append(values, privateevent.PrivateEvent{ID: value.ID, UserID: value.UserID, ProviderEventID: value.ProviderEventID, CalendarID: value.CalendarID, StartAt: value.StartAt, EndAt: value.EndAt, BusyStatus: value.BusyStatus, Visibility: value.Visibility, CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt})
 		}
+	}
+	current, err := store.privateInputRevision(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if revision != current {
+		return nil, errProjectionInputsChanged
 	}
 	sort.Slice(values, func(i, j int) bool {
 		if values[i].StartAt.Equal(values[j].StartAt) {

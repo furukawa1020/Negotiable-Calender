@@ -18,13 +18,14 @@ type projectionLease struct{ UserID, ID string }
 // A durable gate covers every batch. Failed updates stay hidden until their
 // entire affected range is repaired. Lease expiry never reopens publication.
 type projectionPublication struct {
-	PolicyRevision string
-	ID             string
-	Ready          bool
-	Dirty          bool
-	ClearRequired  bool
-	From, To       time.Time
-	LeaseUntil     *time.Time
+	PrivateRevision string
+	PolicyRevision  string
+	ID              string
+	Ready           bool
+	Dirty           bool
+	ClearRequired   bool
+	From, To        time.Time
+	LeaseUntil      *time.Time
 }
 
 func (b *Backend) projectionPublicationRef(userID string) *firestore.DocumentRef {
@@ -54,7 +55,7 @@ func (b *Backend) beginProjectionWrite(ctx context.Context, userID string, from,
 		} else if !firestoreNotFound(err) {
 			return err
 		}
-		clearAll = previous.PolicyRevision != inputs.Revision
+		clearAll = previous.PolicyRevision != inputs.Revision || previous.PrivateRevision != inputs.PrivateRevision
 		now := time.Now().UTC()
 		// Deletion revokes an in-flight replacement before removing any rows.
 		if !deleting {
@@ -104,7 +105,7 @@ func (b *Backend) finishProjectionWrite(ctx context.Context, userID string, read
 	lease, _ := ctx.Value(projectionLeaseKey{}).(projectionLease)
 	inputs, _ := ctx.Value(projectionInputsKey{}).(projectionInputs)
 	return b.fencedWrite(ctx, userID, func(tx *firestore.Transaction) error {
-		return tx.Set(b.projectionPublicationRef(userID), projectionPublication{ID: lease.ID, Ready: ready, PolicyRevision: inputs.Revision})
+		return tx.Set(b.projectionPublicationRef(userID), projectionPublication{ID: lease.ID, Ready: ready, PolicyRevision: inputs.Revision, PrivateRevision: inputs.PrivateRevision})
 	})
 }
 
@@ -143,8 +144,15 @@ func (b *Backend) projectionReadRevision(ctx context.Context, userID string) (st
 	if err != nil {
 		return "", false, err
 	}
-	if legacy {
-		return "", revision == "", nil
+	privateRevision, err := b.privateInputRevision(ctx, userID)
+	if errors.Is(err, errPrivateInputsIncomplete) {
+		return "", false, nil
 	}
-	return value.ID, value.PolicyRevision == revision && value.Ready && !value.Dirty && value.LeaseUntil == nil, nil
+	if err != nil {
+		return "", false, err
+	}
+	if legacy {
+		return "", revision == "" && privateRevision == "", nil
+	}
+	return value.ID, value.PrivateRevision == privateRevision && value.PolicyRevision == revision && value.Ready && !value.Dirty && value.LeaseUntil == nil, nil
 }

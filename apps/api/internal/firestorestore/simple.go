@@ -38,6 +38,7 @@ func (store *Policy) Upsert(ctx context.Context, value policy.SharingPolicy) err
 		return err
 	}
 	err := store.fencedWrite(ctx, value.UserID, func(tx *firestore.Transaction) error {
+		if err := store.invalidatePolicyProjections(tx, value.UserID); err != nil { return err }
 		return tx.Set(store.Client.Collection("sharingPolicies").Doc(value.UserID), value)
 	})
 	if err != nil {
@@ -79,7 +80,10 @@ func (store *Policy) CreateOverride(ctx context.Context, value policy.ManualOver
 	if err := value.Validate(); err != nil {
 		return err
 	}
-	_, err := store.Client.Collection("users").Doc(value.UserID).Collection("manualOverrides").Doc(value.ID).Create(ctx, value)
+	err := store.fencedWrite(ctx, value.UserID, func(tx *firestore.Transaction) error {
+ if err := store.invalidatePolicyProjections(tx, value.UserID); err != nil { return err }
+ return tx.Create(store.Client.Collection("users").Doc(value.UserID).Collection("manualOverrides").Doc(value.ID), value)
+})
 	if err != nil {
 		return fmt.Errorf("create manual override: %w", err)
 	}
@@ -187,6 +191,11 @@ func (store *Projection) Replace(ctx context.Context, userID string, from, to ti
 		if err != nil {
 			return fmt.Errorf("list replaced projections: %w", err)
 		}
+		// A new policy invalidates even rows outside this rebuild's window.
+  if clearAll, _ := ctx.Value(projectionClearAllKey{}).(bool); clearAll {
+   if err := writes.Delete(ctx, doc.Ref); err != nil { return err }
+   continue
+  }
 		var existing projection.ScheduleProjection
 		if err := doc.DataTo(&existing); err != nil {
 			return fmt.Errorf("decode replaced projection: %w", err)

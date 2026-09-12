@@ -48,12 +48,14 @@ func TestPrivateInputsFailureAfter400AndFullRecovery(t *testing.T) {
 				}
 			}
 			if data && dataCommits.Add(1) > 1 {
- // Simulate a rejected server transaction, releasing its read locks before
- // returning the error. A transport drop would instead need lock/lease expiry.
- if len(request.Transaction)>0 {
-  rollback := &firestorepb.RollbackRequest{Database:request.Database,Transaction:request.Transaction}
-  if err:=invoke(ctx,"/google.firestore.v1.Firestore/Rollback",rollback,&emptypb.Empty{},cc,opts...);err!=nil { return err }
- }
+				// Simulate a rejected server transaction, releasing its read locks before
+				// returning the error. A transport drop would instead need lock/lease expiry.
+				if len(request.Transaction) > 0 {
+					rollback := &firestorepb.RollbackRequest{Database: request.Database, Transaction: request.Transaction}
+					if err := invoke(ctx, "/google.firestore.v1.Firestore/Rollback", rollback, &emptypb.Empty{}, cc, opts...); err != nil {
+						return err
+					}
+				}
 				return status.Error(codes.PermissionDenied, "synthetic second-batch failure")
 			}
 		}

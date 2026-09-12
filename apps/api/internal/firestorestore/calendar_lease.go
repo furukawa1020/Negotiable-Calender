@@ -105,6 +105,7 @@ func (backend *Backend) fencedWrite(ctx context.Context, userID string, write fu
 		if err := backend.guardProjectionWrite(txctx, tx, userID); err != nil {
 			return err
 		}
+		if err := backend.guardProjectionInputs(txctx, tx, userID); err != nil { return err }
 		return write(tx)
 	})
 }

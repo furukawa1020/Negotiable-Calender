@@ -64,3 +64,17 @@ deployment job, which runs only for `main`.
 For real-account use, complete Google OAuth client setup and Secret Manager
 configuration before changing `DEMO_MODE` to `false`. A passing demo deployment
 does not verify login or Calendar consent with a real Google account.
+
+## Bounded history reads
+
+Notification lists query the latest 100 documents and organization audit lists
+query the latest 200, ordered by `CreatedAt DESC, __name__ DESC` in Firestore.
+Document IDs equal the stored event IDs, preserving deterministic same-time ordering.
+This uses the default descending single-field index on `CreatedAt`; keep that
+index enabled for the `notifications` and `auditLogs` collections. See the
+[Firestore index ordering documentation](https://firebase.google.com/docs/firestore/query-data/index-overview#default_ordering_and_the_name_field).
+
+These limits bound returned document reads, not total project costs. Older
+records remain stored; this is not a retention or deletion policy. The emulator
+release gate covers over-limit history, time/ID ordering, principal isolation,
+empty arrays, and an undecodable old record that must remain outside the query.

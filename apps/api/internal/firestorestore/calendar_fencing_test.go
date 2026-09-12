@@ -173,7 +173,7 @@ func TestCalendarFencesEveryWriteAfterReconnect(t *testing.T) {
 	if err := b.Calendar().SaveConnection(ctx, connection); err != nil {
 		t.Fatal(err)
 	}
-	span := calendarintegration.BusySpan{ProviderEventID: "stale", StartAt: now, EndAt: now.Add(time.Hour), Busy: true}
+	span := calendarintegration.BusySpan{ProviderEventID: "stale", CalendarID: "primary", StartAt: now, EndAt: now.Add(time.Hour), Busy: true}
 	for name, write := range map[string]func() error{
 		"events": func() error {
 			return b.Calendar().ApplyChanges(stale, "alice", calendarintegration.ChangeSet{Upserts: []calendarintegration.BusySpan{span}}, now, now.Add(time.Hour), now)

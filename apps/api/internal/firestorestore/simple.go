@@ -185,7 +185,10 @@ func (store *Notification) Create(ctx context.Context, value notification.Notifi
 }
 
 func (store *Notification) List(ctx context.Context, userID string) ([]notification.Notification, error) {
-	iter := store.Client.Collection("users").Doc(userID).Collection("notifications").Documents(ctx)
+	iter := store.Client.Collection("users").Doc(userID).Collection("notifications").
+		OrderBy("CreatedAt", firestore.Desc).
+		OrderBy(firestore.DocumentID, firestore.Desc).
+		Limit(100).Documents(ctx)
 	defer iter.Stop()
 	values := []notification.Notification{}
 	for {
@@ -201,15 +204,6 @@ func (store *Notification) List(ctx context.Context, userID string) ([]notificat
 			return nil, fmt.Errorf("decode notification: %w", err)
 		}
 		values = append(values, value)
-	}
-	sort.Slice(values, func(i, j int) bool {
-		if values[i].CreatedAt.Equal(values[j].CreatedAt) {
-			return values[i].ID > values[j].ID
-		}
-		return values[i].CreatedAt.After(values[j].CreatedAt)
-	})
-	if len(values) > 100 {
-		values = values[:100]
 	}
 	return values, nil
 }
@@ -260,7 +254,10 @@ func (store *Audit) Create(ctx context.Context, value audit.Event) error {
 }
 
 func (store *Audit) List(ctx context.Context, organizationID string) ([]audit.Event, error) {
-	iter := store.Client.Collection("organizations").Doc(organizationID).Collection("auditLogs").Documents(ctx)
+	iter := store.Client.Collection("organizations").Doc(organizationID).Collection("auditLogs").
+		OrderBy("CreatedAt", firestore.Desc).
+		OrderBy(firestore.DocumentID, firestore.Desc).
+		Limit(200).Documents(ctx)
 	defer iter.Stop()
 	values := []audit.Event{}
 	for {
@@ -276,15 +273,6 @@ func (store *Audit) List(ctx context.Context, organizationID string) ([]audit.Ev
 			return nil, fmt.Errorf("decode audit event: %w", err)
 		}
 		values = append(values, value)
-	}
-	sort.Slice(values, func(i, j int) bool {
-		if values[i].CreatedAt.Equal(values[j].CreatedAt) {
-			return values[i].ID > values[j].ID
-		}
-		return values[i].CreatedAt.After(values[j].CreatedAt)
-	})
-	if len(values) > 200 {
-		values = values[:200]
 	}
 	return values, nil
 }

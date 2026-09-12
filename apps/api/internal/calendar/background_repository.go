@@ -23,6 +23,8 @@ type BackgroundStore interface {
 func EnsureBackgroundSchema(ctx context.Context, database *sql.DB) error {
 	const schema = `
 ALTER TABLE calendar_connections ADD COLUMN IF NOT EXISTS sync_token text NOT NULL DEFAULT '';
+ALTER TABLE calendar_connections ADD COLUMN IF NOT EXISTS sync_lease_id text NOT NULL DEFAULT '';
+ALTER TABLE calendar_connections ADD COLUMN IF NOT EXISTS sync_lease_until timestamptz;
 ALTER TABLE calendar_connections ADD COLUMN IF NOT EXISTS last_attempt_at timestamptz;
 ALTER TABLE calendar_connections ADD COLUMN IF NOT EXISTS next_attempt_at timestamptz;
 ALTER TABLE calendar_connections ADD COLUMN IF NOT EXISTS last_error_code text NOT NULL DEFAULT '';
@@ -56,6 +58,7 @@ WITH due AS (
 	SELECT user_id
 	FROM calendar_connections
 	WHERE reconnect_required=false
+	  AND (sync_lease_until IS NULL OR sync_lease_until <= $1)
 	  AND (next_attempt_at IS NULL OR next_attempt_at <= $1)
 	ORDER BY next_attempt_at NULLS FIRST, user_id
 	FOR UPDATE SKIP LOCKED
@@ -69,7 +72,7 @@ WHERE connection.user_id=due.user_id
 RETURNING connection.user_id,connection.refresh_token_cipher,connection.granted_scopes,
           connection.connected_at,connection.last_synced_at,connection.last_attempt_at,
           connection.next_attempt_at,connection.last_error_code,connection.failure_count,
-          connection.sync_token,connection.reconnect_required
+          connection.sync_token,connection.reconnect_required,connection.sync_lease_id,connection.sync_lease_until
 `, now.UTC(), limit, lease.Seconds())
 	if err != nil {
 		return nil, fmt.Errorf("claim due calendar connections: %w", err)
@@ -100,7 +103,7 @@ func scanBackgroundConnection(scanner connectionScanner) (Connection, error) {
 		&value.UserID, &value.RefreshTokenCipher, &scopes, &value.ConnectedAt,
 		&value.LastSyncedAt, &value.LastAttemptAt, &value.NextAttemptAt,
 		&value.LastErrorCode, &value.FailureCount, &value.SyncToken,
-		&value.ReconnectRequired,
+		&value.ReconnectRequired, &value.SyncLeaseID, &value.SyncLeaseUntil,
 	); err != nil {
 		return Connection{}, fmt.Errorf("scan calendar connection: %w", err)
 	}
@@ -115,6 +118,7 @@ func (store *PostgresStore) ApplyChanges(ctx context.Context, userID string, cha
 		return fmt.Errorf("begin incremental calendar sync: %w", err)
 	}
 	defer tx.Rollback()
+	if err := GuardSyncTransaction(ctx, tx, userID); err != nil { return err }
 
 	if changes.Full {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM private_events WHERE user_id=$1 AND start_at<$3 AND end_at>$2`, userID, from.UTC(), to.UTC()); err != nil {
@@ -152,40 +156,23 @@ busy_status=EXCLUDED.busy_status,visibility=EXCLUDED.visibility,updated_at=EXCLU
 }
 
 func (store *PostgresStore) MarkSyncSuccess(ctx context.Context, userID, syncToken string, now, next time.Time) error {
-	result, err := store.database.ExecContext(ctx, `
-UPDATE calendar_connections
-SET sync_token=$2,last_synced_at=$3,last_attempt_at=$3,next_attempt_at=$4,
-    last_error_code='',failure_count=0,reconnect_required=false
-WHERE user_id=$1
-`, userID, syncToken, now.UTC(), next.UTC())
-	if err != nil {
-		return fmt.Errorf("mark background calendar sync success: %w", err)
-	}
-	if count, countErr := result.RowsAffected(); countErr != nil || count != 1 {
-		return fmt.Errorf("mark background calendar sync success: connection not found")
-	}
-	return nil
+	return store.syncWrite(ctx,userID,func(tx *sql.Tx) error {
+		result,err := tx.ExecContext(ctx, `UPDATE calendar_connections SET sync_token=$2,last_synced_at=$3,last_attempt_at=$3,next_attempt_at=$4,last_error_code='',failure_count=0,reconnect_required=false,sync_lease_id='',sync_lease_until=NULL WHERE user_id=$1`,userID,syncToken,now.UTC(),next.UTC())
+		if err != nil { return err }
+		if n,err:=result.RowsAffected(); err!=nil || n!=1 { return ErrSyncLeaseLost }
+		return nil
+	})
 }
 
 func (store *PostgresStore) MarkSyncFailure(ctx context.Context, userID, code string, next time.Time, reconnect bool) error {
-	if code == "" {
-		code = "temporary_failure"
-	}
-	result, err := store.database.ExecContext(ctx, `
-UPDATE calendar_connections
-SET next_attempt_at=$3,last_error_code=$2,failure_count=failure_count+1,
-    reconnect_required=$4
-WHERE user_id=$1
-`, userID, code, next.UTC(), reconnect)
-	if err != nil {
-		return fmt.Errorf("mark background calendar sync failure: %w", err)
-	}
-	if count, countErr := result.RowsAffected(); countErr != nil || count != 1 {
-		return fmt.Errorf("mark background calendar sync failure: connection not found")
-	}
-	return nil
+	if code=="" { code="temporary_failure" }
+	return store.syncWrite(ctx,userID,func(tx *sql.Tx) error {
+		result,err := tx.ExecContext(ctx,`UPDATE calendar_connections SET next_attempt_at=$3,last_error_code=$2,failure_count=failure_count+1,reconnect_required=$4,sync_lease_id='',sync_lease_until=NULL WHERE user_id=$1`,userID,code,next.UTC(),reconnect)
+		if err!=nil { return err }
+		if n,err:=result.RowsAffected();err!=nil || n!=1 { return ErrSyncLeaseLost }
+		return nil
+	})
 }
-
 
 func splitScopes(value string) []string {
 	return strings.Fields(value)

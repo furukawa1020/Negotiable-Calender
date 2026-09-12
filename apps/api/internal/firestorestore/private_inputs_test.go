@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -16,6 +17,8 @@ import (
 	"google.golang.org/api/option"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
 
@@ -46,9 +49,15 @@ func TestPrivateInputsFailureAfter400AndFullRecovery(t *testing.T) {
 				return status.Error(codes.PermissionDenied, "synthetic second-batch failure")
 			}
 		}
+		ctx = metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer owner") // emulator-only credential
 		return invoke(ctx, method, req, reply, cc, opts...)
 	}
-	client, err := firestore.NewClient(ctx, "demo-nc-"+safeDigest(t.Name())[:16], option.WithGRPCDialOption(grpc.WithUnaryInterceptor(intercept)))
+	// The SDK's emulator path creates its own connection and ignores dial options.
+ // Supply the intercepted connection explicitly so the failure reaches Commit.
+ conn,err := grpc.NewClient(os.Getenv("FIRESTORE_EMULATOR_HOST"),grpc.WithTransportCredentials(insecure.NewCredentials()),grpc.WithUnaryInterceptor(intercept))
+ if err != nil { t.Fatal(err) }
+ t.Cleanup(func(){_ = conn.Close()})
+ client, err := firestore.NewClient(ctx, "demo-nc-"+safeDigest(t.Name())[:16], option.WithGRPCConn(conn))
 	if err != nil {
 		t.Fatal(err)
 	}

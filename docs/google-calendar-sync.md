@@ -38,8 +38,8 @@ recovery. Public projections are rebuilt before the new cursor is committed, so
 a failed rebuild does not advance the cursor. Multi-batch Firestore publication atomicity remains tracked in #88.
 
 Workers claim due connections with PostgreSQL `FOR UPDATE SKIP LOCKED` and a
-two-minute lease. Full protection against manual-sync and stale-worker races
-remains tracked in #87. Each Google operation is bounded by the worker timeout. Temporary
+two-minute scheduling reservation. Manual and background executions additionally
+acquire a per-connection execution lease, described below. Each Google operation is bounded by the worker timeout. Temporary
 failures use exponential backoff with deterministic jitter, capped at six
 hours. A revoked grant is excluded from future claims and the UI requests an
 explicit reconnect.
@@ -91,7 +91,44 @@ disconnect, failed reconnect sync, and successful publication resumption.
 PostgreSQL tests inject a delete failure to verify transaction rollback and user
 isolation. These tests require no real OAuth client and do not verify live consent.
 
-Remaining production gaps: OAuth provisioning/live verification (#76), concurrent
-sync/disconnect fencing (#87), multi-batch atomicity (#88), and reliable scheduled
+Remaining production gaps: OAuth provisioning/live verification (#76),
+multi-batch atomicity (#88), and reliable scheduled
 sync when Cloud Run scales to zero (#89). The deployed demo and synthetic tests
 must not be described as a completed real Google Calendar integration.
+
+## Sync ownership and lifecycle races
+
+Every manual or background sync acquires a random execution ID with a two-minute
+lease before reading Google. Its context carries this ID to event writes, public
+projection writes, and success/failure status updates. Each database transaction
+checks the ID and its expiry while holding the connection's write lock. Firestore
+checks every chunk; PostgreSQL locks the per-user lifecycle and connection row.
+The ID and lease timestamps are not included in connection JSON responses.
+
+A second execution returns HTTP 409 while an owner is active. Reconnecting resets
+ownership. Disconnecting invalidates ownership before cleanup, so an old Google
+response cannot repopulate events or change the new grant's sync/failure state.
+A crashed execution may be retried after the lease expires; the old execution
+remains fenced even if it resumes later. Context cancellation may leave a lease
+until expiry rather than write failure state with an already-cancelled context.
+
+Firestore disconnect uses its own two-minute cleanup lease. Reconnect is rejected
+while cleanup is in progress. After a cleanup failure, retry disconnect after the
+lease expires, then reconnect; old cleanup batches are fenced if a retry takes
+over. The public block remains until a valid new sync completes. PostgreSQL uses
+one transaction for disconnect, with the same per-user lock as sync and reconnect.
+
+### Schema and rollout
+
+PostgreSQL `EnsureBackgroundSchema` adds `sync_lease_id` (empty by default) and
+`sync_lease_until` (nullable) without deleting existing data. Firestore missing
+lease fields are interpreted as no active owner. No new composite index is used.
+
+Do not run old unfenced and new fenced workers against a live connected account
+at the same time: drain/stop old workers before enabling real-account traffic.
+Rollback to an unfenced revision requires stopping new sync activity as well;
+retaining the additive SQL columns is safe. The current published environment
+remains demo mode with real OAuth unconfigured, so deploy fencing before #76.
+
+This prevents obsolete writers, not whole-window atomic replacement. Partial
+successful chunks before an execution fails are still covered by #88.

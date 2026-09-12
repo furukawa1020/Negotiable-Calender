@@ -27,13 +27,13 @@ type privateEventRecord struct {
 }
 
 func (store *Calendar) CreateFlow(ctx context.Context, value calendarintegration.Flow) error {
-	_, err := store.Client.Collection("calendarOAuthFlows").Doc(value.ID).Create(ctx, value)
-	return err
+	return store.fencedWrite(ctx,value.UserID,func(tx *firestore.Transaction) error{return tx.Create(store.Client.Collection("calendarOAuthFlows").Doc(value.ID),value)})
 }
 func (store *Calendar) ConsumeFlow(ctx context.Context, id, userID string, state []byte, now time.Time) (calendarintegration.Flow, error) {
 	ref := store.Client.Collection("calendarOAuthFlows").Doc(id)
 	var value calendarintegration.Flow
 	err := store.Client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
+		if err:=store.guardAccountActive(ctx,tx,userID);err!=nil{return err}
 		doc, err := tx.Get(ref)
 		if err != nil {
 			return err
@@ -62,6 +62,7 @@ func (store *Calendar) SaveConnection(ctx context.Context, value calendarintegra
 	next := value.ConnectedAt
 	value.NextAttemptAt = &next
 	return store.Client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
+		if err:=store.guardAccountActive(ctx,tx,value.UserID);err!=nil{return err}
 		doc, err := tx.Get(store.projectionBlock(value.UserID))
 		if err != nil && !firestoreNotFound(err) {
 			return err
@@ -105,6 +106,7 @@ func (store *Calendar) MarkReconnectRequired(ctx context.Context, userID string)
 func (store *Calendar) DeleteConnection(ctx context.Context, userID string) error {
 	id := calendarintegration.NewSyncLeaseID()
 	err := store.Client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
+		if err:=store.guardAccountActive(ctx,tx,userID);err!=nil{return err}
 		doc, err := tx.Get(store.projectionBlock(userID))
 		if err != nil && !firestoreNotFound(err) {
 			return err

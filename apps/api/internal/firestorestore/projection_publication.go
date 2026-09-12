@@ -124,6 +124,11 @@ func (b *Backend) abandonProjectionWrite(ctx context.Context, userID string) {
 // prevents ABA (ready -> busy -> ready) from accepting a mixed read.
 // Legacy data has an empty revision; controls must not be deleted independently.
 func (b *Backend) projectionReadRevision(ctx context.Context, userID string) (string, bool, error) {
+	if deleting, err := b.accountIsDeleting(ctx, userID); err != nil {
+		return "", false, err
+	} else if deleting {
+		return "", false, nil
+	}
 	if _, err := b.projectionBlock(userID).Get(ctx); err == nil {
 		return "", false, nil
 	} else if !firestoreNotFound(err) {

@@ -83,6 +83,7 @@ func (store *Auth) UpsertGoogleIdentity(ctx context.Context, profile auth.Profil
 	} else if !firestoreNotFound(err) {
 		return auth.Identity{}, err
 	}
+	priorIdentityUserID := identityRecordValue.UserID
 	userID := identityRecordValue.UserID
 	if userID == "" {
 		matches, err := store.Client.Collection("users").Where("Email", "==", profile.Email).Limit(1).Documents(ctx).GetAll()
@@ -94,6 +95,20 @@ func (store *Auth) UpsertGoogleIdentity(ctx context.Context, profile auth.Profil
 		} else {
 			userID = "user-" + safeDigest(profile.Subject)
 		}
+	}
+	// A completed deletion never reuses the old user ID. New sign-in may
+	// create a fresh account; a pending deletion cannot be bypassed.
+	if doc, err := store.accountDeletionRef(userID).Get(ctx); err == nil {
+		var deletion accountDeletion
+		if err := doc.DataTo(&deletion); err != nil {
+			return auth.Identity{}, err
+		}
+		if deletion.Phase != "complete" {
+			return auth.Identity{}, errAccountDeleting
+		}
+		userID = randomID("user")
+	} else if !firestoreNotFound(err) {
+		return auth.Identity{}, err
 	}
 	displayName := profile.DisplayName
 	if displayName == "" {
@@ -117,10 +132,28 @@ func (store *Auth) UpsertGoogleIdentity(ctx context.Context, profile auth.Profil
 			identityRecordValue.CreatedAt = prior.CreatedAt
 		}
 	}
-	batch := store.Client.Batch()
-	batch.Set(userRef, user)
-	batch.Set(ref, identityRecordValue)
-	if _, err := batch.Commit(ctx); err != nil {
+	err := store.fencedWrite(ctx, userID, func(tx *firestore.Transaction) error {
+		current, err := tx.Get(ref)
+		currentUserID := ""
+		if err == nil {
+			var existing identityRecord
+			if err := current.DataTo(&existing); err != nil {
+				return err
+			}
+			currentUserID = existing.UserID
+		} else if !firestoreNotFound(err) {
+			return err
+		}
+		// Avoid competing post-deletion sign-ins creating orphan accounts.
+		if currentUserID != priorIdentityUserID {
+			return errAccountDeleting
+		}
+		if err := tx.Set(userRef, user); err != nil {
+			return err
+		}
+		return tx.Set(ref, identityRecordValue)
+	})
+	if err != nil {
 		return auth.Identity{}, err
 	}
 	workspaces, err := store.Organization().ListWorkspaces(ctx, userID)
@@ -140,18 +173,21 @@ func (store *Auth) UpsertGoogleIdentity(ctx context.Context, profile auth.Profil
 }
 
 func (store *Auth) createWorkspace(ctx context.Context, userID string, value organization.Workspace, now time.Time) error {
-	batch := store.Client.Batch()
-	batch.Set(store.Client.Collection("organizations").Doc(value.ID), organizationRecord{ID: value.ID, Name: value.Name, CreatedAt: now, UpdatedAt: now})
-	member := membershipRecord{ID: randomID("membership"), OrganizationID: value.ID, UserID: userID, Role: value.Role, CreatedAt: now}
-	batch.Set(store.Client.Collection("organizations").Doc(value.ID).Collection("members").Doc(userID), member)
-	batch.Set(store.Client.Collection("users").Doc(userID).Collection("workspaces").Doc(value.ID), value)
-	_, err := batch.Commit(ctx)
-	return err
+	return store.fencedWrite(ctx, userID, func(tx *firestore.Transaction) error {
+		if err := tx.Set(store.Client.Collection("organizations").Doc(value.ID), organizationRecord{ID: value.ID, Name: value.Name, CreatedAt: now, UpdatedAt: now}); err != nil {
+			return err
+		}
+		member := membershipRecord{ID: randomID("membership"), OrganizationID: value.ID, UserID: userID, Role: value.Role, CreatedAt: now}
+		if err := tx.Set(store.Client.Collection("organizations").Doc(value.ID).Collection("members").Doc(userID), member); err != nil {
+			return err
+		}
+		return tx.Set(store.Client.Collection("users").Doc(userID).Collection("workspaces").Doc(value.ID), value)
+	})
 }
-
 func (store *Auth) CreateSession(ctx context.Context, value auth.Session) error {
-	_, err := store.Client.Collection("authSessions").Doc(hashID(value.TokenHash)).Create(ctx, value)
-	return err
+	return store.fencedWrite(ctx, value.UserID, func(tx *firestore.Transaction) error {
+		return tx.Create(store.Client.Collection("authSessions").Doc(hashID(value.TokenHash)), value)
+	})
 }
 func (store *Auth) GetSession(ctx context.Context, tokenHash []byte, now time.Time) (auth.Identity, error) {
 	var session auth.Session
@@ -166,6 +202,11 @@ func (store *Auth) GetSession(ctx context.Context, tokenHash []byte, now time.Ti
 		return auth.Identity{}, err
 	}
 	if !session.ExpiresAt.After(now) {
+		return auth.Identity{}, auth.ErrNotFound
+	}
+	if deleting, err := store.accountIsDeleting(ctx, session.UserID); err != nil {
+		return auth.Identity{}, err
+	} else if deleting {
 		return auth.Identity{}, auth.ErrNotFound
 	}
 	var user userRecord
@@ -189,45 +230,17 @@ func (store *Auth) DeleteSession(ctx context.Context, tokenHash []byte) error {
 	return err
 }
 func (store *Auth) DeleteAccount(ctx context.Context, userID string) error {
-	userRef := store.Client.Collection("users").Doc(userID)
-	if _, err := userRef.Get(ctx); firestoreNotFound(err) {
-		return auth.ErrNotFound
-	} else if err != nil {
-		return fmt.Errorf("load account: %w", err)
-	}
-	workspaces, err := store.Organization().ListWorkspaces(ctx, userID)
+	deletion, err := store.beginAccountDeletion(ctx, userID)
 	if err != nil {
-		return fmt.Errorf("list account workspaces: %w", err)
+		return err
 	}
-	for _, workspace := range workspaces {
-		if workspace.Role != organization.Owner {
-			continue
-		}
-		iter := store.Client.Collection("organizations").Doc(workspace.ID).Collection("members").Documents(ctx)
-		members, owners := 0, 0
-		for {
-			doc, nextErr := iter.Next()
-			if errors.Is(nextErr, iterator.Done) {
-				break
-			}
-			if nextErr != nil {
-				iter.Stop()
-				return fmt.Errorf("inspect organization owners: %w", nextErr)
-			}
-			members++
-			var member membershipRecord
-			if err := doc.DataTo(&member); err != nil {
-				iter.Stop()
-				return err
-			}
-			if member.Role == organization.Owner {
-				owners++
-			}
-		}
-		iter.Stop()
-		if members > 1 && owners == 1 {
-			return auth.ErrLastOrganizationOwner
-		}
+	if deletion.Phase == "complete" {
+		return nil
+	}
+	userRef := store.Client.Collection("users").Doc(userID)
+	workspaces := make([]organization.Workspace, 0, len(deletion.OrganizationIDs))
+	for _, id := range deletion.OrganizationIDs {
+		workspaces = append(workspaces, organization.Workspace{ID: id})
 	}
 	requests := store.Client.Collection("coordinationRequests")
 	requestIter := requests.Documents(ctx)
@@ -321,10 +334,13 @@ func (store *Auth) DeleteAccount(ctx context.Context, userID string) error {
 			}
 		}
 	}
-	if _, err := userRef.Delete(ctx); err != nil {
-		return err
-	}
-	return nil
+	return store.Client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
+		if err := tx.Delete(userRef); err != nil {
+			return err
+		}
+		// Keep only a minimal lifecycle marker; stale user IDs remain fenced.
+		return tx.Set(store.accountDeletionRef(userID), accountDeletion{Phase: "complete", StartedAt: deletion.StartedAt})
+	})
 }
 
 func deleteQuery(ctx context.Context, query firestore.Query) error {
@@ -409,20 +425,21 @@ func (store *Organization) CreateInvitation(ctx context.Context, value organizat
 	if err := value.Validate(); err != nil {
 		return err
 	}
-	var member membershipRecord
-	doc, err := store.Client.Collection("organizations").Doc(value.OrganizationID).Collection("members").Doc(value.InvitedBy).Get(ctx)
-	if err != nil {
-		return organization.ErrForbidden
-	}
-	if err := doc.DataTo(&member); err != nil || !organization.CanInvite(member.Role, value.Role) {
-		return organization.ErrForbidden
-	}
-	event := audit.Event{ID: randomID("audit"), OrganizationID: value.OrganizationID, ActorUserID: value.InvitedBy, Action: audit.InvitationCreated, ResourceType: "invitation", ResourceID: value.ID, CreatedAt: value.CreatedAt}
-	batch := store.Client.Batch()
-	batch.Create(store.Client.Collection("organizationInvitations").Doc(hashID(value.TokenHash)), value)
-	batch.Create(store.Client.Collection("organizations").Doc(value.OrganizationID).Collection("auditLogs").Doc(event.ID), event)
-	_, err = batch.Commit(ctx)
-	return err
+	return store.fencedWrite(ctx, value.InvitedBy, func(tx *firestore.Transaction) error {
+		doc, err := tx.Get(store.Client.Collection("organizations").Doc(value.OrganizationID).Collection("members").Doc(value.InvitedBy))
+		if err != nil {
+			return organization.ErrForbidden
+		}
+		var member membershipRecord
+		if err := doc.DataTo(&member); err != nil || !organization.CanInvite(member.Role, value.Role) {
+			return organization.ErrForbidden
+		}
+		event := audit.Event{ID: randomID("audit"), OrganizationID: value.OrganizationID, ActorUserID: value.InvitedBy, Action: audit.InvitationCreated, ResourceType: "invitation", ResourceID: value.ID, CreatedAt: value.CreatedAt}
+		if err := tx.Create(store.Client.Collection("organizationInvitations").Doc(hashID(value.TokenHash)), value); err != nil {
+			return err
+		}
+		return tx.Create(store.Client.Collection("organizations").Doc(value.OrganizationID).Collection("auditLogs").Doc(event.ID), event)
+	})
 }
 func (store *Organization) PreviewInvitation(ctx context.Context, token []byte, now time.Time) (organization.InvitationPreview, error) {
 	var value organization.Invitation
@@ -452,6 +469,9 @@ func (store *Organization) AcceptInvitation(ctx context.Context, token []byte, u
 	userRef := store.Client.Collection("users").Doc(userID)
 	memberID, auditID := randomID("membership"), randomID("audit")
 	err := store.Client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
+		if err := store.guardAccountActive(ctx, tx, userID); err != nil {
+			return err
+		}
 		doc, err := tx.Get(invitationRef)
 		if err != nil {
 			return err
@@ -548,6 +568,9 @@ func (store *Organization) SwitchWorkspace(ctx context.Context, sessionHash []by
 	sessionRef := store.Client.Collection("authSessions").Doc(hashID(sessionHash))
 	auditID := randomID("audit")
 	err := store.Client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
+		if err := store.guardAccountActive(ctx, tx, userID); err != nil {
+			return err
+		}
 		doc, err := tx.Get(orgRef.Collection("members").Doc(userID))
 		if err != nil {
 			return err

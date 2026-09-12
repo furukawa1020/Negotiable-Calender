@@ -169,6 +169,9 @@ func (store *PostgresStore) DeleteConnection(ctx context.Context, userID string)
 		return fmt.Errorf("begin calendar disconnect: %w", err)
 	}
 	defer tx.Rollback()
+	if _, err = tx.ExecContext(ctx, `DELETE FROM schedule_projections WHERE user_id=$1`, userID); err != nil {
+		return fmt.Errorf("delete calendar projections: %w", err)
+	}
 	if _, err = tx.ExecContext(ctx, `DELETE FROM private_events WHERE user_id=$1`, userID); err != nil {
 		return fmt.Errorf("delete calendar spans: %w", err)
 	}

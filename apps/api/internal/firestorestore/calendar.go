@@ -78,7 +78,10 @@ func (store *Calendar) ReplaceBusySpans(ctx context.Context, userID string, span
 	return store.ApplyChanges(ctx, userID, changes, from, to, now)
 }
 func (store *Calendar) MarkSynced(ctx context.Context, userID string, now time.Time) error {
-	_, err := store.Client.Collection("calendarConnections").Doc(userID).Update(ctx, []firestore.Update{{Path: "LastSyncedAt", Value: now}, {Path: "ReconnectRequired", Value: false}})
+	batch := store.Client.Batch()
+	batch.Update(store.Client.Collection("calendarConnections").Doc(userID), []firestore.Update{{Path: "LastSyncedAt", Value: now}, {Path: "ReconnectRequired", Value: false}})
+	batch.Delete(store.projectionBlock(userID))
+	_, err := batch.Commit(ctx)
 	return err
 }
 func (store *Calendar) MarkReconnectRequired(ctx context.Context, userID string) error {
@@ -86,6 +89,14 @@ func (store *Calendar) MarkReconnectRequired(ctx context.Context, userID string)
 	return err
 }
 func (store *Calendar) DeleteConnection(ctx context.Context, userID string) error {
+	// Hide public data before chunked cleanup. Keep this marker on any failure;
+	// reconnecting alone must not republish an old projection.
+	if _, err := store.projectionBlock(userID).Set(ctx, map[string]any{"BlockedAt": time.Now().UTC()}); err != nil {
+		return fmt.Errorf("block disconnected projection: %w", err)
+	}
+	if err := store.Projection().DeleteForUser(ctx, userID); err != nil {
+		return err
+	}
 	if err := deleteCollection(ctx, store.Client, store.Client.Collection("users").Doc(userID).Collection("privateEvents"), 200); err != nil {
 		return err
 	}
@@ -247,7 +258,10 @@ func (store *Calendar) ClaimDueConnections(ctx context.Context, now time.Time, l
 	return claimed, nil
 }
 func (store *Calendar) MarkSyncSuccess(ctx context.Context, userID, syncToken string, now, next time.Time) error {
-	_, err := store.Client.Collection("calendarConnections").Doc(userID).Update(ctx, []firestore.Update{{Path: "SyncToken", Value: syncToken}, {Path: "LastSyncedAt", Value: now}, {Path: "LastAttemptAt", Value: now}, {Path: "NextAttemptAt", Value: next}, {Path: "LastErrorCode", Value: ""}, {Path: "FailureCount", Value: 0}, {Path: "ReconnectRequired", Value: false}})
+	batch := store.Client.Batch()
+	batch.Update(store.Client.Collection("calendarConnections").Doc(userID), []firestore.Update{{Path: "SyncToken", Value: syncToken}, {Path: "LastSyncedAt", Value: now}, {Path: "LastAttemptAt", Value: now}, {Path: "NextAttemptAt", Value: next}, {Path: "LastErrorCode", Value: ""}, {Path: "FailureCount", Value: 0}, {Path: "ReconnectRequired", Value: false}})
+	batch.Delete(store.projectionBlock(userID))
+	_, err := batch.Commit(ctx)
 	return err
 }
 func (store *Calendar) MarkSyncFailure(ctx context.Context, userID, code string, next time.Time, reconnect bool) error {

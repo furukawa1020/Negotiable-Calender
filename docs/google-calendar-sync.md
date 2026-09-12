@@ -20,9 +20,9 @@ re-encryption migration before replacing the old key.
 
 Manual sync imports a rolling window from 30 days ago through 90 days ahead.
 After import, the API combines those private busy spans with the user's sharing
-policy and active manual overrides, then atomically replaces the public
+policy and active manual overrides, then replaces the public
 15-minute projections for that window. Manual overrides are applied last.
-Disconnecting deletes both the encrypted grant and imported busy spans.
+Disconnecting stops publication of existing projections and deletes the encrypted grant and imported busy spans. Unknown time is not relabeled as available.
 
 
 ## Automatic incremental sync
@@ -35,11 +35,11 @@ The first run imports the configured rolling window and saves Google's opaque
 sync cursor. Later runs use that cursor, upsert changed recurring instances, and
 delete cancelled instances. A `410 Gone` cursor expiry triggers one full-window
 recovery. Public projections are rebuilt before the new cursor is committed, so
-a failed rebuild is retried idempotently instead of publishing partial state.
+a failed rebuild does not advance the cursor. Multi-batch Firestore publication atomicity remains tracked in #88.
 
 Workers claim due connections with PostgreSQL `FOR UPDATE SKIP LOCKED` and a
-two-minute lease, preventing concurrent API replicas from processing the same
-connection. Each Google operation is bounded by the worker timeout. Temporary
+two-minute lease. Full protection against manual-sync and stale-worker races
+remains tracked in #87. Each Google operation is bounded by the worker timeout. Temporary
 failures use exponential backoff with deterministic jitter, capped at six
 hours. A revoked grant is excluded from future claims and the UI requests an
 explicit reconnect.
@@ -73,3 +73,25 @@ projection data and cannot import this DTO.
 The production Web client restores an existing server session on startup.
 Unauthenticated production visitors see only the Google sign-in gate. Fixed
 sample events are rendered only by the explicit development demo mode.
+
+## Disconnect publication and integration verification
+
+PostgreSQL removes public projections, private events, and the connection in one
+transaction. Firestore first writes a durable per-user `projectionControls/calendarDisconnected`
+marker: public projection reads return an empty set while it exists, even when
+subsequent cleanup fails. Read errors fail closed. Reconnecting alone does not
+remove it; successful sync completion removes it in the same batch as the
+connection completion update. Account deletion cleans the marker. The web UI
+clears displayed events, selected details, and projections after disconnect.
+
+The Firestore emulator integration test uses the real GoogleProvider parser with
+a synthetic HTTP transport: consent redirect, PKCE exchange, single-use callback,
+encrypted grant, full/incremental sync, cancellation, actual projection rebuild,
+disconnect, failed reconnect sync, and successful publication resumption.
+PostgreSQL tests inject a delete failure to verify transaction rollback and user
+isolation. These tests require no real OAuth client and do not verify live consent.
+
+Remaining production gaps: OAuth provisioning/live verification (#76), concurrent
+sync/disconnect fencing (#87), multi-batch atomicity (#88), and reliable scheduled
+sync when Cloud Run scales to zero (#89). The deployed demo and synthetic tests
+must not be described as a completed real Google Calendar integration.

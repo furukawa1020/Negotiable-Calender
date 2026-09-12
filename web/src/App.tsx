@@ -887,7 +887,7 @@ function App() {
       const response = await apiFetch(`${apiURL}/api/v1/calendar/sync`, { method: 'POST' })
       if (!response.ok) throw new Error('sync failed')
       const payload = await response.json() as { busySpanCount: number; lastSyncedAt: string }
-      setCalendarConnection((current) => current ? { ...current, lastSyncedAt: payload.lastSyncedAt, reconnectRequired: false } : current)
+      setCalendarConnection((current) => current ? { ...current, lastSyncedAt: payload.lastSyncedAt, reconnectRequired: false, lastErrorCode: '' } : current)
       setNotice(`Google Calendarから${payload.busySpanCount}件のbusy時間を同期しました。予定名は保存していません。`)
       try {
         const from = new Date(visibleDate)
@@ -922,6 +922,12 @@ function App() {
       const response = await apiFetch(`${apiURL}/api/v1/calendar/connection`, { method: 'DELETE' })
       if (!response.ok) throw new Error('disconnect failed')
       setCalendarConnection(null)
+      setPrivateCalendarEvents([])
+      setSelectedPrivateEventID('')
+      setPrivateEventsError('')
+      setPrivateEventsLoading(false)
+      setProjections([])
+      setMemberProjections([])
       setNotice('Google Calendarの接続と同期済みbusy時間を削除しました。')
     } catch {
       setNotice('Calendar接続を解除できませんでした。')

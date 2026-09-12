@@ -68,15 +68,14 @@ The normal Firestore emulator CI suite runs:
 Run with FIRESTORE_EMULATOR_HOST set, then:
 `go test -race -count=1 -v ./internal/firestorestore` from apps/api.
 
-## Remaining work in #88
+## Scope and issue tracking
 
-The privateEvents input collection still uses multi-batch changes without a
-committed-input snapshot. A concurrent policy-triggered rebuild can therefore
-read incomplete synchronization inputs. Policy/manual-override revision fencing is now implemented for Firestore as
-specified below. It does not make private-event inputs atomic. The projection
-gate alone does not prove these end-to-end synchronization properties. Keep #88 open until those
-paths, automatic recovery for moving synchronization windows, and their failure
-tests are implemented.
+The sections below cover committed private inputs and policy/override revisions
+for Firestore. #88 is tracked across these changes and their regression tests.
+This protocol does not turn several writes into one physical database snapshot:
+intermediate rows exist but are never accepted by the application as committed.
+All writers/readers must use the protocol. Direct administrative mutations and
+old application revisions bypass it.
 
 ## Policy and manual-override revision fencing
 
@@ -109,5 +108,58 @@ targets after settings change; use the serving-disabled recovery procedure above
 Regression tests include a paused real Rebuilder with concurrent policy edit,
 stale batches/completion after 400 writes, immediate invalidation, narrow-window
 regeneration, manual overrides, duplicate-write rollback and cross-user isolation.
-This does not implement PostgreSQL policy revision fencing or committed snapshots
-for Firestore privateEvents; those remain separate work.
+PostgreSQL policy revision fencing is outside this Firestore protocol.
+
+## Committed private calendar input
+
+users/{userID}/projectionControls/privateInputs holds a unique input ID, readiness,
+and a two-minute writer lease. ApplyChanges commits an unready control BEFORE its
+first data write; all data batches validate the input lease and any calendar sync
+lease in the same transaction. Only the last successful operation marks it ready.
+Lease expiry or best-effort cancellation cleanup never marks incomplete data ready.
+
+Public readers require both the completed policy revision and completed private
+input revision recorded in their projection gate to match the current controls.
+ListPrivateEvents checks readiness/revision before AND after the collection read,
+and rejects a revision mismatch instead of returning a partial or mixed list.
+The real Rebuilder captures private input before loading settings/events; each
+publication batch/completion rechecks it, preventing stale captured input from
+being published even if another input update has already finished.
+
+A failed input update forces the next AcquireSync to clear its stored/returned
+sync token, so the existing Google sync flow requests a full response. An
+incremental ApplyChanges is explicitly rejected until full recovery succeeds.
+A full response replaces the whole private-event cache, not just overlapping
+rows: this removes abandoned partial data when the sync window moves. Events
+outside the current requested window are intentionally not retained by full sync.
+Incremental success still applies cancellations and upserts to the committed cache.
+
+New private input revisions invalidate all previous public rows, including rows
+outside a smaller rebuild window. A subsequent valid regeneration removes those
+obsolete generated rows before publication. An interrupted projection with no
+recorded committed input revision is also fully cleared on retry with a valid
+private input revision, allowing moving-window sync recovery without reopening
+a partially modified older window.
+
+Disconnect atomically revokes the private-input writer alongside its calendar
+grant; only successful cleanup commits an empty input cache. The independent
+calendarDisconnected marker remains closed until reconnection and successful
+synchronization. A stale writer cannot recreate rows or finish over this control.
+
+### Validation and migration
+
+No new collection/index/history is required. One control per user is reused;
+account deletion already removes projectionControls. A missing privateInputs
+control is legacy data with empty input revision. After the first new-code sync,
+all publication requires a completed input revision. Before activating real-user
+traffic on an installation upgraded from old multi-batch writers, drain old
+writers and perform a successful full sync/rebuild: legacy absence alone cannot
+prove that old data was never partially written. Do not delete input controls to
+unblock publication. Use full resynchronization or completed disconnect cleanup.
+
+The emulator suite tests 3/400/405-event syncs, incremental updates/cancellations,
+a real Commit RPC failure after 400 persisted rows, rejection of partial reads and
+rebuilds, automatic empty-cursor selection and shifted-window full recovery,
+a paused real Rebuilder across input revision changes, cancellation, overlapping
+writers, expired leases and stale writes/completion after disconnect. Google data
+and failures are synthetic. These are not real-account OAuth acceptance tests.

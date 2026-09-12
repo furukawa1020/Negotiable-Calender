@@ -100,7 +100,16 @@ func (store *Projection) ListForUser(ctx context.Context, userID string) ([]proj
 	return store.list(ctx, userID, time.Time{}, time.Time{}, true)
 }
 
+func (backend *Backend) projectionBlock(userID string) *firestore.DocumentRef {
+	return backend.Client.Collection("users").Doc(userID).Collection("projectionControls").Doc("calendarDisconnected")
+}
+
 func (store *Projection) list(ctx context.Context, userID string, from, to time.Time, all bool) ([]projection.ScheduleProjection, error) {
+	if _, err := store.projectionBlock(userID).Get(ctx); err == nil {
+		return []projection.ScheduleProjection{}, nil
+	} else if !firestoreNotFound(err) {
+		return nil, fmt.Errorf("check projection publication: %w", err)
+	}
 	iter := store.Client.Collection("users").Doc(userID).Collection("scheduleProjections").Documents(ctx)
 	defer iter.Stop()
 	now := time.Now().UTC()

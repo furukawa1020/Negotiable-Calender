@@ -20,6 +20,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 func privateFixtures(now time.Time, prefix string, count int) []calendarintegration.BusySpan {
@@ -37,6 +38,7 @@ func TestPrivateInputsFailureAfter400AndFullRecovery(t *testing.T) {
 	// Fail actual Firestore Commit RPCs after the first 400-upsert transaction.
 	// Controls/cleanup RPCs still work; no production hook or real Google account.
 	intercept := func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoke grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+		ctx = metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer owner") // emulator-only credential
 		if request, ok := req.(*firestorepb.CommitRequest); ok && inject.Load() {
 			data := false
 			for _, write := range request.Writes {
@@ -46,10 +48,15 @@ func TestPrivateInputsFailureAfter400AndFullRecovery(t *testing.T) {
 				}
 			}
 			if data && dataCommits.Add(1) > 1 {
+ // Simulate a rejected server transaction, releasing its read locks before
+ // returning the error. A transport drop would instead need lock/lease expiry.
+ if len(request.Transaction)>0 {
+  rollback := &firestorepb.RollbackRequest{Database:request.Database,Transaction:request.Transaction}
+  if err:=invoke(ctx,"/google.firestore.v1.Firestore/Rollback",rollback,&emptypb.Empty{},cc,opts...);err!=nil { return err }
+ }
 				return status.Error(codes.PermissionDenied, "synthetic second-batch failure")
 			}
 		}
-		ctx = metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer owner") // emulator-only credential
 		return invoke(ctx, method, req, reply, cc, opts...)
 	}
 	// The SDK's emulator path creates its own connection and ignores dial options.

@@ -285,7 +285,7 @@ func (store *Auth) DeleteAccount(ctx context.Context, userID string) error {
 		}
 		iter.Stop()
 	}
-	for _, collection := range []string{"manualOverrides", "scheduleProjections", "notifications", "privateEvents", "workspaces"} {
+	for _, collection := range []string{"manualOverrides", "scheduleProjections", "notifications", "privateEvents", "workspaces", "projectionControls"} {
 		if err := deleteCollection(ctx, store.Client, userRef.Collection(collection), 200); err != nil {
 			return fmt.Errorf("delete account %s: %w", collection, err)
 		}

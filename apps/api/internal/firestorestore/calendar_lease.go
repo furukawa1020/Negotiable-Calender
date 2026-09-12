@@ -25,6 +25,7 @@ func (store *Calendar) AcquireSync(ctx context.Context, userID string, now time.
 	var value calendarintegration.Connection
 	ref := store.Client.Collection("calendarConnections").Doc(userID)
 	err := store.Client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
+		if err:=store.guardAccountActive(ctx,tx,userID);err!=nil{return err}
 		doc, err := tx.Get(ref)
 		if firestoreNotFound(err) {
 			return calendarintegration.ErrNotFound
@@ -106,6 +107,7 @@ func (backend *Backend) guardCalendarWrite(ctx context.Context, tx *firestore.Tr
 
 func (backend *Backend) fencedWrite(ctx context.Context, userID string, write func(*firestore.Transaction) error) error {
 	return backend.Client.RunTransaction(ctx, func(txctx context.Context, tx *firestore.Transaction) error {
+		if err:=backend.guardAccountActive(txctx,tx,userID);err!=nil{return err}
 		if err := backend.guardCalendarWrite(txctx, tx, userID); err != nil {
 			return err
 		}

@@ -293,6 +293,7 @@ func (store *Auth) DeleteAccount(ctx context.Context, userID string) error {
 	for _, query := range []firestore.Query{
 		store.Client.Collection("authSessions").Where("UserID", "==", userID),
 		store.Client.Collection("authIdentities").Where("UserID", "==", userID),
+		store.Client.Collection("calendarOAuthFlows").Where("UserID", "==", userID),
 		store.Client.Collection("organizationInvitations").Where("InvitedBy", "==", userID),
 	} {
 		if err := deleteQuery(ctx, query); err != nil {

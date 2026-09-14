@@ -12,6 +12,7 @@ import (
 	"cloud.google.com/go/firestore"
 	"cloud.google.com/go/firestore/apiv1/firestorepb"
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/audit"
+	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/notification"
 	coordinationrequest "github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/request"
 	"google.golang.org/api/option"
 	"google.golang.org/grpc"
@@ -32,11 +33,12 @@ func deletionRequest(now time.Time) coordinationrequest.CoordinationRequest {
 }
 
 func TestRequestAuditCleanupResumesAtEveryBoundary(t *testing.T) {
-	for _, boundary := range []string{"audit", "request", "actor"} {
+	for _, boundary := range []string{"notification", "audit", "request", "actor"} {
 		t.Run(boundary, func(t *testing.T) {
 			_, ctx := emulatorBackend(t)
 			var armed atomic.Bool
 			var auditDeletes atomic.Int32
+			var notificationDeletes atomic.Int32
 			interceptor := func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoke grpc.UnaryInvoker, opts ...grpc.CallOption) error {
 				ctx = metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer owner")
 				if commit, ok := req.(*firestorepb.CommitRequest); ok && armed.Load() {
@@ -46,6 +48,9 @@ func TestRequestAuditCleanupResumesAtEveryBoundary(t *testing.T) {
 						fail = fail || boundary == "actor" && strings.HasSuffix(path, "/auditLogs/actor")
 						if boundary == "audit" && strings.Contains(path, "/auditLogs/related-") {
 							fail = auditDeletes.Add(1) > 1
+						}
+						if boundary == "notification" && strings.Contains(path, "/notifications/related-") {
+							fail = notificationDeletes.Add(1) > 1
 						}
 						if fail {
 							return status.Error(codes.PermissionDenied, "synthetic cleanup boundary")
@@ -67,10 +72,21 @@ func TestRequestAuditCleanupResumesAtEveryBoundary(t *testing.T) {
 			b := &Backend{Client: client}
 			now := seedDeletionAccount(t, b, ctx)
 			request := deletionRequest(now)
+			request.Options = []coordinationrequest.Option{{ID: "historical", RequestID: request.ID, Type: coordinationrequest.OptionDelegate, DelegateUserID: "carol", CreatedAt: now}}
 			if err := b.Request().Create(ctx, request); err != nil {
 				t.Fatal(err)
 			}
 			audits := client.Collection("organizations").Doc("org").Collection("auditLogs")
+			inbox := client.Collection("users").Doc("bob").Collection("notifications")
+			delegateInbox := client.Collection("users").Doc("carol").Collection("notifications")
+			for _, recipient := range []string{"bob", "carol"} {
+				for _, id := range []string{"related-1", "related-2"} {
+					if err := b.Notification().Create(ctx, notification.Notification{ID: id, UserID: recipient, Type: notification.RequestReceived, RequestID: request.ID}); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			putDocument(t, ctx, inbox.Doc("keep"), notification.Notification{ID: "keep", UserID: "bob", RequestID: "another-request"})
 			for _, id := range []string{"related-1", "related-2"} {
 				if err := b.Audit().Create(ctx, audit.Event{ID: id, OrganizationID: "org", ActorUserID: "bob", ResourceType: "request", ResourceID: request.ID}); err != nil {
 					t.Fatal(err)
@@ -85,6 +101,15 @@ func TestRequestAuditCleanupResumesAtEveryBoundary(t *testing.T) {
 				t.Fatal("failure not injected")
 			}
 			armed.Store(false)
+			if boundary == "notification" {
+				docs, err := inbox.Where("RequestID", "==", request.ID).Documents(ctx).GetAll()
+				if err != nil || len(docs) != 1 {
+					t.Fatalf("expected partial notification progress: %d %v", len(docs), err)
+				}
+			}
+			if err := b.Notification().Create(ctx, notification.Notification{ID: "late", UserID: "bob", RequestID: request.ID}); err == nil {
+				t.Fatal("late notification bypassed pending deletion")
+			}
 			_, err = client.Collection("coordinationRequests").Doc(request.ID).Get(ctx)
 			if boundary == "actor" {
 				if !firestoreNotFound(err) {
@@ -110,6 +135,17 @@ func TestRequestAuditCleanupResumesAtEveryBoundary(t *testing.T) {
 			}
 			if _, err := foreign.Get(ctx); err != nil {
 				t.Fatalf("foreign audit touched: %v", err)
+			}
+			notifications, err := inbox.Documents(ctx).GetAll()
+			if err != nil || len(notifications) != 1 || notifications[0].Ref.ID != "keep" {
+				t.Fatalf("notification cleanup/isolation: %v %v", notifications, err)
+			}
+			notifications, err = delegateInbox.Documents(ctx).GetAll()
+			if err != nil || len(notifications) != 0 {
+				t.Fatalf("historical delegate notifications remain: %v %v", notifications, err)
+			}
+			if err := b.Notification().Create(ctx, notification.Notification{ID: "late-complete", UserID: "bob", RequestID: request.ID}); err == nil {
+				t.Fatal("notification recreated after completed deletion")
 			}
 			if _, err := client.Collection("coordinationRequests").Doc(request.ID).Get(ctx); !firestoreNotFound(err) {
 				t.Fatalf("request remains: %v", err)

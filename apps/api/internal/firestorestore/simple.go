@@ -250,7 +250,28 @@ func (store *Projection) DeleteForUser(ctx context.Context, userID string) error
 }
 
 func (store *Notification) Create(ctx context.Context, value notification.Notification) error {
+	if value.UserID == "" || value.RequestID == "" || value.ID == "" {
+		return fmt.Errorf("notification recipient, request and id are required")
+	}
 	err := store.fencedWrite(ctx, value.UserID, func(tx *firestore.Transaction) error {
+		doc, err := tx.Get(store.Client.Collection("coordinationRequests").Doc(value.RequestID))
+		if err != nil {
+			return fmt.Errorf("notification request not found: %w", err)
+		}
+		var request coordinationrequest.CoordinationRequest
+		if err := doc.DataTo(&request); err != nil {
+			return err
+		}
+		recipient := false
+		for _, userID := range requestParticipants(request) {
+			recipient = recipient || userID == value.UserID
+		}
+		if !recipient {
+			return fmt.Errorf("notification recipient is not a request participant")
+		}
+		if err := store.guardRequestAccounts(ctx, tx, request); err != nil {
+			return err
+		}
 		return tx.Create(store.Client.Collection("users").Doc(value.UserID).Collection("notifications").Doc(value.ID), value)
 	})
 	if err != nil {

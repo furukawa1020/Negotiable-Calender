@@ -263,8 +263,12 @@ func (store *Auth) DeleteAccount(ctx context.Context, userID string) error {
 			owned = owned || option.DelegateUserID == userID
 		}
 		if owned {
-			// Keep the request as a durable cleanup reference until its audit
-			// sweep succeeds. Account fences prevent new related audit writes.
+			// Keep the request until both dependent sweeps succeed. Account
+			// fences prevent new related notification and audit writes.
+			if err := store.deleteRequestNotifications(ctx, value, doc.Ref.ID); err != nil {
+				requestIter.Stop()
+				return err
+			}
 			if err := store.deleteRequestAudits(ctx, value.OrganizationID, doc.Ref.ID); err != nil {
 				requestIter.Stop()
 				return err
@@ -389,6 +393,18 @@ func (store *Auth) deleteRequestAudits(ctx context.Context, organizationID, requ
 			}
 		}
 	}
+}
+
+func (store *Auth) deleteRequestNotifications(ctx context.Context, value coordinationrequest.CoordinationRequest, requestID string) error {
+	// Current and historical delegates remain in Options. Query only those
+	// recipients, including their subcollections if a parent user is absent.
+	for _, userID := range requestParticipants(value) {
+		query := store.Client.Collection("users").Doc(userID).Collection("notifications").Where("RequestID", "==", requestID)
+		if err := deleteQuery(ctx, query); err != nil {
+			return fmt.Errorf("delete request notifications: %w", err)
+		}
+	}
+	return nil
 }
 
 func safeDigest(value string) string {

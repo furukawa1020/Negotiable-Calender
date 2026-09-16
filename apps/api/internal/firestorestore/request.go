@@ -233,21 +233,29 @@ func (store *Request) mutate(ctx context.Context, id string, update func(*coordi
 }
 
 func (store *Backend) guardRequestAccounts(ctx context.Context, tx *firestore.Transaction, value coordinationrequest.CoordinationRequest) error {
-	users := []string{value.RequesterUserID, value.TargetUserID, value.DelegatedUserID}
-	for _, option := range value.Options {
-		users = append(users, option.DelegateUserID)
-	}
-	seen := map[string]bool{}
-	for _, userID := range users {
-		if userID == "" || seen[userID] {
-			continue
-		}
-		seen[userID] = true
+	for _, userID := range requestParticipants(value) {
 		if err := store.guardAccountActive(ctx, tx, userID); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func requestParticipants(value coordinationrequest.CoordinationRequest) []string {
+	users := []string{value.RequesterUserID, value.TargetUserID, value.DelegatedUserID}
+	for _, option := range value.Options {
+		users = append(users, option.DelegateUserID)
+	}
+	seen := map[string]bool{}
+	participants := []string{}
+	for _, userID := range users {
+		if userID == "" || seen[userID] {
+			continue
+		}
+		seen[userID] = true
+		participants = append(participants, userID)
+	}
+	return participants
 }
 
 func oneOf(value coordinationrequest.Status, options ...coordinationrequest.Status) bool {

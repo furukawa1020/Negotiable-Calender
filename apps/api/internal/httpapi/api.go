@@ -79,6 +79,7 @@ func newAPI(database databasePinger, policies policy.Store, projections projecti
 	mux.HandleFunc("GET /api/v1/requests", api.listCoordinationRequests)
 	mux.HandleFunc("POST /api/v1/requests", api.createCoordinationRequest)
 	mux.HandleFunc("GET /api/v1/requests/{requestId}", api.getCoordinationRequest)
+	mux.HandleFunc("GET /api/v1/requests/{requestId}/calendar.ics", api.exportConfirmedCalendar)
 	mux.HandleFunc("POST /api/v1/requests/{requestId}/accept", api.acceptCoordinationRequest)
 	mux.HandleFunc("POST /api/v1/requests/{requestId}/suggest", api.suggestCoordinationRequest)
 	mux.HandleFunc("POST /api/v1/requests/{requestId}/delegate", api.delegateCoordinationRequest)

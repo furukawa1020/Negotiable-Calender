@@ -328,6 +328,7 @@ describe('App', () => {
     expect(await screen.findByText('別の時間候補を追加しました。')).toBeInTheDocument()
     fireEvent.click(screen.getAllByRole('button', { name: 'この候補を承認' })[0])
     expect(await screen.findByText('候補を承認しました。')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'カレンダーに登録（ICS）' })).toBeInTheDocument()
     expect(screen.queryByText('Product Review')).not.toBeInTheDocument()
     expect(globalThis.fetch).toHaveBeenCalledWith(
       expect.stringContaining('/api/v1/requests'),
@@ -341,6 +342,29 @@ describe('App', () => {
       expect.stringContaining('/api/v1/requests/request-1/accept'),
       expect.objectContaining({ method: 'POST' }),
     )
+  })
+
+  it('downloads the confirmed meeting from the persisted sent request', async () => {
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({ requests: [{
+        id: 'confirmed-1', requesterUserId: 'demo-member', targetUserId: 'demo-manager',
+        title: '確定レビュー', type: 'meeting', durationMinutes: 30, deadlineAt: '2026-09-22T00:00:00Z',
+        priority: 'normal', status: 'accepted', acceptedOptionId: 'chosen', createdAt: '2026-09-20T00:00:00Z',
+        options: [{ id: 'chosen', type: 'meeting', startAt: '2026-09-21T01:00:00Z', endAt: '2026-09-21T01:30:00Z' }],
+      }] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response('BEGIN:VCALENDAR', { status: 200, headers: { 'Content-Type': 'text/calendar' } }))
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:meeting')
+    const revoke = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined)
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: '送信済み' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'カレンダーに登録（ICS）' }))
+    await waitFor(() => expect(click).toHaveBeenCalled())
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/api/v1/requests/confirmed-1/calendar.ics'),
+      expect.objectContaining({ headers: { 'X-Demo-User-ID': 'demo-member' }, credentials: 'include' }),
+    )
+    await waitFor(() => expect(revoke).toHaveBeenCalledWith('blob:meeting'), { timeout: 2000 })
   })
 
   it('loads sent requests and lets the requester cancel an active request', async () => {

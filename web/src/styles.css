@@ -1759,3 +1759,12 @@ footer {
     justify-self: end;
   }
 }
+.confirmed-meeting {
+  border: 1px solid #a5bdb0;
+  border-radius: 12px;
+  padding: 16px;
+  background: #f1f7f3;
+  color: #234133;
+}
+.confirmed-meeting p { line-height: 1.6; }
+.confirmed-meeting p:last-child { font-size: 0.85rem; }

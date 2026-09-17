@@ -1,5 +1,6 @@
 import { type FormEvent, useEffect, useMemo, useState } from 'react'
 import SharingPolicyEditor from './SharingPolicyEditor'
+import { ConfirmedMeeting } from './ConfirmedMeeting'
 import { sharingPolicyError, type SharingPolicyDraft } from './sharingPolicy'
 
 const defaultSharingPolicy: SharingPolicyDraft = {
@@ -88,6 +89,7 @@ type CoordinationRequest = {
   priority: string
   status: string
   asyncMessage?: string
+  acceptedOptionId?: string
   options: CoordinationOption[]
   createdAt: string
 }
@@ -656,7 +658,7 @@ function App() {
         throw new Error('response failed')
       }
       setInboxRequests((current) => current.map((item) => item.id === requestID
-        ? { ...item, status: action === 'accept' ? 'accepted' : 'declined' }
+        ? { ...item, status: action === 'accept' ? 'accepted' : 'declined', acceptedOptionId: action === 'accept' ? optionID : undefined }
         : item))
       setNotice(action === 'accept' ? '候補を承認しました。' : '依頼を辞退しました。')
     } catch {
@@ -664,6 +666,21 @@ function App() {
     } finally {
       setRespondingRequestID('')
     }
+  }
+
+  const downloadConfirmedMeeting = async (requestID: string) => {
+    const response = await apiFetch(`${apiURL}/api/v1/requests/${encodeURIComponent(requestID)}/calendar.ics`, {
+      headers: { 'X-Demo-User-ID': activeUserID },
+    })
+    if (!response.ok) throw new Error('calendar export failed')
+    const url = URL.createObjectURL(await response.blob())
+    const link = document.createElement('a')
+    link.href = url
+    link.download = 'negotiable-meeting.ics'
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000)
   }
 
   const respondAsync = async (event: FormEvent<HTMLFormElement>, requestID: string) => {
@@ -1266,6 +1283,7 @@ function App() {
                     <p>{item.requesterUserId} · {item.durationMinutes}分 · 期限 {formatDateTime(item.deadlineAt)}</p>
                   </div>
                   <div className="option-list" aria-label={`${item.title}の候補`}>
+                    <ConfirmedMeeting request={item} onDownload={downloadConfirmedMeeting} />
                     {item.options.map((option) => (
                       <div className="option-row" key={option.id}>
                         <span>{option.type === 'meeting' ? 'MEETING' : 'ASYNC'}</span>
@@ -1327,6 +1345,7 @@ function App() {
                       <p>{item.targetUserId} 宛 · {item.durationMinutes}分 · 期限 {formatDateTime(item.deadlineAt)}</p>
                     </div>
                     <div className="option-list">
+                      <ConfirmedMeeting request={item} onDownload={downloadConfirmedMeeting} />
                       <strong>{item.options.length}件の調整候補</strong>
                       {cancellable ? (
                         <button className="decline-button" type="button" disabled={respondingRequestID === item.id} onClick={() => cancelSentRequest(item.id)}>

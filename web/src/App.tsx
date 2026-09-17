@@ -670,7 +670,7 @@ function App() {
 
   const downloadConfirmedMeeting = async (requestID: string) => {
     const response = await apiFetch(`${apiURL}/api/v1/requests/${encodeURIComponent(requestID)}/calendar.ics`, {
-      headers: { 'X-Demo-User-ID': activeUserID },
+      headers: { 'X-Demo-User-ID': currentView === 'sent' ? requesterUserID : activeUserID },
     })
     if (!response.ok) throw new Error('calendar export failed')
     const url = URL.createObjectURL(await response.blob())

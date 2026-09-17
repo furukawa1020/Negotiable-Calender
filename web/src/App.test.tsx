@@ -344,6 +344,28 @@ describe('App', () => {
     )
   })
 
+  it.each([
+    ['booking_conflict', '重なる確定済み'],
+    ['availability_changed', '対応可能時間が変わった'],
+    ['candidate_expired', '開始済み'],
+    ['candidate_invalid', '会議として確定できません'],
+  ])('keeps the request editable after %s', async (code, message) => {
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({ requests: [{
+        id: 'r', requesterUserId: 'demo-member', targetUserId: 'demo-manager', title: '競合する依頼',
+        type: 'meeting', durationMinutes: 30, deadlineAt: '2026-10-01T00:00:00Z', priority: 'normal',
+        status: 'suggested', createdAt: '2026-09-01T00:00:00Z',
+        options: [{ id: 'o', type: 'meeting', startAt: '2026-09-21T01:00:00Z', endAt: '2026-09-21T01:30:00Z' }],
+      }] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ code }), { status: 409 }))
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: '依頼' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'この候補を承認' }))
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(message))
+    expect(screen.getByRole('button', { name: '別時間を提案' })).toBeEnabled()
+    expect(screen.queryByRole('button', { name: 'カレンダーに登録（ICS）' })).not.toBeInTheDocument()
+  })
+
   it('downloads the confirmed meeting from the persisted sent request', async () => {
     vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(new Response(JSON.stringify({ requests: [{

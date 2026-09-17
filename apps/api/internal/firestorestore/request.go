@@ -125,28 +125,17 @@ func (store *Request) Cancel(ctx context.Context, requestID, userID string) erro
 }
 
 func (store *Request) Respond(ctx context.Context, requestID, userID string, status coordinationrequest.Status, optionID string) error {
-	if status != coordinationrequest.Accepted && status != coordinationrequest.Declined {
+	if status == coordinationrequest.Accepted {
+		return store.acceptMeeting(ctx, requestID, userID, optionID)
+	}
+	if status != coordinationrequest.Declined {
 		return fmt.Errorf("unsupported response status")
 	}
 	return store.mutate(ctx, requestID, func(value *coordinationrequest.CoordinationRequest, tx *firestore.Transaction) error {
 		if value.TargetUserID != userID || value.Status != coordinationrequest.Suggested {
 			return coordinationrequest.ErrNotFound
 		}
-		if status == coordinationrequest.Accepted {
-			found := false
-			for _, option := range value.Options {
-				if option.ID == optionID {
-					found = true
-					break
-				}
-			}
-			if !found {
-				return coordinationrequest.ErrNotFound
-			}
-			value.AcceptedOptionID = optionID
-		} else {
-			value.AcceptedOptionID = ""
-		}
+		value.AcceptedOptionID = ""
 		value.Status, value.UpdatedAt = status, time.Now().UTC()
 		return nil
 	})

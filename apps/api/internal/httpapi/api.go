@@ -431,6 +431,16 @@ func (api *API) respondToCoordinationRequest(response http.ResponseWriter, reque
 		return
 	}
 	err = api.requests.Respond(request.Context(), requestID, targetUserID, status, optionID)
+	if errors.Is(err, coordinationrequest.ErrAlreadyAccepted) {
+		writeJSON(response, http.StatusOK, map[string]any{"id": requestID, "status": coordinationrequest.Accepted, "acceptedOptionId": optionID})
+		return
+	}
+	for _, conflict := range []error{coordinationrequest.ErrCandidateInvalid, coordinationrequest.ErrCandidateExpired, coordinationrequest.ErrAvailabilityChanged, coordinationrequest.ErrBookingConflict} {
+		if errors.Is(err, conflict) {
+			writeJSON(response, http.StatusConflict, map[string]string{"error": "meeting cannot be confirmed; choose another time", "code": conflict.Error()})
+			return
+		}
+	}
 	if errors.Is(err, coordinationrequest.ErrNotFound) {
 		writeJSON(response, http.StatusConflict, map[string]string{"error": "request cannot be updated"})
 		return
@@ -583,8 +593,22 @@ func (api *API) createCoordinationRequest(response http.ResponseWriter, request 
 		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to generate request options"})
 		return
 	}
+	var reserved []coordinationrequest.ReservedRange
+	for _, participant := range []string{value.RequesterUserID, value.TargetUserID} {
+		confirmed, err := api.requests.ListForUser(request.Context(), participant)
+		if err != nil {
+			writeJSON(response, http.StatusServiceUnavailable, map[string]string{"error": "unable to verify confirmed meetings"})
+			return
+		}
+		ranges, err := coordinationrequest.ConfirmedRanges(confirmed)
+		if err != nil {
+			writeJSON(response, http.StatusConflict, map[string]string{"error": "unable to verify confirmed meetings"})
+			return
+		}
+		reserved = append(reserved, ranges...)
+	}
 	options, err := coordinationrequest.GenerateCandidates(coordinationrequest.CandidateInput{
-		Request: value, Projections: publicProjections, Now: now,
+		Request: value, Projections: publicProjections, Reserved: reserved, Now: now,
 	})
 	if err != nil {
 		api.logger.Error("generate request candidates", "error", err)

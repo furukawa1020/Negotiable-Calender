@@ -1,0 +1,121 @@
+package request
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"time"
+
+	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/projection"
+)
+
+func (store *PostgresStore) acceptMeeting(ctx context.Context, requestID, userID, optionID string) (err error) {
+	defer func() {
+		var state interface{ SQLState() string }
+		if errors.As(err, &state) && (state.SQLState() == "40001" || state.SQLState() == "40P01") {
+			err = ErrBookingConflict
+		}
+	}()
+	tx, err := store.database.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var value CoordinationRequest
+	var accepted sql.NullString
+	err = tx.QueryRowContext(ctx, `SELECT id, organization_id, requester_user_id, target_user_id, status, deadline_at, accepted_option_id FROM coordination_requests WHERE id=$1 FOR UPDATE`, requestID).Scan(&value.ID, &value.OrganizationID, &value.RequesterUserID, &value.TargetUserID, &value.Status, &value.DeadlineAt, &accepted)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if value.TargetUserID != userID {
+		return ErrNotFound
+	}
+	if value.Status == Accepted && accepted.String == optionID {
+		return ErrAlreadyAccepted
+	}
+	if value.Status != Suggested {
+		return ErrNotFound
+	}
+	var selected Option
+	err = tx.QueryRowContext(ctx, `SELECT id,request_id,type,start_at,end_at,created_at FROM coordination_request_options WHERE request_id=$1 AND id=$2`, requestID, optionID).Scan(&selected.ID, &selected.RequestID, &selected.Type, &selected.StartAt, &selected.EndAt, &selected.CreatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrCandidateInvalid
+	}
+	if err != nil {
+		return err
+	}
+	selected.CreatedAt = selected.CreatedAt.UTC()
+	if selected.StartAt != nil {
+		utc := selected.StartAt.UTC()
+		selected.StartAt = &utc
+	}
+	if selected.EndAt != nil {
+		utc := selected.EndAt.UTC()
+		selected.EndAt = &utc
+	}
+	value.Options = []Option{selected}
+	if _, err := ConfirmableMeeting(value, optionID, time.Now().UTC()); err != nil {
+		return err
+	}
+	// Serializable predicate reads prevent write skew for both roles, even across orgs.
+	rows, err := tx.QueryContext(ctx, `SELECT r.id,r.accepted_option_id,o.type,o.start_at,o.end_at FROM coordination_requests r LEFT JOIN coordination_request_options o ON o.id=r.accepted_option_id AND o.request_id=r.id WHERE r.status=$1 AND r.id<>$2 AND (r.requester_user_id IN ($3,$4) OR r.target_user_id IN ($3,$4))`, Accepted, requestID, value.RequesterUserID, value.TargetUserID)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var id string
+		var selectedID, kind sql.NullString
+		var start, end sql.NullTime
+		if err := rows.Scan(&id, &selectedID, &kind, &start, &end); err != nil {
+			rows.Close()
+			return err
+		}
+		if !kind.Valid || (kind.String == string(OptionMeeting) && (!start.Valid || !end.Valid || !end.Time.After(start.Time) || (selected.StartAt.Before(end.Time) && start.Time.Before(*selected.EndAt)))) {
+			rows.Close()
+			return ErrBookingConflict
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	rows, err = tx.QueryContext(ctx, `SELECT id,user_id,start_at,end_at,availability,interruptibility,requestability,reschedulability,expected_response_bucket,generated_at,expires_at FROM schedule_projections WHERE user_id=$1 AND start_at<$3 AND end_at>$2`, value.TargetUserID, *selected.StartAt, *selected.EndAt)
+	if err != nil {
+		return err
+	}
+	values := []projection.ScheduleProjection{}
+	for rows.Next() {
+		var p projection.ScheduleProjection
+		if err := rows.Scan(&p.ID, &p.UserID, &p.StartAt, &p.EndAt, &p.State.Availability, &p.State.Interruptibility, &p.State.Requestability, &p.State.Reschedulability, &p.ExpectedResponseBucket, &p.GeneratedAt, &p.ExpiresAt); err != nil {
+			rows.Close()
+			return err
+		}
+		values = append(values, p)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	now := time.Now().UTC()
+	if _, err := ConfirmableMeeting(value, optionID, now); err != nil {
+		return err
+	}
+	for i := range values {
+		values[i].StartAt = values[i].StartAt.UTC()
+		values[i].EndAt = values[i].EndAt.UTC()
+		values[i].GeneratedAt = values[i].GeneratedAt.UTC()
+		values[i].ExpiresAt = values[i].ExpiresAt.UTC()
+	}
+	if err := ValidateMeetingAvailability(value.TargetUserID, selected, values, now); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE coordination_requests SET status=$1,accepted_option_id=$2,updated_at=$3 WHERE id=$4`, Accepted, optionID, now, requestID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}

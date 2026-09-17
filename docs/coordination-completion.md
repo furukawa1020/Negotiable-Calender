@@ -24,8 +24,9 @@ Displayed times use the device timezone; exported UTC values preserve the instan
 
 ## Remaining core milestones
 
-- Acceptance-time validation of expired/stale candidates and latest availability.
-- Atomic protection against conflicting confirmed requests, with reproposal UX.
+- Acceptance-time expiry/coverage validation and atomic conflict protection are
+  implemented in the [confirmation engine](confirmation-engine.md). Additional
+  source-sync freshness and distributed Google writeback remain separate work.
 - Full negotiation end-to-end coverage, including non-meeting outcomes.
 - Live Google consent and acceptance (#76), reliable scheduled sync (#89).
 - Optional direct Google writeback only with additional explicit consent and

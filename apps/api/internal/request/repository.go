@@ -231,28 +231,17 @@ WHERE id = $3 AND requester_user_id = $4 AND status IN ($5, $6, $7)
 }
 
 func (store *PostgresStore) Respond(ctx context.Context, requestID, targetUserID string, status Status, optionID string) error {
-	if status != Accepted && status != Declined {
+	if status == Accepted {
+		return store.acceptMeeting(ctx, requestID, targetUserID, optionID)
+	}
+	if status != Declined {
 		return fmt.Errorf("unsupported response status")
 	}
-	var result sql.Result
-	var err error
-	if status == Accepted {
-		result, err = store.database.ExecContext(ctx, `
-UPDATE coordination_requests
-SET status = $1, accepted_option_id = $2, updated_at = $3
-WHERE id = $4 AND target_user_id = $5 AND status = $6
-  AND EXISTS (
-    SELECT 1 FROM coordination_request_options
-    WHERE id = $2 AND request_id = coordination_requests.id
-  )
-`, status, optionID, time.Now().UTC(), requestID, targetUserID, Suggested)
-	} else {
-		result, err = store.database.ExecContext(ctx, `
+	result, err := store.database.ExecContext(ctx, `
 UPDATE coordination_requests
 SET status = $1, accepted_option_id = NULL, updated_at = $2
 WHERE id = $3 AND target_user_id = $4 AND status = $5
 `, status, time.Now().UTC(), requestID, targetUserID, Suggested)
-	}
 	if err != nil {
 		return fmt.Errorf("respond to coordination request: %w", err)
 	}

@@ -27,7 +27,8 @@ Activation evidence (no newly provisioned identity identifiers are recorded here
 - [Authenticated trigger](https://github.com/furukawa1020/Negotiable-Calender/actions/runs/35313371655) returned
   `not_configured`, with a visible warning and no connections processed. Demo mode
   remains enabled. Google OAuth setup and real-account acceptance remain #76.
-- Verification of a timer-initiated run is pending; #89 stays open until recorded.
+- Timer-initiated run evidence is tracked in #89; manual dispatch alone does not
+  establish that the periodic schedule has executed.
 
 ## Authentication and least privilege
 

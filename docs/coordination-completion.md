@@ -24,6 +24,9 @@ Displayed times use the device timezone; exported UTC values preserve the instan
 
 ## Remaining core milestones
 
+- Confirmed-meeting cancellation, atomic app notification/audit and reservation
+  release are implemented in [confirmed cancellation](confirmed-cancellation.md).
+  Safe rescheduling while retaining the original reservation remains open.
 - Acceptance-time expiry/coverage validation and atomic conflict protection are
   implemented in the [confirmation engine](confirmation-engine.md). Additional
   source-sync freshness and distributed Google writeback remain separate work.

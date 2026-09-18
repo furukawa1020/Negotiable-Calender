@@ -47,7 +47,9 @@ or booking_conflict. The UI keeps the request unchanged and points to another
 time or refreshing sync. Repeating the same accepted option returns 200 without
 duplicating audit/notification creation. Different options cannot overwrite an
 accepted choice. Transport failures after commit are therefore safe to retry.
-Notification delivery remains best-effort: this is not a durable delivery outbox.
+Acceptance notification delivery remains best-effort: this is not a durable delivery
+outbox. The separate [confirmed cancellation](confirmed-cancellation.md) operation
+persists its counterpart app notification and audit in the cancellation transaction.
 
 Tests exercise real Firestore emulator and PostgreSQL concurrent transactions,
 cross-organization/opposite-role conflicts, adjacent meetings, pending/dirty

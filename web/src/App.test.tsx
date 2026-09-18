@@ -389,6 +389,31 @@ describe('App', () => {
     await waitFor(() => expect(revoke).toHaveBeenCalledWith('blob:meeting'), { timeout: 2000 })
   })
 
+  it.each(['送信済み', '依頼'])('cancels a confirmed meeting from %s with the correct actor', async (view) => {
+    const future = new Date(Date.now() + 86400000).toISOString()
+    const later = new Date(Date.now() + 90000000).toISOString()
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({ requests: [{
+        id: 'confirmed-cancel', requesterUserId: 'demo-member', targetUserId: 'demo-manager',
+        title: '取消テスト', type: 'meeting', durationMinutes: 30, deadlineAt: later,
+        priority: 'normal', status: 'accepted', acceptedOptionId: 'chosen', createdAt: future,
+        options: [{ id: 'chosen', type: 'meeting', startAt: future, endAt: later }],
+      }] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ status: 'cancelled' }), { status: 200 }))
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: view }))
+    fireEvent.click(await screen.findByRole('button', { name: '確定会議を取り消す' }))
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1)
+    fireEvent.click(screen.getByRole('button', { name: '会議の取消を確定する' }))
+    expect(await screen.findByRole('status')).toHaveTextContent('確定会議を取り消し')
+    expect(screen.queryByRole('button', { name: 'カレンダーに登録（ICS）' })).not.toBeInTheDocument()
+    expect(globalThis.fetch).toHaveBeenLastCalledWith(
+      expect.stringContaining('/api/v1/requests/confirmed-cancel/cancel-confirmed'),
+      expect.objectContaining({ method: 'POST', body: JSON.stringify({ optionId: 'chosen' }), credentials: 'include',
+        headers: { 'Content-Type': 'application/json', 'X-Demo-User-ID': view === '送信済み' ? 'demo-member' : 'demo-manager' } }),
+    )
+  })
+
   it('loads sent requests and lets the requester cancel an active request', async () => {
     vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(new Response(JSON.stringify({

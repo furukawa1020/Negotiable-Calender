@@ -11,6 +11,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/stdlib"
+	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/audit"
+	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/notification"
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/organization"
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/projection"
 	coordinationrequest "github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/request"
@@ -41,7 +43,7 @@ func TestPostgresAtomicConfirmation(t *testing.T) {
 	db := stdlib.OpenDB(*config)
 	defer db.Close()
 	db.SetMaxOpenConns(4)
-	for _, migrate := range []func(context.Context, *sql.DB) error{organization.EnsureSchema, projection.EnsureSchema, coordinationrequest.EnsureSchema} {
+	for _, migrate := range []func(context.Context, *sql.DB) error{organization.EnsureSchema, projection.EnsureSchema, coordinationrequest.EnsureSchema, notification.EnsureSchema, audit.EnsureSchema} {
 		if err := migrate(ctx, db); err != nil {
 			t.Fatal(err)
 		}
@@ -66,6 +68,90 @@ func TestPostgresAtomicConfirmation(t *testing.T) {
 		end := at.Add(30 * time.Minute)
 		return coordinationrequest.CoordinationRequest{ID: id, OrganizationID: "org", RequesterUserID: requester, TargetUserID: target, Type: coordinationrequest.Meeting, Title: "Synthetic", DurationMinutes: 30, DeadlineAt: now.Add(24 * time.Hour), SyncPreference: coordinationrequest.Either, Priority: coordinationrequest.PriorityNormal, Status: coordinationrequest.Suggested, CreatedAt: now, UpdatedAt: now, Options: []coordinationrequest.Option{{ID: id + "-option", RequestID: id, Type: coordinationrequest.OptionMeeting, StartAt: &at, EndAt: &end, CreatedAt: now}}}
 	}
+	t.Run("confirmed-cancellation", func(t *testing.T) {
+		for i, actor := range []string{"alice", "bob"} {
+			value := fixture("cancel-"+actor, "alice", "bob", start.Add(time.Duration(8+i)*time.Hour))
+			if err := store.Create(ctx, value); err != nil {
+				t.Fatal(err)
+			}
+			if err := store.Respond(ctx, value.ID, "bob", coordinationrequest.Accepted, value.Options[0].ID); err != nil {
+				t.Fatal(err)
+			}
+			if err := store.CancelConfirmed(ctx, value.ID, "carol", value.Options[0].ID); !errors.Is(err, coordinationrequest.ErrNotFound) {
+				t.Fatal(err)
+			}
+			if err := store.CancelConfirmed(ctx, value.ID, actor, "old"); !errors.Is(err, coordinationrequest.ErrCancellationInvalid) {
+				t.Fatal(err)
+			}
+			gate := make(chan struct{})
+			results := make(chan error, 2)
+			for range 2 {
+				go func() { <-gate; results <- store.CancelConfirmed(ctx, value.ID, actor, value.Options[0].ID) }()
+			}
+			close(gate)
+			success := 0
+			for range 2 {
+				err := <-results
+				if err == nil {
+					success++
+				} else if !errors.Is(err, coordinationrequest.ErrAlreadyCancelled) && !errors.Is(err, coordinationrequest.ErrBookingConflict) {
+					t.Fatal(err)
+				}
+			}
+			if success != 1 {
+				t.Fatalf("success=%d", success)
+			}
+			if err := store.CancelConfirmed(ctx, value.ID, actor, value.Options[0].ID); !errors.Is(err, coordinationrequest.ErrAlreadyCancelled) {
+				t.Fatal(err)
+			}
+			got, err := store.GetForUser(ctx, value.ID, actor)
+			if err != nil || got.Status != coordinationrequest.Cancelled || got.AcceptedOptionID != value.Options[0].ID {
+				t.Fatal("wrong cancelled state")
+			}
+			for _, query := range []string{"SELECT count(*) FROM notifications WHERE request_id=$1", "SELECT count(*) FROM audit_logs WHERE resource_id=$1"} {
+				var count int
+				if err := db.QueryRowContext(ctx, query, value.ID).Scan(&count); err != nil || count != 1 {
+					t.Fatalf("effects=%d err=%v", count, err)
+				}
+			}
+			note, _ := coordinationrequest.ConfirmedCancellationEffects(value, actor, now)
+			var recipient string
+			if err := db.QueryRowContext(ctx, "SELECT user_id FROM notifications WHERE request_id=$1", value.ID).Scan(&recipient); err != nil || recipient != note.UserID {
+				t.Fatal("wrong recipient")
+			}
+			replacement := fixture("replacement-"+actor, "carol", "bob", *value.Options[0].StartAt)
+			if err := store.Create(ctx, replacement); err != nil {
+				t.Fatal(err)
+			}
+			if err := store.Respond(ctx, replacement.ID, "bob", coordinationrequest.Accepted, replacement.Options[0].ID); err != nil {
+				t.Fatal("slot not released", err)
+			}
+		}
+	})
+	t.Run("cancellation-rollback", func(t *testing.T) {
+		value := fixture("cancel-rollback", "alice", "bob", start.Add(11*time.Hour))
+		if err := store.Create(ctx, value); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.Respond(ctx, value.ID, "bob", coordinationrequest.Accepted, value.Options[0].ID); err != nil {
+			t.Fatal(err)
+		}
+		_, event := coordinationrequest.ConfirmedCancellationEffects(value, "alice", now)
+		if err := audit.NewPostgresStore(db).Create(ctx, event); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.CancelConfirmed(ctx, value.ID, "alice", value.Options[0].ID); err == nil {
+			t.Fatal("collision accepted")
+		}
+		got, err := store.GetForUser(ctx, value.ID, "alice")
+		if err != nil || got.Status != coordinationrequest.Accepted {
+			t.Fatal("partial cancellation")
+		}
+		var count int
+		if err := db.QueryRowContext(ctx, "SELECT count(*) FROM notifications WHERE request_id=$1", value.ID).Scan(&count); err != nil || count != 0 {
+			t.Fatal("partial notification")
+		}
+	})
 	for _, reversed := range []bool{false, true} {
 		name := "target"
 		if reversed {

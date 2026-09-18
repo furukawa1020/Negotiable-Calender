@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/audit"
+	calendarintegration "github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/calendar"
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/notification"
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/organization"
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/projection"
@@ -43,7 +44,7 @@ func TestPostgresAtomicConfirmation(t *testing.T) {
 	db := stdlib.OpenDB(*config)
 	defer db.Close()
 	db.SetMaxOpenConns(4)
-	for _, migrate := range []func(context.Context, *sql.DB) error{organization.EnsureSchema, projection.EnsureSchema, coordinationrequest.EnsureSchema, notification.EnsureSchema, audit.EnsureSchema} {
+	for _, migrate := range []func(context.Context, *sql.DB) error{organization.EnsureSchema, calendarintegration.EnsureSchema, calendarintegration.EnsureBackgroundSchema, projection.EnsureSchema, coordinationrequest.EnsureSchema, notification.EnsureSchema, audit.EnsureSchema} {
 		if err := migrate(ctx, db); err != nil {
 			t.Fatal(err)
 		}
@@ -238,4 +239,5 @@ func TestPostgresAtomicConfirmation(t *testing.T) {
 	if err != nil || got.Status != coordinationrequest.Suggested {
 		t.Fatal("failed confirmation mutated request", err)
 	}
+	testPostgresSourceFreshness(t, ctx, db, store, fixture, now)
 }

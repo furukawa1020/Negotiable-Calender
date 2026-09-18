@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	calendarintegration "github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/calendar"
 	"time"
 
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/projection"
@@ -78,6 +79,17 @@ func (store *PostgresStore) acceptMeeting(ctx context.Context, requestID, userID
 }
 
 func checkMeetingSlotPostgres(ctx context.Context, tx *sql.Tx, value CoordinationRequest, selected Option) error {
+	// Serialize against source replacement, reconnect and sync state transitions.
+	if err := calendarintegration.LockCalendarTransaction(ctx, tx, value.TargetUserID); err != nil {
+		return err
+	}
+	source, err := calendarintegration.ReadSourcePostgres(ctx, tx, value.TargetUserID)
+	if err != nil {
+		return err
+	}
+	if !source.Readable(time.Now().UTC()) || (source.Managed && !source.Snapshot.Covers(*selected.StartAt, *selected.EndAt)) {
+		return ErrAvailabilityChanged
+	}
 	// Serializable predicate reads prevent write skew for both roles, even across orgs.
 	rows, err := tx.QueryContext(ctx, `SELECT r.id,r.accepted_option_id,o.type,o.start_at,o.end_at FROM coordination_requests r LEFT JOIN coordination_request_options o ON o.id=r.accepted_option_id AND o.request_id=r.id WHERE r.status=$1 AND r.id<>$2 AND (r.requester_user_id IN ($3,$4) OR r.target_user_id IN ($3,$4))`, Accepted, value.ID, value.RequesterUserID, value.TargetUserID)
 	if err != nil {
@@ -120,6 +132,9 @@ func checkMeetingSlotPostgres(ctx context.Context, tx *sql.Tx, value Coordinatio
 	}
 	rows.Close()
 	now := time.Now().UTC()
+	if !source.Readable(now) {
+		return ErrAvailabilityChanged
+	}
 	if _, err := ConfirmableMeeting(value, selected.ID, now); err != nil {
 		return err
 	}

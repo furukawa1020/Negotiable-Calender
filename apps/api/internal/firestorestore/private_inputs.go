@@ -14,6 +14,7 @@ var errPrivateInputsIncomplete = errors.New("private calendar inputs are incompl
 type privateInputsLeaseKey struct{}
 type privateInputsLease struct{ UserID, ID string }
 type privateInputsControl struct {
+	Source     *calendarintegration.SourceSnapshot
 	ID         string
 	Ready      bool
 	LeaseUntil *time.Time
@@ -56,7 +57,7 @@ func (b *Backend) privateInputRevision(ctx context.Context, userID string) (stri
 	return value.ID, nil
 }
 
-func (b *Backend) beginPrivateInputs(ctx context.Context, userID string, full bool) (context.Context, error) {
+func (b *Backend) beginPrivateInputs(ctx context.Context, userID string, full bool, receipt ...calendarintegration.SourceSnapshot) (context.Context, error) {
 	id := calendarintegration.NewSyncLeaseID()
 	err := b.fencedWrite(ctx, userID, func(tx *firestore.Transaction) error {
 		block, err := tx.Get(b.projectionBlock(userID))
@@ -82,8 +83,24 @@ func (b *Backend) beginPrivateInputs(ctx context.Context, userID string, full bo
 		if !previous.Ready && !full {
 			return errPrivateInputsIncomplete
 		}
+		_, connErr := tx.Get(b.Client.Collection("calendarConnections").Doc(userID))
+		if connErr != nil && !firestoreNotFound(connErr) {
+			return connErr
+		}
+		var source *calendarintegration.SourceSnapshot
+		if len(receipt) > 0 && (connErr == nil || previous.Source != nil) {
+			var prior calendarintegration.SourceSnapshot
+			if previous.Source != nil {
+				prior = *previous.Source
+			}
+			next, err := calendarintegration.NextSourceSnapshot(prior, full, id, receipt[0].From, receipt[0].To, receipt[0].ObservedAt)
+			if err != nil {
+				return err
+			}
+			source = &next
+		}
 		until := now.Add(2 * time.Minute)
-		return tx.Set(b.privateInputsRef(userID), privateInputsControl{ID: id, LeaseUntil: &until})
+		return tx.Set(b.privateInputsRef(userID), privateInputsControl{ID: id, LeaseUntil: &until, Source: source})
 	})
 	if err != nil {
 		return nil, err
@@ -110,9 +127,8 @@ func (b *Backend) guardPrivateInputs(ctx context.Context, tx *firestore.Transact
 }
 
 func (b *Backend) finishPrivateInputs(ctx context.Context, userID string) error {
-	lease, _ := ctx.Value(privateInputsLeaseKey{}).(privateInputsLease)
 	return b.fencedWrite(ctx, userID, func(tx *firestore.Transaction) error {
-		return tx.Set(b.privateInputsRef(userID), privateInputsControl{ID: lease.ID, Ready: true})
+		return tx.Update(b.privateInputsRef(userID), []firestore.Update{{Path: "Ready", Value: true}, {Path: "LeaseUntil", Value: nil}})
 	})
 }
 

@@ -121,7 +121,7 @@ func TestPrivateInputsFailureAfter400AndFullRecovery(t *testing.T) {
 		t.Fatalf("incremental repair accepted: %v", err)
 	}
 	shifted := now.Add(24 * time.Hour)
-	if err := b.Calendar().ApplyChanges(active, "alice", calendarintegration.ChangeSet{Full: true, Upserts: privateFixtures(shifted, "repaired", 1)}, shifted, shifted.Add(time.Hour), shifted); err != nil {
+	if err := b.Calendar().ApplyChanges(active, "alice", calendarintegration.ChangeSet{Full: true, Upserts: privateFixtures(shifted, "repaired", 1)}, shifted, shifted.Add(time.Hour), now); err != nil {
 		t.Fatal(err)
 	}
 	got, err := b.Calendar().ListPrivateEvents(ctx, "alice", now, shifted.Add(time.Hour))
@@ -132,7 +132,7 @@ func TestPrivateInputsFailureAfter400AndFullRecovery(t *testing.T) {
 	if err := b.Projection().Replace(active, "alice", shifted, shifted.Add(time.Hour), publicationFixtures(shifted, "repaired-public", 1)); err != nil {
 		t.Fatal(err)
 	}
-	if err := b.Calendar().MarkSyncSuccess(active, "alice", "new-cursor", shifted, shifted.Add(time.Hour)); err != nil {
+	if err := b.Calendar().MarkSyncSuccess(active, "alice", "new-cursor", now, shifted.Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	published, err := b.Projection().ListForUser(ctx, "alice")

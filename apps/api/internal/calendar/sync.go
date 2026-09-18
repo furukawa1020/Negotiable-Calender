@@ -73,6 +73,18 @@ func (handler *Handler) syncUser(ctx context.Context, userID string) (SyncResult
 
 	now := handler.now().UTC()
 	from, to := now.Add(-handler.config.SyncPast), now.Add(handler.config.SyncFuture)
+	if snapshots, ok := handler.store.(SourceSnapshotStore); ok {
+		source, err := snapshots.LoadSourceSnapshot(ctx, userID)
+		if err != nil {
+			handler.markFailure(ctx, connection, "source_load_failed", false)
+			return SyncResult{}, syncFailure("source_load_failed", 500, "unable to verify calendar source", err)
+		}
+		// Recover an uncommitted/legacy base and periodically rebase the finite
+		// full-sync window. Delta responses never prove newly added coverage.
+		if !source.Valid() || connection.LastSyncedAt == nil || !connection.LastSyncedAt.UTC().Truncate(time.Microsecond).Equal(source.ObservedAt) || !source.Covers(now.Add(-handler.config.SyncPast/2), now.Add(handler.config.SyncFuture/2)) {
+			connection.SyncToken = ""
+		}
+	}
 	count := 0
 	nextToken := connection.SyncToken
 	backgroundStore, backgroundOK := handler.store.(BackgroundStore)

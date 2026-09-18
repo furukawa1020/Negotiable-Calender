@@ -127,6 +127,7 @@ type AuthUser = {
 }
 
 type CalendarConnection = {
+  sourceFresh?: boolean
   grantedScopes: string[]
   connectedAt: string
   lastSyncedAt?: string
@@ -948,7 +949,7 @@ function App() {
       const response = await apiFetch(`${apiURL}/api/v1/calendar/sync`, { method: 'POST' })
       if (!response.ok) throw new Error('sync failed')
       const payload = await response.json() as { busySpanCount: number; lastSyncedAt: string }
-      setCalendarConnection((current) => current ? { ...current, lastSyncedAt: payload.lastSyncedAt, reconnectRequired: false, lastErrorCode: '' } : current)
+      setCalendarConnection((current) => current ? { ...current, lastSyncedAt: payload.lastSyncedAt, reconnectRequired: false, lastErrorCode: '', sourceFresh: true } : current)
       setNotice(`Google Calendarから${payload.busySpanCount}件のbusy時間を同期しました。予定名は保存していません。`)
       try {
         const from = new Date(visibleDate)
@@ -972,6 +973,7 @@ function App() {
       }
     } catch {
       setNotice('Calendarを同期できませんでした。再接続が必要な場合があります。')
+      setCalendarConnection((current) => current ? { ...current, sourceFresh: false } : current)
     } finally {
       setCalendarBusy(false)
     }
@@ -1262,6 +1264,7 @@ function App() {
                 <p className="eyebrow">PRODUCT STUDIO · PEOPLE</p>
                 <h1 id="people-title">誰に、どう相談できるか。</h1>
                 <p className="hero-copy">予定名ではなく、いま共有されている関わりやすさだけを表示します。</p>
+                <p>外部カレンダー未接続の表示は共有方針に基づきます。デモは実予定の同期結果ではありません。</p>
               </div>
               <button className="secondary-button" type="button" onClick={openPeopleView}>更新</button>
             </div>
@@ -1288,7 +1291,7 @@ function App() {
                         <strong>{segment.label}</strong>
                       </div>
                     ))}
-                    {person.segments.length === 0 ? <p>公開状態はありません。</p> : null}
+                    {person.segments.length === 0 ? <p>確認できる公開状態はありません。同期の鮮度や共有条件を確認してください。</p> : null}
                   </div>
                 </article>
               ))}

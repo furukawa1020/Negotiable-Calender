@@ -50,7 +50,7 @@ func GenerateCandidates(input CandidateInput) ([]Option, error) {
 		if segment.State.Requestability != policy.RequestOpen {
 			continue
 		}
-		if segment.State.Availability == policy.Unavailable {
+		if !segment.ExpiresAt.After(input.Now) || segment.GeneratedAt.After(input.Now) || (segment.State.Availability != policy.Available && segment.State.Availability != policy.Limited) {
 			continue
 		}
 		start := segment.StartAt

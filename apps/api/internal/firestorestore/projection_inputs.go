@@ -3,6 +3,7 @@ package firestorestore
 import (
 	"context"
 	"errors"
+	"time"
 
 	"cloud.google.com/go/firestore"
 	calendarintegration "github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/calendar"
@@ -46,6 +47,21 @@ func (store *Calendar) BeginRebuild(ctx context.Context, userID string) (context
 	if err != nil {
 		return nil, err
 	}
+	inputs, err := decodePrivateInputs(store.privateInputsRef(userID).Get(ctx))
+	if err != nil {
+		return nil, err
+	}
+	if inputs.ID != privateRevision {
+		return nil, errProjectionInputsChanged
+	}
+	source, err := store.sourceState(func(ref *firestore.DocumentRef) (*firestore.DocumentSnapshot, error) { return ref.Get(ctx) }, userID, inputs)
+	if err != nil {
+		return nil, err
+	}
+	if !source.Rebuildable(ctx, userID, time.Now().UTC()) {
+		return nil, calendarintegration.ErrSourceUnavailable
+	}
+	ctx = calendarintegration.WithSourceSnapshot(ctx, userID, source)
 	return context.WithValue(ctx, projectionInputsKey{}, projectionInputs{UserID: userID, Revision: revision, PrivateRevision: privateRevision}), nil
 }
 
@@ -73,6 +89,14 @@ func (b *Backend) guardProjectionInputs(ctx context.Context, tx *firestore.Trans
 	}
 	if revision != inputs.Revision {
 		return errProjectionInputsChanged
+	}
+	source, err := b.sourceState(tx.Get, userID, private)
+	if err != nil {
+		return err
+	}
+	captured, ok := calendarintegration.CapturedSource(ctx, userID)
+	if !source.Rebuildable(ctx, userID, time.Now().UTC()) || !ok || captured.Managed != source.Managed || captured.Snapshot.Revision != source.Snapshot.Revision {
+		return calendarintegration.ErrSourceUnavailable
 	}
 	return nil
 }

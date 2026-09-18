@@ -152,6 +152,9 @@ busy_status=EXCLUDED.busy_status,visibility=EXCLUDED.visibility,updated_at=EXCLU
 			return fmt.Errorf("upsert changed calendar instance: %w", err)
 		}
 	}
+	if err := AdvanceSourcePostgres(ctx, tx, userID, changes.Full, from, to, now); err != nil {
+		return err
+	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit incremental calendar sync: %w", err)
 	}

@@ -69,7 +69,12 @@ Effect tests inject notification/audit insertion collisions in both databases,
 verify complete rollback, race same-request acceptance, and replay after marking
 the resulting notification read. Firestore deletion fences remain in the transaction.
 
-These guarantees concern app-confirmed requests and the currently imported public
-availability snapshot. They do not reserve Google Calendar or detect an external
-Google change that has not yet synced. Live OAuth (#76), reliable scheduled sync
-(#89), and broader negotiation completion (#102) remain open.
+Calendar-backed snapshots additionally pass the [source freshness gate](source-freshness.md)
+at publication, candidate reads and confirmation/reschedule acceptance. Policy rebuilds
+cannot renew the 30-minute source deadline. Never-connected policy/demo availability
+is distinct from Google-backed evidence.
+
+These guarantees concern app-confirmed requests and an imported snapshot. They do
+not reserve Google Calendar or detect an external change that has not yet synced.
+Live OAuth (#76), reliable scheduled sync (#89), and broader negotiation completion
+(#102) remain open.

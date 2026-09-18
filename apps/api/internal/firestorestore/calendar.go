@@ -169,7 +169,7 @@ func (store *Calendar) ApplyChanges(ctx context.Context, userID string, changes 
 			return fmt.Errorf("invalid calendar change")
 		}
 	}
-	ctx, err := store.beginPrivateInputs(ctx, userID, changes.Full)
+	ctx, err := store.beginPrivateInputs(ctx, userID, changes.Full, calendarintegration.SourceSnapshot{From: from, To: to, ObservedAt: now})
 	if err != nil {
 		return err
 	}

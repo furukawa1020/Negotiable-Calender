@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/firestore"
+	calendarintegration "github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/calendar"
 	"google.golang.org/api/iterator"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -116,7 +117,8 @@ func (backend *Backend) projectionBlock(userID string) *firestore.DocumentRef {
 }
 
 func (store *Projection) list(ctx context.Context, userID string, from, to time.Time, all bool) ([]projection.ScheduleProjection, error) {
-	revision, ready, err := store.projectionReadRevision(ctx, userID)
+	var source calendarintegration.SourceState
+	revision, ready, err := store.projectionReadRevision(ctx, userID, &source)
 	if err != nil {
 		return nil, fmt.Errorf("check projection publication: %w", err)
 	}
@@ -156,7 +158,7 @@ func (store *Projection) list(ctx context.Context, userID string, from, to time.
 		}
 		return values[i].StartAt.Before(values[j].StartAt)
 	})
-	return values, nil
+	return projection.BoundToSource(values, source), nil
 }
 
 func (store *Projection) Replace(ctx context.Context, userID string, from, to time.Time, values []projection.ScheduleProjection) error {
@@ -178,6 +180,8 @@ func (store *Projection) Replace(ctx context.Context, userID string, from, to ti
 	if err != nil {
 		return err
 	}
+	source, _ := calendarintegration.CapturedSource(ctx, userID)
+	values = projection.BoundToSource(values, source)
 	completed := false
 	defer func() {
 		if !completed {

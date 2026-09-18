@@ -198,8 +198,23 @@ func TestAccountDeletionRetriesAfterCommittedCleanupBatch(t *testing.T) {
 	t.Cleanup(func() { _ = client.Close() })
 	b := &Backend{Client: client}
 	now := seedDeletionAccount(t, b, ctx)
-	if err := b.Projection().Replace(ctx, "alice", now, now.Add(24*time.Hour), publicationFixtures(now, "old", 405)); err != nil {
+	lease, err := b.Calendar().AcquireSync(ctx, "alice", now, time.Minute)
+	if err != nil {
 		t.Fatal(err)
+	}
+	active := calendarintegration.WithSyncLease(ctx, calendarintegration.SyncLease{UserID: "alice", ID: lease.SyncLeaseID})
+	if err := b.Calendar().ApplyChanges(active, "alice", calendarintegration.ChangeSet{Full: true}, now, now.Add(24*time.Hour), now); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Projection().Replace(active, "alice", now, now.Add(24*time.Hour), publicationFixtures(now, "old", 405)); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Calendar().MarkSyncSuccess(active, "alice", "synthetic-cursor", now, now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	visible, err := b.Projection().ListForUser(ctx, "alice")
+	if err != nil || len(visible) != 405 {
+		t.Fatalf("expected completed source publication: %d %v", len(visible), err)
 	}
 	fail.Store(true)
 	err = b.Auth().DeleteAccount(ctx, "alice")

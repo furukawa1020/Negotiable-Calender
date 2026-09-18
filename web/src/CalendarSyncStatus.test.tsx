@@ -3,6 +3,10 @@ import { describe, expect, it } from 'vitest'
 import { CalendarSyncStatus } from './CalendarSyncStatus'
 
 describe('CalendarSyncStatus', () => {
+  it('warns when the server cannot verify a recently timestamped source', () => {
+    render(<CalendarSyncStatus mode="external" connection={{ reconnectRequired: false, sourceFresh: false, lastSyncedAt: new Date().toISOString() }} />)
+    expect(screen.getByText(/鮮度を確認できません/)).toBeInTheDocument()
+  })
   it('distinguishes disabled automation from a fresh sync', () => {
     render(<CalendarSyncStatus mode="off" connection={{ reconnectRequired: false, lastSyncedAt: new Date().toISOString() }} />)
     expect(screen.getByText(/自動同期は停止中/)).toBeInTheDocument()

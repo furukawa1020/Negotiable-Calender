@@ -171,6 +171,14 @@ func (handler *Handler) status(response http.ResponseWriter, request *http.Reque
 		writeJSON(response, 500, map[string]string{"error": "unable to load calendar connection"})
 		return
 	}
+	fresh := false
+	if snapshots, ok := handler.store.(SourceSnapshotStore); ok {
+		source, sourceErr := snapshots.LoadSourceSnapshot(request.Context(), userID)
+		if sourceErr == nil {
+			fresh = (SourceState{Managed: true, Snapshot: source, Connection: &value}).Committed(handler.now().UTC())
+		}
+	}
+	value.SourceFresh = &fresh
 	mode := handler.config.SyncMode
 	if !handler.Configured() || (mode != "external" && mode != "background") {
 		mode = "off"

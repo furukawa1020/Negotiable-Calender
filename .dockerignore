@@ -2,6 +2,8 @@
 .github
 .agents
 .codex
+.firebase
+firebase-debug*.log
 gha-creds-*.json
 **/client_secret_*.json
 **/node_modules

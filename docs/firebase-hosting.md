@@ -26,6 +26,7 @@ Run from the repository root using the existing authenticated Firebase CLI
 (initially 15.25.1). Do not export refresh tokens or commit debug logs.
 
 ```powershell
+$env:GOOGLE_CLOUD_QUOTA_PROJECT = 'improve-production-management'
 python -B -m unittest discover -s .github/scripts -p 'test_*.py'
 firebase hosting:sites:list --project improve-production-management --json
 # One-time creation only; inspect sites first. Never delete/recreate another site.
@@ -34,6 +35,9 @@ firebase deploy --only hosting --config firebase.json --project improve-producti
 ```
 
 The five static-site tests run in the existing Production blueprint CI job.
+The quota-project environment setting scopes API quota to the existing project;
+it does not increase quotas or change billing plans. Without it, the CLI shared
+consumer project returned Resource Manager 429 errors during initial setup.
 After deploy, verify HTTPS index/CSS/404, response security headers, and the exact
 Cloud Run link. Confirm `/api/v1/auth/session` and secret/draft paths on Hosting
 return 404, not app data. Confirm the Cloud Run anonymous session remains 401.

@@ -36,6 +36,20 @@ const initialProjections = [
 const apiURL = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:8080' : window.location.origin)
 const apiFetch = (input: RequestInfo | URL, init?: RequestInit) => fetch(input, { ...init, credentials: 'include' })
 
+const requestStatusLabel = (status: string) => ({ pending: '未回答', suggested: '候補を確認中', accepted: '日時確定', declined: '辞退', delegated: '委譲済み', async: '非同期で回答', cancelled: 'キャンセル済み', expired: '期限切れ' }[status] ?? status)
+const priorityLabel = (priority: string) => ({ normal: '通常', high: '重要', urgent: '緊急' }[priority] ?? priority)
+
+function NavigationIcon({ view }: { view: string }) {
+  const paths: Record<string, string> = {
+    calendar: 'M5 3v4M15 3v4M3 9h14M4 5h12a1 1 0 0 1 1 1v11H3V6a1 1 0 0 1 1-1Z',
+    people: 'M8 10a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM2 17v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2M14 4a3 3 0 0 1 0 6M16 12a3 3 0 0 1 2 3v2',
+    inbox: 'M3 4h14v13H3V4ZM3 12h4l1 2h4l1-2h4M10 6v5M7 8l3 3 3-3',
+    sent: 'M3 3l15 7-15 7 3-7-3-7ZM6 10h12',
+    audit: 'M5 3h10v14H5V3ZM8 7h4M8 10h4M8 13h4',
+  }
+  return <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d={paths[view]} /></svg>
+}
+
 type ProjectionRow = (typeof initialProjections)[number]
 
 type CalendarView = 'day' | 'week' | 'month'
@@ -1061,12 +1075,13 @@ function App() {
 
   if (!authUser && !demoMode) {
     return (
-      <div className="app-shell">
+      <div className="app-shell signin-shell">
         <main className="signin-gate">
           <span className="brand-mark" aria-hidden="true">N</span>
-          <p className="eyebrow">NEGOTIABLE CALENDAR</p>
-          <h1>予定を見せずに、予定を共有する。</h1>
-          <p className="hero-copy">本人確認後に、あなたのカレンダーと組織の調整状態を表示します。</p>
+          <p className="signin-brand">Negotiable Calendar</p>
+          <h1>カレンダーにログイン</h1>
+          <p className="hero-copy">自分の予定と組織に共有する公開状態を確認し、相談の依頼・回答を管理します。</p>
+          <p className="signin-help">Google ログインとカレンダーの接続は別の操作です。予定の読み取りには、ログイン後に接続の許可が必要です。</p>
           {notice ? <p role="status">{notice}</p> : null}
           <a className="primary-button" href={`${apiURL}/api/v1/auth/google/login`}>Googleでログイン</a>
         </main>
@@ -1081,13 +1096,6 @@ function App() {
           <span className="brand-mark" aria-hidden="true">N</span>
           <span>Negotiable Calendar</span>
         </a>
-        <nav className="top-nav" aria-label="メインナビゲーション">
-          <button className={currentView === 'calendar' ? 'active' : ''} type="button" onClick={() => setCurrentView('calendar')}>マイカレンダー</button>
-          <button className={currentView === 'people' ? 'active' : ''} type="button" onClick={openPeopleView}>組織</button>
-          <button className={currentView === 'inbox' ? 'active' : ''} type="button" onClick={openInbox}>依頼</button>
-          <button className={currentView === 'sent' ? 'active' : ''} type="button" onClick={openSentRequests}>送信済み</button>
-          <button className={currentView === 'audit' ? 'active' : ''} type="button" onClick={openAudit}>監査</button>
-        </nav>
         <div className="topbar-actions">
           <span className="protected-badge"><ShieldIcon />予定詳細は保護されています</span>
           <div className="notification-wrap">
@@ -1161,7 +1169,19 @@ function App() {
         </div>
       </header>
 
+      <aside className="workspace-nav">
+        <nav className="top-nav" aria-label="メインナビゲーション">
+          <button aria-current={currentView === 'calendar' ? 'page' : undefined} className={currentView === 'calendar' ? 'active' : ''} type="button" onClick={() => setCurrentView('calendar')}><NavigationIcon view="calendar" />マイカレンダー</button>
+          <button aria-current={currentView === 'people' ? 'page' : undefined} className={currentView === 'people' ? 'active' : ''} type="button" onClick={openPeopleView}><NavigationIcon view="people" />組織</button>
+          <button aria-current={currentView === 'inbox' ? 'page' : undefined} className={currentView === 'inbox' ? 'active' : ''} type="button" onClick={openInbox}><NavigationIcon view="inbox" />依頼</button>
+          <button aria-current={currentView === 'sent' ? 'page' : undefined} className={currentView === 'sent' ? 'active' : ''} type="button" onClick={openSentRequests}><NavigationIcon view="sent" />送信済み</button>
+          <button aria-current={currentView === 'audit' ? 'page' : undefined} className={currentView === 'audit' ? 'active' : ''} type="button" onClick={openAudit}><NavigationIcon view="audit" />監査</button>
+        </nav>
+        <div className="workspace-note"><ShieldIcon /><p>組織への共有範囲<strong>公開状態のみ</strong></p></div>
+      </aside>
+
       <main id="top">
+        {demoMode ? <p className="demo-notice">デモ表示 · サンプルの予定です。実際のカレンダーとは同期していません。</p> : null}
         {invitationPreview ? (
           <section className="privacy-note" aria-label="Workspace招待">
             <ShieldIcon />
@@ -1173,9 +1193,8 @@ function App() {
         <>
         <section className="hero" aria-labelledby="page-title">
           <div>
-            <p className="eyebrow">{dateLabel}</p>
-            <h1 id="page-title">今日、どう関われるか。</h1>
-            <p className="hero-copy">予定の中身はあなたのもの。組織には、調整に必要な余地だけを共有します。</p>
+            <h1 id="page-title">カレンダー</h1>
+            <p className="hero-copy">自分の予定と、組織に共有する相談可能な時間を確認できます。</p>
           </div>
           <button className="primary-button" type="button" onClick={() => setActiveDialog('request')}>
             <span aria-hidden="true">＋</span> 依頼を作成
@@ -1185,13 +1204,14 @@ function App() {
         <section className="privacy-note" aria-label="プライバシー設定の状態">
           <ShieldIcon />
           <div>
-            <strong>Privacy Projection is active</strong>
+            <strong>公開範囲：状態のみ</strong>
             <span>イベント名・参加者・場所は組織に共有されません</span>
           </div>
           <button type="button" onClick={openSharingRules}>共有ルールを確認</button>
         </section>
 
         <section className="calendar-toolbar" aria-label="カレンダー操作">
+          <strong className="calendar-date">{dateLabel}</strong>
           <div className="date-controls">
             <button type="button" aria-label={calendarView === 'day' ? '前の日' : calendarView === 'week' ? '前の週' : '前の月'} onClick={() => moveCalendar(-1)}>←</button>
             <button type="button" onClick={() => setCalendarAnchor(new Date())}>今日</button>
@@ -1199,15 +1219,15 @@ function App() {
           </div>
           <div className="calendar-view-controls" aria-label="表示期間">
             {(['day', 'week', 'month'] as CalendarView[]).map((view) => (
-              <button className={calendarView === view ? 'active' : ''} type="button" key={view} onClick={() => setCalendarView(view)}>
+              <button aria-pressed={calendarView === view} className={calendarView === view ? 'active' : ''} type="button" key={view} onClick={() => setCalendarView(view)}>
                 {view === 'day' ? '日' : view === 'week' ? '週' : '月'}
               </button>
             ))}
           </div>
           <div className="layer-controls" aria-label="表示レイヤー">
-            <button className={calendarLayer === 'both' ? 'active' : ''} type="button" onClick={() => setCalendarLayer('both')}>両方</button>
-            <button className={calendarLayer === 'private' ? 'active' : ''} type="button" onClick={() => setCalendarLayer('private')}>Private</button>
-            <button className={calendarLayer === 'projection' ? 'active' : ''} type="button" onClick={() => setCalendarLayer('projection')}>Projection</button>
+            <button aria-pressed={calendarLayer === 'both'} className={calendarLayer === 'both' ? 'active' : ''} type="button" onClick={() => setCalendarLayer('both')}>両方</button>
+            <button aria-pressed={calendarLayer === 'private'} className={calendarLayer === 'private' ? 'active' : ''} type="button" onClick={() => setCalendarLayer('private')}>自分の予定</button>
+            <button aria-pressed={calendarLayer === 'projection'} className={calendarLayer === 'projection' ? 'active' : ''} type="button" onClick={() => setCalendarLayer('projection')}>公開状態</button>
           </div>
           <button className="override-button" type="button" onClick={() => setActiveDialog('override')}>状態を上書き</button>
         </section>
@@ -1216,10 +1236,10 @@ function App() {
           <article className="calendar-panel private-panel">
             <div className="panel-heading">
               <div>
-                <p>MY CALENDAR</p>
                 <h2>あなたの予定</h2>
+                <p>予定を選択すると詳細を表示</p>
               </div>
-              <span className="private-label">PRIVATE</span>
+              <span className="private-label">自分のみ</span>
             </div>
             <div className="private-list">
               {privateEventsLoading ? <p className="empty-state" role="status">本人用カレンダーを取得中…</p> : null}
@@ -1230,7 +1250,7 @@ function App() {
                   <time>{event.time}</time>
                   <button className={`private-event ${event.size}`} type="button" aria-expanded={selectedPrivateEventID === event.id} onClick={() => setSelectedPrivateEventID((current) => current === event.id ? '' : event.id)}>
                     <strong>{event.label}</strong>
-                    <span>本人だけに表示 · 組織には非公開</span>
+                    <span>{selectedPrivateEventID === event.id ? '詳細を閉じる' : '詳細を確認'}</span>
                     {selectedPrivateEventID === event.id && event.details?.length ? (
                       <span className="private-event-details">{event.details.join(' · ')}</span>
                     ) : null}
@@ -1243,10 +1263,10 @@ function App() {
           <article className="calendar-panel projection-panel">
             <div className="panel-heading">
               <div>
-                <p>WHAT OTHERS SEE</p>
                 <h2>組織に見える状態</h2>
+                <p>共有ルールから生成した相談可能性</p>
               </div>
-              <span className="projection-label"><span /> PROJECTION</span>
+              <span className="projection-label"><span /> 組織に公開</span>
             </div>
             <div className="projection-list">
               {displayedProjections.map((projection) => (
@@ -1273,10 +1293,9 @@ function App() {
           <section className="people-view" aria-labelledby="people-title">
             <div className="people-heading">
               <div>
-                <p className="eyebrow">PRODUCT STUDIO · PEOPLE</p>
-                <h1 id="people-title">誰に、どう相談できるか。</h1>
-                <p className="hero-copy">予定名ではなく、いま共有されている関わりやすさだけを表示します。</p>
-                <p>外部カレンダー未接続の表示は共有方針に基づきます。デモは実予定の同期結果ではありません。</p>
+                <h1 id="people-title">組織の公開状態</h1>
+                <p className="hero-copy">メンバーが共有する相談可能な時間を確認し、依頼を作成できます。</p>
+                <p className="field-help">外部カレンダー未接続の表示は共有方針に基づきます。デモは実予定の同期結果ではありません。</p>
               </div>
               <button className="secondary-button" type="button" onClick={openPeopleView}>更新</button>
             </div>
@@ -1287,7 +1306,7 @@ function App() {
             ) : null}
             <div className="people-list">
               {people.map((person) => (
-                <article className="person-card" key={person.id}>
+                <article className="person-row" key={person.id}>
                   <div className="person-profile">
                     <span className="person-avatar">{person.displayName.slice(0, 1)}</span>
                     <div>
@@ -1313,9 +1332,8 @@ function App() {
           <section className="inbox-view" aria-labelledby="inbox-title">
             <div className="people-heading">
               <div>
-                <p className="eyebrow">COORDINATION · INBOX</p>
-                <h1 id="inbox-title">届いた依頼を、余白から選ぶ。</h1>
-                <p className="hero-copy">予定の詳細を開かず、共有された候補と期限だけで判断できます。</p>
+                <h1 id="inbox-title">受信した依頼</h1>
+                <p className="hero-copy">日時の承認・別時間の提案・非同期での回答・委譲を行えます。</p>
               </div>
               <button className="secondary-button" type="button" onClick={openInbox}>更新</button>
             </div>
@@ -1326,11 +1344,11 @@ function App() {
             ) : null}
             <div className="request-list">
               {inboxRequests.map((item) => (
-                <article className="request-card" key={item.id}>
+                <article className="request-row" key={item.id}>
                   <div className="request-summary">
                     <div className="request-meta">
-                      <span className={`priority priority-${item.priority}`}>{item.priority}</span>
-                      <span>{item.status}</span>
+                      <span className={`priority priority-${item.priority}`}>{priorityLabel(item.priority)}</span>
+                      <span>{requestStatusLabel(item.status)}</span>
                     </div>
                     <h2>{item.title}</h2>
                     <p>{item.requesterUserId} · {item.durationMinutes}分 · 期限 {formatDateTime(item.deadlineAt)}</p>
@@ -1351,7 +1369,7 @@ function App() {
                     <RescheduleMeeting request={item} actor={activeUserID} onChange={rescheduleMeeting} />
                     {item.options.map((option) => (
                       <div className="option-row" key={option.id}>
-                        <span>{option.type === 'meeting' ? 'MEETING' : 'ASYNC'}</span>
+                        <span>{option.type === 'meeting' ? '会議' : '非同期'}</span>
                         <strong>{option.startAt && option.endAt
                           ? `${formatDateTime(option.startAt)} — ${new Intl.DateTimeFormat('ja-JP', { hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(option.endAt))}`
                           : '非同期で回答'}</strong>
@@ -1377,7 +1395,7 @@ function App() {
                         </form>
                         <button className="decline-button" type="button" disabled={respondingRequestID === item.id} onClick={() => respondToRequest(item.id, 'decline')}>今回は辞退</button>
                       </>
-                    ) : <div><p className="response-complete">回答済み · {item.status}</p>{item.asyncMessage ? <p className="async-message">{item.asyncMessage}</p> : null}</div>}
+                    ) : <div><p className="response-complete">回答済み · {requestStatusLabel(item.status)}</p>{item.asyncMessage ? <p className="async-message">{item.asyncMessage}</p> : null}</div>}
                   </div>
                 </article>
               ))}
@@ -1387,8 +1405,7 @@ function App() {
           <section className="inbox-view" aria-labelledby="sent-title">
             <div className="people-heading">
               <div>
-                <p className="eyebrow">COORDINATION · SENT</p>
-                <h1 id="sent-title">送った依頼を、最後まで管理する。</h1>
+                <h1 id="sent-title">送信した依頼</h1>
                 <p className="hero-copy">依頼者本人だけが送信状況を確認し、回答前の依頼をキャンセルできます。</p>
               </div>
               <button className="secondary-button" type="button" onClick={openSentRequests}>更新</button>
@@ -1400,11 +1417,11 @@ function App() {
               {sentRequests.map((item) => {
                 const cancellable = ['pending', 'suggested', 'delegated'].includes(item.status)
                 return (
-                  <article className="request-card" key={item.id}>
+                  <article className="request-row" key={item.id}>
                     <div className="request-summary">
                       <div className="request-meta">
-                        <span className={`priority priority-${item.priority}`}>{item.priority}</span>
-                        <span>{item.status}</span>
+                        <span className={`priority priority-${item.priority}`}>{priorityLabel(item.priority)}</span>
+                        <span>{requestStatusLabel(item.status)}</span>
                       </div>
                       <h2>{item.title}</h2>
                       <p>{item.targetUserId} 宛 · {item.durationMinutes}分 · 期限 {formatDateTime(item.deadlineAt)}</p>
@@ -1417,7 +1434,7 @@ function App() {
                         <button className="decline-button" type="button" disabled={respondingRequestID === item.id} onClick={() => cancelSentRequest(item.id)}>
                           {respondingRequestID === item.id ? 'キャンセル中…' : '依頼をキャンセル'}
                         </button>
-                      ) : <div><p className="response-complete">更新済み · {item.status}</p>{item.asyncMessage ? <p className="async-message">{item.asyncMessage}</p> : null}</div>}
+                      ) : <div><p className="response-complete">更新済み · {requestStatusLabel(item.status)}</p>{item.asyncMessage ? <p className="async-message">{item.asyncMessage}</p> : null}</div>}
                     </div>
                   </article>
                 )
@@ -1428,8 +1445,7 @@ function App() {
           <section className="audit-view" aria-labelledby="audit-title">
             <div className="people-heading">
               <div>
-                <p className="eyebrow">PRIVACY · AUDIT LOG</p>
-                <h1 id="audit-title">共有した事実だけを、記録する。</h1>
+                <h1 id="audit-title">操作履歴</h1>
                 <p className="hero-copy">操作主体・操作種別・依頼ID・時刻のみ。予定内容や依頼タイトルは記録されません。</p>
               </div>
               <button className="secondary-button" type="button" onClick={openAudit}>更新</button>
@@ -1458,7 +1474,6 @@ function App() {
           <section className="modal" role="dialog" aria-modal="true" aria-labelledby="request-title">
             <div className="modal-heading">
               <div>
-                <p className="eyebrow">COORDINATION REQUEST</p>
                 <h2 id="request-title">依頼を作成</h2>
               </div>
               <button className="close-button" type="button" aria-label="閉じる" onClick={() => setActiveDialog('')}>×</button>
@@ -1483,7 +1498,7 @@ function App() {
                 </label>
               </div>
               <label>
-                同期性
+                回答方法
                 <select name="sync" defaultValue="either">
                   <option value="either">できれば会話・非同期でも可</option>
                   <option value="meeting">直接相談したい</option>
@@ -1512,12 +1527,11 @@ function App() {
           <section className="modal rules-modal" role="dialog" aria-modal="true" aria-labelledby="rules-title">
             <div className="modal-heading">
               <div>
-                <p className="eyebrow">SHARING POLICY</p>
                 <h2 id="rules-title">共有ルール</h2>
               </div>
               <button className="close-button" type="button" aria-label="閉じる" onClick={() => setActiveDialog('')}>×</button>
             </div>
-            <p className="modal-copy">予定の内容ではなく、関わりやすさだけに変換して共有します。</p>
+            <p className="modal-copy">勤務時間と条件を指定し、組織に表示する相談可否・割り込み可否を設定します。</p>
             {policyLoading ? <p role="status">共有ルールを読み込んでいます…</p> : null}
             <SharingPolicyEditor value={sharingPolicy} onChange={setSharingPolicy} disabled={policyLoading || policySaving} />
             <div className="policy-save-actions">
@@ -1533,12 +1547,11 @@ function App() {
           <section className="modal" role="dialog" aria-modal="true" aria-labelledby="override-title">
             <div className="modal-heading">
               <div>
-                <p className="eyebrow">MANUAL OVERRIDE</p>
                 <h2 id="override-title">公開状態を上書き</h2>
               </div>
               <button className="close-button" type="button" aria-label="閉じる" onClick={() => setActiveDialog('')}>×</button>
             </div>
-            <p className="modal-copy">予定の内容は変更せず、組織に見える関わりやすさだけを一時変更します。</p>
+            <p className="modal-copy">指定した時間の公開状態を一時的に変更します。元のカレンダーの予定は変更しません。</p>
             <form className="request-form" onSubmit={submitOverride}>
               <div className="form-row">
                 <label>開始<input name="startTime" type="time" defaultValue="15:30" required /></label>
@@ -1565,7 +1578,6 @@ function App() {
           <section className="modal danger-modal" role="dialog" aria-modal="true" aria-labelledby="delete-account-title">
             <div className="modal-heading">
               <div>
-                <p className="eyebrow">DANGER ZONE</p>
                 <h2 id="delete-account-title">アカウントを完全に削除</h2>
               </div>
               <button className="close-button" type="button" aria-label="閉じる" disabled={deletingAccount} onClick={() => setActiveDialog('')}>×</button>
@@ -1593,8 +1605,8 @@ function App() {
       ) : null}
 
       <footer>
-        <span>予定を見せずに、予定を共有する。</span>
-        <span>All times JST</span>
+        <span>Negotiable Calendar</span>
+        <span>表示時刻は端末のタイムゾーンに基づきます</span>
       </footer>
     </div>
   )

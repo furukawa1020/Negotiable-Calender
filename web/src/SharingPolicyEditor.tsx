@@ -175,7 +175,6 @@ export default function SharingPolicyEditor({ value, onChange, disabled = false 
       </fieldset>
 
       <section className="policy-preview" aria-label="組織への公開プレビュー">
-        <p className="eyebrow">PRIVACY PREVIEW</p>
         <strong>組織には次の調整状態だけが見えます</strong>
         <dl>{(Object.keys(stateOptions) as Array<keyof InteractionState>).map((key) => <div key={key}><dt>{stateLabels[key]}</dt><dd>{stateOptions[key].find(([optionValue]) => optionValue === value.default[key])?.[1]}</dd></div>)}</dl>
         <small>予定名・説明・場所・参加者・Calendar名は表示されません。</small>

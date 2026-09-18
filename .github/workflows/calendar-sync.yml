@@ -45,6 +45,7 @@ jobs:
           # No HTTP retry: the next scheduled invocation resumes due work safely.
           curl --fail --silent --show-error --request POST \
             --connect-timeout 5 --max-time 55 --retry 0 \
+            --header 'Content-Length: 0' \
             --header "Authorization: Bearer ${SYNC_ID_TOKEN}" \
             --output "${RUNNER_TEMP}/calendar-sync-result.json" "${SYNC_URL}"
           jq '{status, configured, result}' "${RUNNER_TEMP}/calendar-sync-result.json" >> "$GITHUB_STEP_SUMMARY"

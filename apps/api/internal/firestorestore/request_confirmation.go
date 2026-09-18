@@ -128,6 +128,7 @@ func (store *Request) confirmationProjections(ctx context.Context, tx *firestore
 		return nil, coordinationrequest.ErrAvailabilityChanged
 	}
 	doc, err := tx.Get(store.projectionPublicationRef(userID))
+	var publishedRevision string
 	if firestoreNotFound(err) {
 		if policyRevision != "" || inputs.ID != "" {
 			return nil, coordinationrequest.ErrAvailabilityChanged
@@ -143,6 +144,15 @@ func (store *Request) confirmationProjections(ctx context.Context, tx *firestore
 		if !publication.Ready || publication.Dirty || publication.LeaseUntil != nil || publication.PolicyRevision != policyRevision || publication.PrivateRevision != inputs.ID {
 			return nil, coordinationrequest.ErrAvailabilityChanged
 		}
+		publishedRevision = publication.PrivateRevision
+	}
+	source, err := store.sourceState(tx.Get, userID, inputs)
+	if err != nil {
+		return nil, err
+	}
+	source.PublishedRevision = publishedRevision
+	if !source.Readable(time.Now().UTC()) {
+		return nil, coordinationrequest.ErrAvailabilityChanged
 	}
 	docs, err := tx.Documents(store.Client.Collection("users").Doc(userID).Collection("scheduleProjections").Limit(10001)).GetAll()
 	if err != nil {
@@ -159,5 +169,8 @@ func (store *Request) confirmationProjections(ctx context.Context, tx *firestore
 		}
 		values = append(values, value)
 	}
-	return values, nil
+	if !source.Readable(time.Now().UTC()) {
+		return nil, coordinationrequest.ErrAvailabilityChanged
+	}
+	return projection.BoundToSource(values, source), nil
 }

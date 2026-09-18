@@ -15,6 +15,7 @@ type TokenSet struct {
 }
 
 type Connection struct {
+	SourceFresh        *bool      `json:"sourceFresh,omitempty" firestore:"-"`
 	SyncLeaseID        string     `json:"-"`
 	SyncLeaseUntil     *time.Time `json:"-"`
 	UserID             string     `json:"userId"`

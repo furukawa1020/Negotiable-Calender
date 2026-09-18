@@ -123,7 +123,7 @@ func (b *Backend) abandonProjectionWrite(ctx context.Context, userID string) {
 // Readers validate before and after reading the collection. An operation ID
 // prevents ABA (ready -> busy -> ready) from accepting a mixed read.
 // Legacy data has an empty revision; controls must not be deleted independently.
-func (b *Backend) projectionReadRevision(ctx context.Context, userID string) (string, bool, error) {
+func (b *Backend) projectionReadRevision(ctx context.Context, userID string, captured ...*calendarintegration.SourceState) (string, bool, error) {
 	if deleting, err := b.accountIsDeleting(ctx, userID); err != nil {
 		return "", false, err
 	} else if deleting {
@@ -157,7 +157,25 @@ func (b *Backend) projectionReadRevision(ctx context.Context, userID string) (st
 		return "", false, err
 	}
 	if legacy {
-		return "", revision == "" && privateRevision == "", nil
+		value.Ready = revision == "" && privateRevision == ""
+	}
+	inputs, err := decodePrivateInputs(b.privateInputsRef(userID).Get(ctx))
+	if err != nil {
+		return "", false, err
+	}
+	if inputs.ID != privateRevision {
+		return "", false, nil
+	}
+	source, err := b.sourceState(func(ref *firestore.DocumentRef) (*firestore.DocumentSnapshot, error) { return ref.Get(ctx) }, userID, inputs)
+	if err != nil {
+		return "", false, err
+	}
+	source.PublishedRevision = value.PrivateRevision
+	if !source.Readable(time.Now().UTC()) {
+		return "", false, nil
+	}
+	if len(captured) > 0 {
+		*captured[0] = source
 	}
 	return value.ID, value.PrivateRevision == privateRevision && value.PolicyRevision == revision && value.Ready && !value.Dirty && value.LeaseUntil == nil, nil
 }

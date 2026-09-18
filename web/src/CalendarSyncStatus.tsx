@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
 
-type Props = { mode: string; connection: { lastSyncedAt?: string; lastAttemptAt?: string; nextAttemptAt?: string; lastErrorCode?: string; reconnectRequired: boolean } }
+type Props = { mode: string; connection: { sourceFresh?: boolean; lastSyncedAt?: string; lastAttemptAt?: string; nextAttemptAt?: string; lastErrorCode?: string; reconnectRequired: boolean } }
 
 export function CalendarSyncStatus({ mode, connection }: Props) {
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 60000); return () => window.clearInterval(timer) }, [])
   const synced = connection.lastSyncedAt ? Date.parse(connection.lastSyncedAt) : NaN
-  const stale = !Number.isFinite(synced) || now - synced > 30 * 60000
+  const stale = connection.sourceFresh === false || !Number.isFinite(synced) || synced > now || now - synced >= 30 * 60000
   const format = (value: string) => new Date(value).toLocaleString('ja-JP')
   return <div>
     <span>{connection.reconnectRequired ? 'Calendarの再接続が必要です' : mode === 'external' ? 'Calendar 定期同期を設定済み' : mode === 'background' ? 'Calendar ローカル自動同期' : 'Calendar 自動同期は停止中（手動同期は利用できます）'}</span>

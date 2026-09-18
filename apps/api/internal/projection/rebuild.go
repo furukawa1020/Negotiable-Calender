@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	calendarintegration "github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/calendar"
 	"time"
 
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/policy"
@@ -107,6 +108,28 @@ type PostgresRebuildStore struct {
 
 func NewPostgresRebuildStore(database *sql.DB) *PostgresRebuildStore {
 	return &PostgresRebuildStore{database: database, projections: NewPostgresStore(database)}
+}
+
+func (store *PostgresRebuildStore) BeginRebuild(ctx context.Context, userID string) (context.Context, error) {
+	tx, err := store.database.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	if err := calendarintegration.LockCalendarTransaction(ctx, tx, userID); err != nil {
+		return nil, err
+	}
+	state, err := calendarintegration.ReadSourcePostgres(ctx, tx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if !state.Rebuildable(ctx, userID, time.Now().UTC()) {
+		return nil, calendarintegration.ErrSourceUnavailable
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return calendarintegration.WithSourceSnapshot(ctx, userID, state), nil
 }
 
 func (store *PostgresRebuildStore) UserTimezone(ctx context.Context, userID string) (string, error) {

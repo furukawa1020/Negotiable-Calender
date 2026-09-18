@@ -57,6 +57,11 @@ CREATE TABLE IF NOT EXISTS private_events (
     PRIMARY KEY (user_id, provider_event_id)
 );
 CREATE INDEX IF NOT EXISTS private_events_user_range_idx ON private_events(user_id, start_at, end_at);
+CREATE TABLE IF NOT EXISTS calendar_source_snapshots (
+    user_id text PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    snapshot jsonb NOT NULL DEFAULT '{}',
+    published_revision text NOT NULL DEFAULT ''
+);
 `
 	if _, err := database.ExecContext(ctx, schema); err != nil {
 		return fmt.Errorf("create calendar schema: %w", err)
@@ -107,6 +112,9 @@ reconnect_required=false,next_attempt_at=EXCLUDED.connected_at,last_error_code='
 	if err != nil {
 		return fmt.Errorf("save calendar connection: %w", err)
 	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO calendar_source_snapshots(user_id) VALUES($1) ON CONFLICT(user_id) DO UPDATE SET snapshot='{}',published_revision=''`, value.UserID); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
@@ -154,6 +162,9 @@ VALUES ($1,$2,$3,$4,$5,$6,'default',$7,$7)`, userID, span.ProviderEventID, span.
 			return fmt.Errorf("insert busy span: %w", err)
 		}
 	}
+	if err := AdvanceSourcePostgres(ctx, tx, userID, true, from, to, now); err != nil {
+		return err
+	}
 	if err = tx.Commit(); err != nil {
 		return fmt.Errorf("commit calendar sync: %w", err)
 	}
@@ -187,6 +198,11 @@ func (store *PostgresStore) DeleteConnection(ctx context.Context, userID string)
 	}
 	if _, err = tx.ExecContext(ctx, `DELETE FROM calendar_connections WHERE user_id=$1`, userID); err != nil {
 		return fmt.Errorf("delete calendar connection: %w", err)
+	}
+	// Retain an external-source tombstone until account deletion; policy rebuilds
+	// must not silently turn a disconnected external source into policy-only data.
+	if _, err := tx.ExecContext(ctx, `INSERT INTO calendar_source_snapshots(user_id) VALUES($1) ON CONFLICT(user_id) DO UPDATE SET snapshot='{}',published_revision=''`, userID); err != nil {
+		return err
 	}
 	if err = tx.Commit(); err != nil {
 		return fmt.Errorf("commit calendar disconnect: %w", err)

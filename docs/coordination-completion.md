@@ -30,7 +30,8 @@ Displayed times use the device timezone; exported UTC values preserve the instan
   through proposal/decline/withdrawal and swaps it atomically on counterpart approval.
 - Acceptance-time expiry/coverage validation and atomic conflict protection are
   implemented in the [confirmation engine](confirmation-engine.md). Additional
-  source-sync freshness and distributed Google writeback remain separate work.
+  [Source-sync freshness](source-freshness.md) now gates calendar-backed snapshots;
+  distributed Google writeback remains separate work.
 - Full negotiation end-to-end coverage, including non-meeting outcomes.
 - Live Google consent and acceptance (#76), reliable scheduled sync (#89).
   The [bounded external sync trigger](scheduled-calendar-sync.md) is implemented;

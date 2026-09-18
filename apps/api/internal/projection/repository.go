@@ -88,6 +88,20 @@ func (store *PostgresStore) Replace(ctx context.Context, userID string, from, to
 	if err := calendarintegration.GuardSyncTransaction(ctx, transaction, userID); err != nil {
 		return err
 	}
+	state, err := calendarintegration.ReadSourcePostgres(ctx, transaction, userID)
+	if err != nil {
+		return err
+	}
+	captured, capturedOK := calendarintegration.CapturedSource(ctx, userID)
+	if !state.Rebuildable(ctx, userID, time.Now().UTC()) || (state.Managed && (!capturedOK || !captured.Managed || captured.Snapshot.Revision != state.Snapshot.Revision)) || (capturedOK && captured.Managed != state.Managed) {
+		return calendarintegration.ErrSourceUnavailable
+	}
+	values = BoundToSource(values, state)
+	if state.Managed && state.PublishedRevision != state.Snapshot.Revision {
+		if _, err := transaction.ExecContext(ctx, "DELETE FROM schedule_projections WHERE user_id=$1", userID); err != nil {
+			return err
+		}
+	}
 	if _, err := transaction.ExecContext(ctx, `
 DELETE FROM schedule_projections
 WHERE user_id = $1 AND start_at < $3 AND end_at > $2
@@ -109,6 +123,11 @@ INSERT INTO schedule_projections (
 			return fmt.Errorf("insert replacement projection: %w", err)
 		}
 	}
+	if state.Managed {
+		if _, err := transaction.ExecContext(ctx, "UPDATE calendar_source_snapshots SET published_revision=$2 WHERE user_id=$1", userID, state.Snapshot.Revision); err != nil {
+			return err
+		}
+	}
 	if err := transaction.Commit(); err != nil {
 		return fmt.Errorf("commit projection replacement: %w", err)
 	}
@@ -116,7 +135,19 @@ INSERT INTO schedule_projections (
 }
 
 func (store *PostgresStore) list(ctx context.Context, userID string, from, to time.Time, includeAll bool) ([]ScheduleProjection, error) {
-	rows, err := store.database.QueryContext(ctx, `
+	tx, err := store.database.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	state, err := calendarintegration.ReadSourcePostgres(ctx, tx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if !state.Readable(time.Now().UTC()) {
+		return []ScheduleProjection{}, nil
+	}
+	rows, err := tx.QueryContext(ctx, `
 SELECT id, user_id, start_at, end_at, availability, interruptibility,
        requestability, reschedulability, expected_response_bucket,
        generated_at, expires_at
@@ -145,7 +176,10 @@ ORDER BY start_at, id
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate schedule projections: %w", err)
 	}
-	return values, nil
+	if !state.Readable(time.Now().UTC()) {
+		return []ScheduleProjection{}, nil
+	}
+	return BoundToSource(values, state), nil
 }
 
 func normalizeTimestamps(value ScheduleProjection) ScheduleProjection {

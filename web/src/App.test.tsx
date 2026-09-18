@@ -22,7 +22,7 @@ describe('App', () => {
     vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(new Response(JSON.stringify({
         authenticated: true,
-        user: { userId: 'user-1', organizationId: 'org-1', email: 'person@example.com', displayName: 'Person', role: 'OWNER' },
+        user: { userId: 'user-1', organizationId: 'org-1', email: 'person@example.com', displayName: 'Person', avatarUrl: 'https://lh3.googleusercontent.com/test-photo', role: 'OWNER' },
       }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ connected: false }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ activeWorkspaceId: 'org-1', workspaces: [{ id: 'org-1', name: 'Person Workspace', role: 'OWNER' }] }), { status: 200 }))
@@ -30,7 +30,13 @@ describe('App', () => {
     render(<App />)
 
     expect(await screen.findByRole('status')).toHaveTextContent('Googleアカウントでログインしました。')
-    fireEvent.click(screen.getByRole('button', { name: '山田太郎のアカウントメニュー' }))
+    const account = screen.getByRole('button', { name: 'Personのアカウントメニュー' })
+    expect(within(account).getByRole('img')).toHaveAttribute('src', 'https://lh3.googleusercontent.com/test-photo')
+    expect(screen.queryByRole('button', { name: /山田.*アカウントメニュー/ })).not.toBeInTheDocument()
+    expect(screen.queryByText('15分相談可能')).not.toBeInTheDocument()
+    expect(screen.queryByText('Product Review')).not.toBeInTheDocument()
+    expect(screen.getByText(/表示できる公開状態はありません/)).toBeInTheDocument()
+    fireEvent.click(account)
     expect(screen.getByText('Person')).toBeInTheDocument()
     expect(screen.getByText('OWNER · person@example.com')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'ログアウト' }))
@@ -103,7 +109,7 @@ describe('App', () => {
     fireEvent.click(screen.getByRole('button', { name: '月' }))
     expect(screen.getByRole('button', { name: '次の月' })).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: '山田太郎のアカウントメニュー' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Personのアカウントメニュー' }))
     expect(screen.getByText(/前回の同期に失敗しました（timeout）/)).toBeInTheDocument()
     fireEvent.click(await screen.findByRole('button', { name: 'busy時間を同期' }))
     expect(await screen.findByText('Google Calendarから3件のbusy時間を同期しました。予定名は保存していません。')).toBeInTheDocument()
@@ -172,7 +178,7 @@ describe('App', () => {
     const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
     render(<App />)
 
-    fireEvent.click(screen.getByRole('button', { name: '山田太郎のアカウントメニュー' }))
+    fireEvent.click(screen.getByRole('button', { name: '山田 太郎のアカウントメニュー' }))
     fireEvent.click(screen.getByRole('button', { name: '本人データをエクスポート' }))
 
     expect(await screen.findByRole('status')).toHaveTextContent('本人データを安全にエクスポートしました。')
@@ -581,7 +587,7 @@ describe('App', () => {
 
     render(<App />)
     expect(await screen.findByText('Googleアカウントでログインしました。')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '山田太郎のアカウントメニュー' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Personのアカウントメニュー' }))
     fireEvent.click(screen.getByRole('button', { name: 'アカウントを削除' }))
 
     expect(screen.getByRole('dialog', { name: 'アカウントを完全に削除' })).toBeInTheDocument()

@@ -5,6 +5,7 @@ import { CalendarSyncStatus } from './CalendarSyncStatus'
 import { AccountAvatar } from './AccountAvatar'
 import { RescheduleMeeting } from './RescheduleMeeting'
 import { LocalPlanning } from './LocalPlanningPanel'
+import { PlanningRateLimitError } from './localPlanning'
 import type { RescheduleCommand, RescheduleProposal } from './RescheduleMeeting'
 import { sharingPolicyError, type SharingPolicyDraft } from './sharingPolicy'
 
@@ -1341,6 +1342,7 @@ function App() {
                         const response = await apiFetch(`${apiURL}/api/v1/requests/${encodeURIComponent(item.id)}/planning-preview`, {
                           signal, headers: { 'X-Demo-User-ID': activeUserID, 'X-Organization-ID': activeOrganizationID },
                         })
+                        if (response.status === 429) throw new PlanningRateLimitError(response.headers.get('Retry-After'))
                         if (!response.ok) throw new Error('planning preview unavailable')
                         return response.json()
                       }}

@@ -1,4 +1,15 @@
 export type PlanningCandidate = { id: string; startAt: string; endAt: string }
+export class PlanningRateLimitError extends Error {
+  readonly retryAfter: number
+  constructor(header: string | null) {
+    super('planning temporarily limited')
+    const seconds = Number(header ?? '60')
+    this.retryAfter = Number.isFinite(seconds) && seconds > 0 ? Math.min(60, Math.ceil(seconds)) : 60
+  }
+}
+export const planningFailureMessage = (error: unknown, fallback: string) => error instanceof PlanningRateLimitError
+  ? `候補確認の回数上限に達しました。約 ${error.retryAfter} 秒待ってから、閉じて再試行してください。`
+  : fallback
 export type PlanningPreview = { revision: string; expiresAt: string; candidates: PlanningCandidate[] }
 export type PlanningPreference = 'earlier' | 'later'
 export type LocalAvailability = 'unavailable' | 'downloadable' | 'downloading' | 'available'

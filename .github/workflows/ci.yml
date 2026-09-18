@@ -75,6 +75,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Test anonymous authentication deployment checks
+        run: python3 -B -m unittest discover -s .github/scripts -p 'test_*.py'
       - name: Validate production invariants
         shell: bash
         run: |

@@ -183,9 +183,11 @@ jobs:
           for attempt in {1..12}; do
             if curl --fail --silent --show-error --connect-timeout 5 --max-time 15 "${SERVICE_URL}/health" >/dev/null \
               && curl --fail --silent --show-error --connect-timeout 5 --max-time 15 "${SERVICE_URL}/ready" >/dev/null \
-              && curl --fail --silent --show-error --connect-timeout 5 --max-time 15 "${SERVICE_URL}/api/v1/auth/session" \
-                | jq -e --argjson expected "$EXPECTED_DEMO_MODE" \
-                  '.authenticated == false and (.demoMode | type == "boolean") and .demoMode == $expected' >/dev/null; then
+              && SESSION_STATUS=$(curl --silent --show-error --connect-timeout 5 --max-time 15 \
+                --output "${RUNNER_TEMP}/auth-session.json" --write-out '%{http_code}' \
+                "${SERVICE_URL}/api/v1/auth/session") \
+              && python3 .github/scripts/check-auth-response.py "$EXPECTED_DEMO_MODE" "$SESSION_STATUS" \
+                < "${RUNNER_TEMP}/auth-session.json"; then
               exit 0
             fi
             sleep 5

@@ -73,8 +73,9 @@ Grant the runtime service account Secret Accessor on this app's secret only, not
 the entire project. Generate the encryption key once with a cryptographic RNG;
 preserve it when updating OAuth credentials. Do not blindly overwrite an existing
 bundle or key. Pin numeric versions and stage a no-traffic revision before routing
-production traffic. Verify unauthenticated sessions report `demoMode: false`,
-demo headers cannot grant access, and login redirects to the expected Google client
+production traffic. Verify anonymous sessions return HTTP 401 with
+`authenticated: false` and do not enable demo mode, demo headers cannot grant
+access, and login redirects to the expected Google client
 and callback. Account-owner login and separate Calendar consent remain mandatory
 acceptance steps in #76; no anonymous probe substitutes for them.
 

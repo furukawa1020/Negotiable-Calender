@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -25,8 +26,31 @@ func planningFixture() (*stubRequestStore, *stubProjectionStore, *stubOrganizati
 	return &stubRequestStore{value: value}, &stubProjectionStore{values: []projection.ScheduleProjection{segment}}, &stubOrganizationStore{}
 }
 
+type boundedPlanningStub struct {
+	*stubRequestStore
+	projections  *stubProjectionStore
+	reads, loads int
+}
+
+func (s *boundedPlanningStub) GetForUser(ctx context.Context, id, user string) (req.CoordinationRequest, error) {
+	s.reads++
+	return s.stubRequestStore.GetForUser(ctx, id, user)
+}
+
+func (s *boundedPlanningStub) LoadPlanningSources(ctx context.Context, target, requester string, from, to time.Time) ([]projection.ScheduleProjection, []req.CoordinationRequest, error) {
+	s.loads++
+	if s.projections.err != nil {
+		return nil, nil, s.projections.err
+	}
+	if s.err != nil {
+		return nil, nil, s.err
+	}
+	return s.projections.values, s.values, nil
+}
+
 func planningCall(requests *stubRequestStore, projections *stubProjectionStore, organizations *stubOrganizationStore, user, org string) *httptest.ResponseRecorder {
-	handler := New(&stubDatabase{}, &stubPolicyStore{}, projections, organizations, requests, "http://localhost:5173", slog.New(slog.NewTextHandler(io.Discard, nil)))
+	store := &boundedPlanningStub{stubRequestStore: requests, projections: projections}
+	handler := New(&stubDatabase{}, &stubPolicyStore{}, projections, organizations, store, "http://localhost:5173", slog.New(slog.NewTextHandler(io.Discard, nil)))
 	r := httptest.NewRequest(http.MethodGet, "/api/v1/requests/private-request/planning-preview", nil)
 	r.Header.Set("X-Demo-User-ID", user)
 	r.Header.Set("X-Organization-ID", org)

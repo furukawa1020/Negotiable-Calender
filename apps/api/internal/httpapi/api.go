@@ -33,16 +33,17 @@ type projectionInvalidator interface {
 }
 
 type API struct {
-	database      databasePinger
-	policies      policy.Store
-	projections   projection.Store
-	organizations organization.Store
-	requests      coordinationrequest.Store
-	notifications notification.Store
-	audits        audit.Store
-	projector     ProjectionRebuilder
-	webOrigin     string
-	logger        *slog.Logger
+	planningBudget planningBudget
+	database       databasePinger
+	policies       policy.Store
+	projections    projection.Store
+	organizations  organization.Store
+	requests       coordinationrequest.Store
+	notifications  notification.Store
+	audits         audit.Store
+	projector      ProjectionRebuilder
+	webOrigin      string
+	logger         *slog.Logger
 }
 
 func New(database databasePinger, policies policy.Store, projections projection.Store, organizations organization.Store, requests coordinationrequest.Store, webOrigin string, logger *slog.Logger) http.Handler {

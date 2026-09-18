@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { abortable, languageOptions, localModel, parseRanking, planningPrompt, rankingSchema, samePlanningSource, validatePreview } from './localPlanning'
+import { abortable, languageOptions, localModel, parseRanking, planningFailureMessage, planningPrompt, rankingSchema, samePlanningSource, validatePreview } from './localPlanning'
 import type { LocalAvailability, LocalSession, PlanningCandidate, PlanningPreference, PlanningPreview } from './localPlanning'
 
 type Props = { loadPreview: (signal: AbortSignal) => Promise<PlanningPreview> }
@@ -33,8 +33,8 @@ export function LocalPlanning({ loadPreview }: Props) {
       const status = model ? await abortable(model.availability(languageOptions).catch(() => 'unavailable' as const), controller.signal) : 'unavailable'
       if (controller.signal.aborted) return
       setPreview(validatePreview(fresh)); setAvailability(status)
-    } catch {
-      if (!controller.signal.aborted) setError('候補を確認できません。依頼・同期状態を更新して再試行してください。')
+    } catch (error) {
+      if (!controller.signal.aborted) setError(planningFailureMessage(error, '候補を確認できません。依頼・同期状態を更新して再試行してください。'))
     } finally { window.clearTimeout(timer); if (active.current === controller) { setBusy(false); if (controller.signal.aborted) setError('候補確認を中断しました。閉じて再試行してください。') } }
   }
   const compare = async () => {
@@ -64,8 +64,8 @@ export function LocalPlanning({ loadPreview }: Props) {
       const after = validatePreview(await abortable(loadPreview(controller.signal), controller.signal))
       if (!samePlanningSource(preview, after) || controller.signal.aborted) throw new Error('source changed')
       setRanking(selected)
-    } catch {
-      if (!controller.signal.aborted) setError('AI の比較を完了できませんでした。候補や空き状況が変わった可能性もあります。下の通常の候補をご利用ください。')
+    } catch (error) {
+      if (!controller.signal.aborted) setError(planningFailureMessage(error, 'AI の比較を完了できませんでした。候補や空き状況が変わった可能性もあります。下の通常の候補をご利用ください。'))
     } finally {
       window.clearTimeout(timer)
       controller.signal.removeEventListener('abort', destroy)

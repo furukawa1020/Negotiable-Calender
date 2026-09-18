@@ -1,13 +1,16 @@
 package httpapi
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/aiplanning"
@@ -29,6 +32,19 @@ func (api *API) getPlanningPreview(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 401, map[string]string{"error": "request identity is required"})
 		return
 	}
+	if allowed, retry := api.planningBudget.allow(userID, time.Now()); !allowed {
+		w.Header().Set("Retry-After", strconv.Itoa(max(1, int(math.Ceil(retry.Seconds())))))
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "planning request limit reached"})
+		return
+	}
+	sources, supported := api.requests.(planningSourceStore)
+	if !supported {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "bounded planning unavailable"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	r = r.WithContext(ctx)
 	value, err := api.requests.GetForUser(r.Context(), r.PathValue("requestId"), userID)
 	if errors.Is(err, coordinationrequest.ErrNotFound) {
 		writeJSON(w, 404, map[string]string{"error": "request not found"})
@@ -77,23 +93,10 @@ func (api *API) getPlanningPreview(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 409, map[string]string{"error": "planning range too large"})
 		return
 	}
-	segments, err := api.projections.List(r.Context(), userID, from, to)
-	if err != nil || len(segments) > 10000 {
-		writeJSON(w, 503, map[string]string{"error": "availability cannot be verified"})
+	segments, bookings, err := sources.LoadPlanningSources(ctx, userID, value.RequesterUserID, from, to)
+	if err != nil {
+		writeJSON(w, 503, map[string]string{"error": "bounded planning sources cannot be verified"})
 		return
-	}
-	bookings := []coordinationrequest.CoordinationRequest{}
-	for _, actor := range []string{value.RequesterUserID, value.TargetUserID} {
-		rows, err := api.requests.ListForUser(r.Context(), actor)
-		if err != nil || len(rows) > 5000 {
-			writeJSON(w, 503, map[string]string{"error": "booking state cannot be verified"})
-			return
-		}
-		for _, row := range rows {
-			if row.Status == coordinationrequest.Accepted {
-				bookings = append(bookings, row)
-			}
-		}
 	}
 	sort.Slice(segments, func(i, j int) bool { return segments[i].ID < segments[j].ID })
 	sort.Slice(bookings, func(i, j int) bool { return bookings[i].ID < bookings[j].ID })

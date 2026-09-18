@@ -68,6 +68,7 @@ func TestPostgresAtomicConfirmation(t *testing.T) {
 		end := at.Add(30 * time.Minute)
 		return coordinationrequest.CoordinationRequest{ID: id, OrganizationID: "org", RequesterUserID: requester, TargetUserID: target, Type: coordinationrequest.Meeting, Title: "Synthetic", DurationMinutes: 30, DeadlineAt: now.Add(24 * time.Hour), SyncPreference: coordinationrequest.Either, Priority: coordinationrequest.PriorityNormal, Status: coordinationrequest.Suggested, CreatedAt: now, UpdatedAt: now, Options: []coordinationrequest.Option{{ID: id + "-option", RequestID: id, Type: coordinationrequest.OptionMeeting, StartAt: &at, EndAt: &end, CreatedAt: now}}}
 	}
+	testPostgresConfirmationEffects(t, ctx, db, store, fixture, now)
 	testPostgresReschedule(t, ctx, db, store, fixture, now)
 	t.Run("confirmed-cancellation", func(t *testing.T) {
 		for i, actor := range []string{"alice", "bob"} {
@@ -109,7 +110,7 @@ func TestPostgresAtomicConfirmation(t *testing.T) {
 			if err != nil || got.Status != coordinationrequest.Cancelled || got.AcceptedOptionID != value.Options[0].ID {
 				t.Fatal("wrong cancelled state")
 			}
-			for _, query := range []string{"SELECT count(*) FROM notifications WHERE request_id=$1", "SELECT count(*) FROM audit_logs WHERE resource_id=$1"} {
+			for _, query := range []string{"SELECT count(*) FROM notifications WHERE request_id=$1 AND type='request_cancelled'", "SELECT count(*) FROM audit_logs WHERE resource_id=$1 AND action='request_cancelled'"} {
 				var count int
 				if err := db.QueryRowContext(ctx, query, value.ID).Scan(&count); err != nil || count != 1 {
 					t.Fatalf("effects=%d err=%v", count, err)
@@ -117,7 +118,7 @@ func TestPostgresAtomicConfirmation(t *testing.T) {
 			}
 			note, _ := coordinationrequest.ConfirmedCancellationEffects(value, actor, now)
 			var recipient string
-			if err := db.QueryRowContext(ctx, "SELECT user_id FROM notifications WHERE request_id=$1", value.ID).Scan(&recipient); err != nil || recipient != note.UserID {
+			if err := db.QueryRowContext(ctx, "SELECT user_id FROM notifications WHERE request_id=$1 AND type='request_cancelled'", value.ID).Scan(&recipient); err != nil || recipient != note.UserID {
 				t.Fatal("wrong recipient")
 			}
 			replacement := fixture("replacement-"+actor, "carol", "bob", *value.Options[0].StartAt)
@@ -149,7 +150,7 @@ func TestPostgresAtomicConfirmation(t *testing.T) {
 			t.Fatal("partial cancellation")
 		}
 		var count int
-		if err := db.QueryRowContext(ctx, "SELECT count(*) FROM notifications WHERE request_id=$1", value.ID).Scan(&count); err != nil || count != 0 {
+		if err := db.QueryRowContext(ctx, "SELECT count(*) FROM notifications WHERE request_id=$1 AND type='request_cancelled'", value.ID).Scan(&count); err != nil || count != 0 {
 			t.Fatal("partial notification")
 		}
 	})

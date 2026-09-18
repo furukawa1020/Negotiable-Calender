@@ -61,11 +61,11 @@ func TestConfirmedCancellationAtomicLifecycle(t *testing.T) {
 				t.Fatal("reservation retained")
 			}
 			note, event := coordinationrequest.ConfirmedCancellationEffects(value, actor, now)
-			notes, err := b.Client.Collection("users").Doc(note.UserID).Collection("notifications").Documents(ctx).GetAll()
+			notes, err := b.Client.Collection("users").Doc(note.UserID).Collection("notifications").Where("Type", "==", note.Type).Documents(ctx).GetAll()
 			if err != nil || len(notes) != 1 || notes[0].Ref.ID != note.ID {
 				t.Fatalf("notes=%d err=%v", len(notes), err)
 			}
-			audits, err := b.Client.Collection("organizations").Doc(event.OrganizationID).Collection("auditLogs").Documents(ctx).GetAll()
+			audits, err := b.Client.Collection("organizations").Doc(event.OrganizationID).Collection("auditLogs").Where("Action", "==", event.Action).Documents(ctx).GetAll()
 			if err != nil || len(audits) != 1 || audits[0].Ref.ID != event.ID {
 				t.Fatal("audit missing or duplicated")
 			}

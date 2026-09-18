@@ -74,7 +74,7 @@ func TestRescheduleAtomicSwapAndReplay(t *testing.T) {
 				t.Fatal("wrong reservation", err)
 			}
 			audits, err := b.Client.Collection("organizations").Doc(value.OrganizationID).Collection("auditLogs").Documents(ctx).GetAll()
-			if err != nil || len(audits) != 2 {
+			if err != nil || len(audits) != 3 {
 				t.Fatal("duplicate/missing effects")
 			}
 			reuse := confirmationRequest("reuse", "carol", "bob", now, start)

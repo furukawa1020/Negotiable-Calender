@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"errors"
 	coordinationrequest "github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/request"
 	"io"
 	"log/slog"
@@ -14,6 +15,27 @@ import (
 type confirmationErrorStore struct {
 	stubRequestStore
 	responseErr error
+}
+
+func TestAcceptanceHTTPDoesNotWriteTransactionalEffects(t *testing.T) {
+	for _, failed := range []bool{false, true} {
+		store := &confirmationErrorStore{}
+		store.value = coordinationrequest.CoordinationRequest{ID: "r", TargetUserID: "bob", RequesterUserID: "alice"}
+		want := 200
+		if failed {
+			store.responseErr = errors.New("synthetic storage failure")
+			want = 500
+		}
+		notes, audits := &stubNotificationStore{}, &stubAuditStore{}
+		handler := NewWithStores(nil, nil, nil, nil, store, notes, audits, "", slog.New(slog.NewTextHandler(io.Discard, nil)))
+		r := httptest.NewRequest(http.MethodPost, "/api/v1/requests/r/accept", strings.NewReader(`{"optionId":"o"}`))
+		r.Header.Set("X-Demo-User-ID", "bob")
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, r)
+		if w.Code != want || len(notes.values) != 0 || len(audits.values) != 0 {
+			t.Fatalf("failed=%v status=%d notes=%d audit=%d", failed, w.Code, len(notes.values), len(audits.values))
+		}
+	}
 }
 
 func (s *confirmationErrorStore) Respond(context.Context, string, string, coordinationrequest.Status, string) error {

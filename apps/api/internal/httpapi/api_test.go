@@ -1006,8 +1006,8 @@ func TestCoordinationRequestAcceptsSelectedOptionAsTarget(t *testing.T) {
 	if store.respondID != "request-1" || store.respondTarget != "manager-1" || store.respondStatus != coordinationrequest.Accepted || store.respondOption != "option-1" {
 		t.Fatalf("unexpected accept call: %#v", store)
 	}
-	if len(notifications.values) != 1 || notifications.values[0].UserID != "member-1" || notifications.values[0].Type != notification.RequestAccepted {
-		t.Fatalf("expected requester notification, got %#v", notifications.values)
+	if len(notifications.values) != 0 {
+		t.Fatalf("HTTP repeated transactional acceptance notification: %#v", notifications.values)
 	}
 }
 

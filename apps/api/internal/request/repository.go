@@ -19,6 +19,8 @@ type Store interface {
 	ListForUser(context.Context, string) ([]CoordinationRequest, error)
 	GetForUser(context.Context, string, string) (CoordinationRequest, error)
 	Cancel(context.Context, string, string) error
+	// Accepted commits the reservation, requester notification and audit atomically.
+	// ErrAlreadyAccepted means a replay; callers must not emit acceptance effects.
 	Respond(context.Context, string, string, Status, string) error
 	RespondAsync(context.Context, string, string, string) error
 	Suggest(context.Context, string, string, Option) error

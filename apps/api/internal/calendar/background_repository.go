@@ -50,6 +50,7 @@ func (store *PostgresStore) ClaimDueConnections(ctx context.Context, now time.Ti
 	if limit <= 0 {
 		limit = 10
 	}
+	limit = min(limit, 20)
 	if lease <= 0 {
 		lease = defaultClaimLease
 	}

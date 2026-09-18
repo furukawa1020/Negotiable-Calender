@@ -33,6 +33,8 @@ Displayed times use the device timezone; exported UTC values preserve the instan
   source-sync freshness and distributed Google writeback remain separate work.
 - Full negotiation end-to-end coverage, including non-meeting outcomes.
 - Live Google consent and acceptance (#76), reliable scheduled sync (#89).
+  The [bounded external sync trigger](scheduled-calendar-sync.md) is implemented;
+  approved production identity provisioning/activation remains a separate gate.
 - Optional direct Google writeback only with additional explicit consent and
   idempotent retry/cancellation semantics.
 

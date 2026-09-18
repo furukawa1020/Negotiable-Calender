@@ -104,6 +104,9 @@ jobs:
 
       - id: configuration
         name: Validate existing authentication mode
+        env:
+          SYNC_ENABLED: ${{ vars.CALENDAR_SYNC_ENABLED }}
+          SYNC_SUBJECT: ${{ vars.CALENDAR_SYNC_SUBJECT }}
         shell: bash
         run: |
           MODE=$(gcloud run services describe "${SERVICE}" \
@@ -114,6 +117,17 @@ jobs:
             *) echo "::error::DEMO_MODE must explicitly be true or false"; exit 1 ;;
           esac
           echo "demo_mode=$MODE" >> "$GITHUB_OUTPUT"
+          if [[ -n "$SYNC_SUBJECT" && ! "$SYNC_SUBJECT" =~ ^[0-9]{10,30}$ ]]; then
+            echo '::error::Invalid dedicated sync subject'; exit 1
+          fi
+          case "$SYNC_ENABLED" in
+            true)
+              [[ "$SYNC_SUBJECT" =~ ^[0-9]{10,30}$ ]] || { echo '::error::Dedicated sync subject is required'; exit 1; }
+              echo 'sync_mode=external' >> "$GITHUB_OUTPUT"
+              ;;
+            false|'') echo 'sync_mode=off' >> "$GITHUB_OUTPUT" ;;
+            *) echo '::error::CALENDAR_SYNC_ENABLED must be true or false'; exit 1 ;;
+          esac
 
       - name: Configure Artifact Registry authentication
         run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
@@ -133,6 +147,9 @@ jobs:
           sbom: true
 
       - name: Deploy the exact image digest
+        env:
+          SYNC_MODE: ${{ steps.configuration.outputs.sync_mode }}
+          SYNC_SUBJECT: ${{ vars.CALENDAR_SYNC_SUBJECT }}
         shell: bash
         run: |
           IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/${SERVICE}@${{ steps.image.outputs.digest }}"
@@ -155,7 +172,7 @@ jobs:
             --startup-probe="httpGet.path=/ready,initialDelaySeconds=0,timeoutSeconds=2,periodSeconds=5,failureThreshold=12" \
             --liveness-probe="httpGet.path=/health,initialDelaySeconds=0,timeoutSeconds=2,periodSeconds=30,failureThreshold=3" \
             --allow-unauthenticated \
-            --update-env-vars="STORAGE_BACKEND=firestore,GCP_PROJECT_ID=${PROJECT_ID},COOKIE_SECURE=true,WEB_ROOT=/app/web,WEB_ORIGIN=${SERVICE_URL}" \
+            --update-env-vars="STORAGE_BACKEND=firestore,GCP_PROJECT_ID=${PROJECT_ID},COOKIE_SECURE=true,WEB_ROOT=/app/web,WEB_ORIGIN=${SERVICE_URL},CALENDAR_SYNC_MODE=${SYNC_MODE},CALENDAR_SYNC_AUDIENCE=${SERVICE_URL}/internal/calendar/sync-due,CALENDAR_SYNC_SUBJECT=${SYNC_SUBJECT},CALENDAR_SYNC_EMAIL=negotiable-calendar-sync@${PROJECT_ID}.iam.gserviceaccount.com" \
             --quiet
 
       - name: Verify the public revision

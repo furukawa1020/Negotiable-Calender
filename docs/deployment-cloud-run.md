@@ -15,6 +15,11 @@ quotas; quota settings are not an absolute spending cap.
 
 ## Automatic deployment
 
+Calendar automation is separately gated and request-scoped; see
+[scheduled calendar sync](scheduled-calendar-sync.md). It remains off until the
+dedicated caller/index are approved, provisioned and enabled through repository
+variables. Deploying code alone does not activate Google Calendar synchronization.
+
 `.github/workflows/deploy-cloud-run.yml` verifies the API and Web application,
 builds one immutable image with provenance and an SBOM, pushes it to Artifact
 Registry, deploys that exact digest, and smoke-tests the public service.

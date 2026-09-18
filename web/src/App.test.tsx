@@ -104,14 +104,14 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: '次の月' })).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '山田太郎のアカウントメニュー' }))
-    expect(screen.getByText(/前回の自動同期に失敗しました（timeout）/)).toBeInTheDocument()
+    expect(screen.getByText(/前回の同期に失敗しました（timeout）/)).toBeInTheDocument()
     fireEvent.click(await screen.findByRole('button', { name: 'busy時間を同期' }))
     expect(await screen.findByText('Google Calendarから3件のbusy時間を同期しました。予定名は保存していません。')).toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining('/api/v1/me/private-events?'),
       expect.objectContaining({ credentials: 'include' }),
     )
-    expect(screen.queryByText(/前回の自動同期に失敗しました/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/前回の同期に失敗しました/)).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Calendar接続を解除' }))
     expect(await screen.findByText('Google Calendarの接続と同期済みbusy時間を削除しました。')).toBeInTheDocument()
     expect(screen.queryByText('Confidential board meeting')).not.toBeInTheDocument()

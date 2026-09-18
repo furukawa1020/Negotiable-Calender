@@ -267,23 +267,30 @@ func (store *Calendar) ClaimDueConnections(ctx context.Context, now time.Time, l
 	if lease <= 0 {
 		lease = 2 * time.Minute
 	}
-	iter := store.Client.Collection("calendarConnections").Documents(ctx)
-	defer iter.Stop()
+	limit = min(limit, 20)
+	collection := store.Client.Collection("calendarConnections")
+	// Legacy explicit-null schedules are bounded too; missing fields require reconnect.
+	queries := []firestore.Query{
+		collection.Where("ReconnectRequired", "==", false).Where("NextAttemptAt", "==", nil).Limit(limit),
+		collection.Where("ReconnectRequired", "==", false).Where("NextAttemptAt", "<=", now).OrderBy("NextAttemptAt", firestore.Asc).Limit(limit * 4),
+	}
 	values := []calendarintegration.Connection{}
-	for {
-		doc, err := iter.Next()
-		if errors.Is(err, iterator.Done) {
-			break
-		}
+	for _, query := range queries {
+		docs, err := query.Documents(ctx).GetAll()
 		if err != nil {
-			return nil, fmt.Errorf("list due calendar connections: %w", err)
+			return nil, fmt.Errorf("query due calendar connections: %w", err)
 		}
-		var value calendarintegration.Connection
-		if err := doc.DataTo(&value); err != nil {
-			return nil, fmt.Errorf("decode calendar connection: %w", err)
-		}
-		if !value.ReconnectRequired && (value.SyncLeaseUntil == nil || !value.SyncLeaseUntil.After(now)) && (value.NextAttemptAt == nil || !value.NextAttemptAt.After(now)) {
-			values = append(values, value)
+		for _, doc := range docs {
+			var value calendarintegration.Connection
+			if err := doc.DataTo(&value); err != nil {
+				return nil, fmt.Errorf("decode due calendar connection: %w", err)
+			}
+			if value.UserID != doc.Ref.ID {
+				return nil, fmt.Errorf("calendar connection identity mismatch")
+			}
+			if !value.ReconnectRequired && (value.SyncLeaseUntil == nil || !value.SyncLeaseUntil.After(now)) {
+				values = append(values, value)
+			}
 		}
 	}
 	sort.Slice(values, func(i, j int) bool {
@@ -298,14 +305,17 @@ func (store *Calendar) ClaimDueConnections(ctx context.Context, now time.Time, l
 		}
 		return values[i].NextAttemptAt.Before(*values[j].NextAttemptAt)
 	})
-	if len(values) > limit {
-		values = values[:limit]
-	}
 	claimed := make([]calendarintegration.Connection, 0, len(values))
 	for _, candidate := range values {
+		if len(claimed) == limit {
+			break
+		}
 		ref := store.Client.Collection("calendarConnections").Doc(candidate.UserID)
 		var current calendarintegration.Connection
 		err := store.Client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
+			if err := store.guardAccountActive(ctx, tx, candidate.UserID); err != nil {
+				return err
+			}
 			doc, err := tx.Get(ref)
 			if err != nil {
 				return err
@@ -313,7 +323,7 @@ func (store *Calendar) ClaimDueConnections(ctx context.Context, now time.Time, l
 			if err := doc.DataTo(&current); err != nil {
 				return err
 			}
-			if current.ReconnectRequired || (current.SyncLeaseUntil != nil && current.SyncLeaseUntil.After(now)) || (current.NextAttemptAt != nil && current.NextAttemptAt.After(now)) {
+			if current.UserID != candidate.UserID || current.ReconnectRequired || (current.SyncLeaseUntil != nil && current.SyncLeaseUntil.After(now)) || (current.NextAttemptAt != nil && current.NextAttemptAt.After(now)) {
 				return errClaimLost
 			}
 			next := now.Add(lease)
@@ -321,7 +331,7 @@ func (store *Calendar) ClaimDueConnections(ctx context.Context, now time.Time, l
 			current.NextAttemptAt = &next
 			return tx.Set(ref, current)
 		})
-		if errors.Is(err, errClaimLost) {
+		if errors.Is(err, errClaimLost) || errors.Is(err, errAccountDeleting) || firestoreNotFound(err) {
 			continue
 		}
 		if err != nil {

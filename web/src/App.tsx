@@ -4,6 +4,7 @@ import { ConfirmedMeeting } from './ConfirmedMeeting'
 import { CalendarSyncStatus } from './CalendarSyncStatus'
 import { AccountAvatar } from './AccountAvatar'
 import { RescheduleMeeting } from './RescheduleMeeting'
+import { LocalPlanning } from './LocalPlanningPanel'
 import type { RescheduleCommand, RescheduleProposal } from './RescheduleMeeting'
 import { sharingPolicyError, type SharingPolicyDraft } from './sharingPolicy'
 
@@ -1334,6 +1335,16 @@ function App() {
                     <p>{item.requesterUserId} · {item.durationMinutes}分 · 期限 {formatDateTime(item.deadlineAt)}</p>
                   </div>
                   <div className="option-list" aria-label={`${item.title}の候補`}>
+                    {authUser && item.targetUserId === activeUserID && item.status === 'suggested' ? <LocalPlanning
+                      key={JSON.stringify([activeUserID, activeOrganizationID, item.id, item.deadlineAt, item.options])}
+                      loadPreview={async (signal) => {
+                        const response = await apiFetch(`${apiURL}/api/v1/requests/${encodeURIComponent(item.id)}/planning-preview`, {
+                          signal, headers: { 'X-Demo-User-ID': activeUserID, 'X-Organization-ID': activeOrganizationID },
+                        })
+                        if (!response.ok) throw new Error('planning preview unavailable')
+                        return response.json()
+                      }}
+                    /> : null}
                     <ConfirmedMeeting request={item} onDownload={downloadConfirmedMeeting} onCancel={cancelConfirmedMeeting} />
                     <RescheduleMeeting request={item} actor={activeUserID} onChange={rescheduleMeeting} />
                     {item.options.map((option) => (

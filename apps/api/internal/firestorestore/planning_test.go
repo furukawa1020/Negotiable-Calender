@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"reflect"
 	"testing"
 	"time"
@@ -14,6 +15,8 @@ import (
 	request "github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/request"
 	"google.golang.org/api/option"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 )
 
 // Observe actual SDK RPCs, not the lengths of post-query application slices.
@@ -53,13 +56,25 @@ func (s *planningTraceStream) RecvMsg(m any) error {
 func planningReader(t *testing.T, ctx context.Context, trace *planningReadTrace) *Request {
 	t.Helper()
 	intercept := func(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, streamer grpc.Streamer, opts ...grpc.CallOption) (grpc.ClientStream, error) {
+		ctx = metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer owner")
 		stream, err := streamer(ctx, desc, cc, method, opts...)
 		if err != nil {
 			return nil, err
 		}
 		return &planningTraceStream{ClientStream: stream, trace: trace}, nil
 	}
-	client, err := firestore.NewClient(ctx, "demo-nc-"+safeDigest(t.Name())[:16], option.WithGRPCDialOption(grpc.WithStreamInterceptor(intercept)))
+	// The SDK creates its own emulator connection and ignores dial options.
+	// Pass the traced connection itself so assertions observe real RPCs.
+	address := os.Getenv("FIRESTORE_EMULATOR_HOST")
+	if address == "" {
+		t.Fatal("emulator required; never trace production")
+	}
+	conn, err := grpc.NewClient("passthrough:///"+address, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithStreamInterceptor(intercept))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { conn.Close() })
+	client, err := firestore.NewClient(ctx, "demo-nc-"+safeDigest(t.Name())[:16], option.WithGRPCConn(conn))
 	if err != nil {
 		t.Fatal(err)
 	}

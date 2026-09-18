@@ -70,7 +70,7 @@ func TestRescheduleAtomicSwapAndReplay(t *testing.T) {
 				t.Fatal("not swapped")
 			}
 			ranges, err := coordinationrequest.ConfirmedRanges([]coordinationrequest.CoordinationRequest{got})
-			if err != nil || len(ranges) != 1 || !ranges[0].StartAt.Equal(command.StartAt) {
+			if err != nil || len(ranges) != 1 || !ranges[0].StartAt.Equal(command.StartAt.Truncate(time.Microsecond)) {
 				t.Fatal("wrong reservation", err)
 			}
 			audits, err := b.Client.Collection("organizations").Doc(value.OrganizationID).Collection("auditLogs").Documents(ctx).GetAll()

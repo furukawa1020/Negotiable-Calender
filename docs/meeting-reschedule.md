@@ -9,7 +9,9 @@ may accept or decline; only the proposer may withdraw. One proposal can be activ
 decline, withdraw), proposalId, expectedOptionId and, for propose, startAt (RFC3339).
 The proposal ID is a client-generated unique 8–80 character ASCII alphanumeric,
 hyphen or underscore ID. The UI keeps this ID for retries of the same submission.
-The original duration and deadline are retained; a new end after that deadline,
+Start timestamps are normalized to UTC microseconds for cross-store replay equality.
+The confirmed option's actual duration (not the initial requested duration) and
+the request deadline are retained; a new end after that deadline,
 an unchanged time, a started original/new meeting and stale selection fail closed.
 
 ## Atomicity and concurrency

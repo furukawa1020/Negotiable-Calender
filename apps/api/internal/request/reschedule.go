@@ -45,6 +45,8 @@ func ApplyReschedule(value *CoordinationRequest, actor string, command Reschedul
 	}
 	p := value.RescheduleProposal
 	if command.Action == "propose" {
+		// Match the timestamp precision shared by PostgreSQL and Firestore.
+		command.StartAt = command.StartAt.UTC().Truncate(time.Microsecond)
 		if p != nil && p.ID == command.ProposalID {
 			for _, option := range value.Options {
 				if option.ID == p.ID && option.StartAt != nil && option.StartAt.Equal(command.StartAt) && p.ProposerUserID == actor && p.ExpectedOptionID == command.ExpectedOptionID && p.Status == "proposed" {
@@ -65,15 +67,20 @@ func ApplyReschedule(value *CoordinationRequest, actor string, command Reschedul
 			}
 		}
 		start := command.StartAt.UTC()
-		end := start.Add(time.Duration(value.DurationMinutes) * time.Minute)
-		option := Option{ID: command.ProposalID, RequestID: value.ID, Type: OptionMeeting, StartAt: &start, EndAt: &end, CreatedAt: now}
-		if command.StartAt.IsZero() || value.DurationMinutes <= 0 || option.Validate() != nil || !start.After(now) || end.After(value.DeadlineAt) {
-			return ErrRescheduleInvalid
-		}
+		var duration time.Duration
 		for _, old := range value.Options {
-			if old.ID == value.AcceptedOptionID && old.StartAt != nil && old.StartAt.Equal(start) {
-				return ErrRescheduleInvalid
+			if old.ID == value.AcceptedOptionID && old.Type == OptionMeeting && old.Validate() == nil {
+				duration = old.EndAt.Sub(*old.StartAt)
+				if old.StartAt.Truncate(time.Microsecond).Equal(start) {
+					return ErrRescheduleInvalid
+				}
+				break
 			}
+		}
+		end := start.Add(duration)
+		option := Option{ID: command.ProposalID, RequestID: value.ID, Type: OptionMeeting, StartAt: &start, EndAt: &end, CreatedAt: now}
+		if command.StartAt.IsZero() || duration <= 0 || option.Validate() != nil || !start.After(now) || end.After(value.DeadlineAt) {
+			return ErrRescheduleInvalid
 		}
 		value.Options = append(value.Options, option)
 		value.RescheduleProposal = &RescheduleProposal{ID: command.ProposalID, ProposerUserID: actor, ExpectedOptionID: command.ExpectedOptionID, Status: "proposed"}

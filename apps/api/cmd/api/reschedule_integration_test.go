@@ -25,7 +25,7 @@ func testPostgresReschedule(t *testing.T, ctx context.Context, db *sql.DB, store
 			if scenario == "bob" {
 				actor, other = other, actor
 			}
-			command := coordinationrequest.RescheduleCommand{Action: "propose", ProposalID: "proposal-" + scenario, ExpectedOptionID: value.Options[0].ID, StartAt: start.Add(30 * time.Minute)}
+			command := coordinationrequest.RescheduleCommand{Action: "propose", ProposalID: "proposal-" + scenario, ExpectedOptionID: value.Options[0].ID, StartAt: start.Add(30 * time.Minute).Add(123456789 * time.Nanosecond)}
 			if err := store.Reschedule(ctx, value.ID, actor, command); err != nil {
 				t.Fatal(err)
 			}

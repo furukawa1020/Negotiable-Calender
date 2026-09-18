@@ -16,12 +16,18 @@ func TestRescheduleStateMachine(t *testing.T) {
 	for _, actor := range []string{"alice", "bob"} {
 		t.Run(actor, func(t *testing.T) {
 			value := rescheduleFixture(now)
+			// A manually suggested confirmed option can differ from the requested duration.
+			value.DurationMinutes = 90
 			command := RescheduleCommand{Action: "propose", ProposalID: "proposal-new", ExpectedOptionID: "original", StartAt: now.Add(2 * time.Hour)}
 			if err := ApplyReschedule(&value, actor, command, now); err != nil {
 				t.Fatal(err)
 			}
 			if value.AcceptedOptionID != "original" || value.Status != Accepted {
 				t.Fatal("old reservation lost")
+			}
+			proposed := value.Options[len(value.Options)-1]
+			if proposed.EndAt.Sub(*proposed.StartAt) != 30*time.Minute {
+				t.Fatal("confirmed duration changed")
 			}
 			if err := ApplyReschedule(&value, actor, command, now); !errors.Is(err, ErrRescheduleRepeated) {
 				t.Fatal(err)

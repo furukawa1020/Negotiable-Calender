@@ -16,7 +16,8 @@ export function RescheduleMeeting({ request, actor, onChange }: Props) {
   const [openedAt] = useState(() => Date.now())
   const retry = useRef<{ start: string; expected: string; id: string } | null>(null)
   const selected = request.options.find((option) => option.id === request.acceptedOptionId && option.type === 'meeting')
-  if (request.status !== 'accepted' || !selected?.startAt || Date.parse(selected.startAt) <= openedAt) return null
+  if (request.status !== 'accepted' || !selected?.startAt || !selected.endAt || !Number.isFinite(Date.parse(selected.startAt)) || !Number.isFinite(Date.parse(selected.endAt)) || Date.parse(selected.startAt) <= openedAt || Date.parse(selected.endAt) <= Date.parse(selected.startAt)) return null
+  const durationMinutes = (Date.parse(selected.endAt) - Date.parse(selected.startAt)) / 60000
   const proposal = request.rescheduleProposal
   const pending = proposal?.status === 'proposed'
   const proposed = request.options.find((option) => option.id === proposal?.id)
@@ -48,14 +49,14 @@ export function RescheduleMeeting({ request, actor, onChange }: Props) {
     <strong>日時変更</strong>
     <p>相手が承認するまでは元の予約を維持します。提案先の時間はまだ予約されません。</p>
     {pending ? <>
-      <p>変更提案: {proposed?.startAt ? new Date(proposed.startAt).toLocaleString('ja-JP') : '日時を確認できません'}（{request.durationMinutes}分）</p>
+      <p>変更提案: {proposed?.startAt ? new Date(proposed.startAt).toLocaleString('ja-JP') : '日時を確認できません'}（{durationMinutes}分）</p>
       {proposal.proposerUserId === actor ? <button type="button" disabled={busy} onClick={() => respond('withdraw')}>変更提案を撤回</button> : <>
         <button type="button" disabled={busy || !proposed?.startAt} onClick={() => respond('accept')}>この日時への変更を承認</button>
         <button type="button" disabled={busy} onClick={() => respond('decline')}>変更提案を辞退</button>
       </>}
     </> : editing ? <form onSubmit={propose}>
       <label>変更後の開始日時<input name="startAt" type="datetime-local" required disabled={busy} /></label>
-      <p>端末のタイムゾーンで入力してください。所要時間は{request.durationMinutes}分、終了は元の依頼期限（{new Date(request.deadlineAt).toLocaleString('ja-JP')}）までです。</p>
+      <p>端末のタイムゾーンで入力してください。所要時間は{durationMinutes}分、終了は元の依頼期限（{new Date(request.deadlineAt).toLocaleString('ja-JP')}）までです。</p>
       <button type="submit" disabled={busy}>日時変更の提案を送信</button>
       <button type="button" disabled={busy} onClick={() => setEditing(false)}>閉じる</button>
     </form> : <button type="button" disabled={busy} onClick={() => setEditing(true)}>日時変更を提案</button>}

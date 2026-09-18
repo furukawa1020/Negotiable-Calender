@@ -4,40 +4,39 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="予定の詳細を公開せず、相談できる時間を共有する Negotiable Calendar。サービス紹介と現在の提供状況。">
-  <title>Negotiable Calendar — 予定ではなく、相談できる時間を。</title>
+  <title>Negotiable Calendar — カレンダー共有と相談の調整</title>
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
   <a class="skip" href="#main">本文へ移動</a>
-  <header class="site-header wrap">
+  <header class="site-header">
     <a class="brand" href="/" aria-label="Negotiable Calendar ホーム"><span class="brand-mark" aria-hidden="true">N</span>Negotiable Calendar</a>
     <a class="text-link" href="#status">提供状況</a>
   </header>
   <main id="main">
     <section class="hero wrap" aria-labelledby="hero-title">
       <div>
-        <p class="eyebrow">MAKE ROOM FOR A CONVERSATION</p>
-        <h1 id="hero-title">予定ではなく、<br><span>相談できる時間を。</span></h1>
-        <p class="lead">カレンダーを丸ごと見せる必要はありません。<br>「いつ声をかけられるか」を共有して、<br>チームの相談を、もう少し気軽に。</p>
+        <h1 id="hero-title">カレンダー共有と<br>相談の調整</h1>
+        <p class="lead">予定名・参加者・場所を公開せず、相談可能な時間を組織に共有します。依頼の作成から日時の承認、別時間の提案、非同期での回答まで管理できます。</p>
         <a class="button" href="https://negotiable-calendar-480760664246.asia-northeast1.run.app">アプリを開く <span aria-hidden="true">↗</span></a>
         <p class="caption">アプリは別ドメインで開きます。Calendar 連携の一般公開は準備中です。</p>
       </div>
       <div class="availability" aria-label="相談可能性の表示イメージ。実際の予定ではありません。">
-        <div class="card-heading"><span>相談のしやすさ</span><span class="sample">表示イメージ</span></div>
-        <div class="slot"><time>09:00</time><div class="state quiet">集中したい時間</div></div>
-        <div class="slot"><time>10:00</time><div class="state open">相談しやすい時間</div></div>
-        <div class="slot"><time>11:00</time><div class="state maybe">内容によって相談可能</div></div>
-        <div class="private-note">予定のタイトルや場所を、共有画面に出さない。</div>
+        <div class="schedule-heading"><h2>組織に見える状態</h2><span class="sample">表示イメージ</span></div>
+        <div class="schedule-columns"><span>時間</span><span>公開状態</span></div>
+        <div class="slot"><time>09:00</time><div class="state quiet">割り込み非推奨</div></div>
+        <div class="slot"><time>10:00</time><div class="state open">相談可能</div></div>
+        <div class="slot"><time>11:00</time><div class="state maybe">緊急のみ</div></div>
+        <div class="private-note">予定名・参加者・場所は組織に共有されません</div>
       </div>
     </section>
     <section class="features wrap" aria-label="サービスの特徴">
-      <article><span class="number">01 / SHARE</span><h2>詳細は、あなたの手元に。</h2><p>予定名や参加者ではなく、公開ルールから作る相談可能性を組織へ共有します。</p></article>
-      <article><span class="number">02 / NEGOTIATE</span><h2>空き時間だけで決めない。</h2><p>会議や非同期の相談を依頼し、候補・回答を通じて調整するためのサービスです。</p></article>
-      <article><span class="number">03 / CONTROL</span><h2>カレンダー接続は、別の同意で。</h2><p>Google ログインと Calendar の読み取り許可は別です。現在、Google の予定の作成・変更は行いません。</p></article>
+      <article><h2>公開状態の設定</h2><p>勤務時間と共有ルールから、相談可否・割り込み可否を設定します。指定した時間だけ、状態を一時変更することもできます。</p></article>
+      <article><h2>依頼と回答の管理</h2><p>候補日時の承認、別時間の提案、非同期での回答、他の担当者への委譲に対応します。送信した依頼の状態も確認できます。</p></article>
+      <article><h2>Google Calendar 接続</h2><p>Google ログインと Calendar の読み取り許可は別です。現在、Google の予定の作成・変更は行いません。接続の提供状況は下記をご確認ください。</p></article>
     </section>
     <section id="status" class="status wrap" aria-labelledby="status-title">
-      <p class="eyebrow">CURRENT STATUS</p>
-      <h2 id="status-title">一般公開に向けて準備中です。</h2>
+      <h2 id="status-title">提供状況と利用上の制限</h2>
       <p>アプリは公開済みですが、Google Calendar 連携は Google OAuth の公開設定・審査が未完了です。通常の利用者による接続は、現在拒否される場合があります。このページの公開は、Google の審査承認を意味しません。</p>
       <p>同期には遅延があります。アプリ内での予約は、Google Calendar への予定作成や外部カレンダーでの予約を保証するものではありません。</p>
       <p>受信箱に、本人の明示同意後に候補の時刻と希望条件を端末内 AI で比較する機能を実装しました。予定名・参加者・場所は AI に渡さず、AI による予約確定やクラウド AI への自動切り替えも行いません。</p>

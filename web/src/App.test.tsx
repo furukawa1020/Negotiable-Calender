@@ -163,7 +163,7 @@ describe('App', () => {
   it('explains the privacy projection without exposing sample details as shared data', () => {
     render(<App />)
 
-    expect(screen.getByRole('heading', { name: '今日、どう関われるか。' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'カレンダー' })).toBeInTheDocument()
     expect(screen.getByText('イベント名・参加者・場所は組織に共有されません')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '組織に見える状態' })).toBeInTheDocument()
     expect(screen.getByText('15分相談可能')).toBeInTheDocument()
@@ -261,10 +261,11 @@ describe('App', () => {
 
   it('navigates days and switches manager calendar layers', () => {
     render(<App />)
-    const initialDate = screen.getByText(/月|火|水|木|金|土|日/, { selector: '.eyebrow' }).textContent
+    const initialDate = screen.getByText(/月|火|水|木|金|土|日/, { selector: '.calendar-date' }).textContent
     fireEvent.click(screen.getByRole('button', { name: '次の日' }))
-    expect(screen.getByText(/月|火|水|木|金|土|日/, { selector: '.eyebrow' }).textContent).not.toBe(initialDate)
-    fireEvent.click(screen.getByRole('button', { name: 'Private' }))
+    expect(screen.getByText(/月|火|水|木|金|土|日/, { selector: '.calendar-date' }).textContent).not.toBe(initialDate)
+    fireEvent.click(screen.getByRole('button', { name: '自分の予定' }))
+    expect(screen.getByRole('button', { name: '自分の予定' })).toHaveAttribute('aria-pressed', 'true')
     expect(screen.getByLabelText('今日のプライベート予定と公開状態')).toHaveClass('layer-private')
   })
 
@@ -297,7 +298,7 @@ describe('App', () => {
       }), { status: 200 }))
     render(<App />)
     fireEvent.click(screen.getByRole('button', { name: '組織' }))
-    expect(await screen.findByRole('heading', { name: '誰に、どう相談できるか。' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '組織の公開状態' })).toBeInTheDocument()
     expect(await screen.findByRole('heading', { name: '山田 太郎' })).toBeInTheDocument()
     expect(screen.getByText('緊急のみ')).toBeInTheDocument()
     expect(screen.queryByText('Product Review')).not.toBeInTheDocument()
@@ -324,9 +325,9 @@ describe('App', () => {
     }), { status: 201 })).mockResolvedValue(new Response('{}', { status: 200 }))
     render(<App />)
     fireEvent.click(screen.getByRole('button', { name: '依頼' }))
-    expect(await screen.findByRole('heading', { name: '届いた依頼を、余白から選ぶ。' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '受信した依頼' })).toBeInTheDocument()
     expect(await screen.findByRole('heading', { name: '新API設計レビュー' })).toBeInTheDocument()
-    expect(screen.getByText('MEETING')).toBeInTheDocument()
+    expect(screen.getByText('会議')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '委譲する' })).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('別の開始時間'), { target: { value: '2026-08-28T10:00' } })
     fireEvent.change(screen.getByLabelText('終了時間'), { target: { value: '2026-08-28T10:15' } })
@@ -458,7 +459,7 @@ describe('App', () => {
     fireEvent.click(screen.getByRole('button', { name: '依頼をキャンセル' }))
 
     expect(await screen.findByRole('status')).toHaveTextContent('依頼をキャンセルしました。相手にも通知しました。')
-    expect(screen.getByText('更新済み · cancelled')).toBeInTheDocument()
+    expect(screen.getByText('更新済み · キャンセル済み')).toBeInTheDocument()
     expect(globalThis.fetch).toHaveBeenNthCalledWith(1,
       expect.stringContaining('/api/v1/requests?scope=sent'),
       expect.objectContaining({ headers: { 'X-Demo-User-ID': 'demo-member' }, credentials: 'include' }),
@@ -485,7 +486,7 @@ describe('App', () => {
     expect(await screen.findByRole('heading', { name: '承認フロー確認' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '委譲する' }))
     expect(await screen.findByText('demo-member に依頼を委譲しました。')).toBeInTheDocument()
-    expect(screen.getByText('回答済み · delegated')).toBeInTheDocument()
+    expect(screen.getByText('回答済み · 委譲済み')).toBeInTheDocument()
     expect(globalThis.fetch).toHaveBeenCalledWith(
       expect.stringContaining('/api/v1/requests/request-2/delegate'),
       expect.objectContaining({ method: 'POST' }),
@@ -524,7 +525,7 @@ describe('App', () => {
     }), { status: 200 }))
     render(<App />)
     fireEvent.click(screen.getByRole('button', { name: '監査' }))
-    const heading = await screen.findByRole('heading', { name: '共有した事実だけを、記録する。' })
+    const heading = await screen.findByRole('heading', { name: '操作履歴' })
     expect(heading).toBeInTheDocument()
     expect(await screen.findByText('request accepted')).toBeInTheDocument()
     expect(screen.getByText('予定詳細なし')).toBeInTheDocument()
@@ -561,7 +562,7 @@ describe('App', () => {
     expect(await screen.findByRole('status')).toHaveTextContent('非同期で回答しました。依頼者に通知しました。')
     const rendered = screen.getByText(unsafeMessage)
     expect(rendered.querySelector('img')).toBeNull()
-    expect(screen.getByText('回答済み · async')).toBeInTheDocument()
+    expect(screen.getByText('回答済み · 非同期で回答')).toBeInTheDocument()
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
       expect.stringContaining('/api/v1/requests/request-async/async'),

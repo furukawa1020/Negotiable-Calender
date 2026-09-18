@@ -1,5 +1,6 @@
 """Guard the isolated, static-only launch site (no cloud credentials required)."""
 import json
+import re
 from html.parser import HTMLParser
 from pathlib import Path
 import unittest
@@ -83,6 +84,19 @@ class FirebaseHostingTest(unittest.TestCase):
         self.assertIn(f'href="{APP}"', content)
         for disclosure in ("公開設定・審査が未完了", "現在拒否される場合", "表示イメージ", "正式なポリシーの代わりにはしません"):
             self.assertIn(disclosure, content)
+
+    def test_shared_product_tokens_and_no_decorative_card_effects(self):
+        app_css = (ROOT / "web/src/styles.css").read_text(encoding="utf-8")
+        public_css = (self.public / "styles.css").read_text(encoding="utf-8")
+        tokens = lambda css: dict(re.findall(r"(--[a-z-]+):\s*(#[0-9a-f]+);", css))
+        app_tokens, public_tokens = tokens(app_css), tokens(public_css)
+        for name in ("--ink", "--muted", "--line", "--paper", "--canvas", "--chrome",
+                     "--green", "--green-soft", "--yellow", "--yellow-soft", "--red", "--red-soft"):
+            self.assertIn(name, app_tokens)
+            self.assertEqual(app_tokens[name], public_tokens[name])
+        for css in (app_css, public_css):
+            for effect in ("backdrop-filter", "radial-gradient", "linear-gradient", ".eyebrow", ".request-card", ".person-card"):
+                self.assertNotIn(effect, css)
 
 
 if __name__ == "__main__":

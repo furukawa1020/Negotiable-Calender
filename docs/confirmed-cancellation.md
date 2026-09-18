@@ -32,7 +32,7 @@ this change does not guarantee global ordering between all lifecycle notificatio
 - Imported ICS / Google events are **not** deleted or updated. UI and notification
   explain that users must remove these themselves. No Google write scopes added.
 - Changing a confirmed time while preserving the old reservation until replacement
-  succeeds remains future work; cancellation does not implement rescheduling.
+  succeeds is handled separately by [meeting rescheduling](meeting-reschedule.md).
 - The production demo identity mode is not proof of real OAuth acceptance (#76).
 - This completes the cancellation slice, not Epic #102 or scheduled sync #89.
 

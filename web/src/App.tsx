@@ -679,6 +679,19 @@ function App() {
     }
   }
 
+  const cancelConfirmedMeeting = async (requestID: string, optionID: string) => {
+    const response = await apiFetch(`${apiURL}/api/v1/requests/${encodeURIComponent(requestID)}/cancel-confirmed`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Demo-User-ID': currentView === 'sent' ? requesterUserID : activeUserID },
+      body: JSON.stringify({ optionId: optionID }),
+    })
+    if (!response.ok) throw new Error('confirmed cancellation failed')
+    const update = (current: CoordinationRequest[]) => current.map((item) => item.id === requestID ? { ...item, status: 'cancelled' } : item)
+    setInboxRequests(update)
+    setSentRequests(update)
+    setNotice('確定会議を取り消し、相手に通知しました。外部カレンダーの予定は手動で削除してください。')
+  }
+
   const downloadConfirmedMeeting = async (requestID: string) => {
     const response = await apiFetch(`${apiURL}/api/v1/requests/${encodeURIComponent(requestID)}/calendar.ics`, {
       headers: { 'X-Demo-User-ID': currentView === 'sent' ? requesterUserID : activeUserID },
@@ -1294,7 +1307,7 @@ function App() {
                     <p>{item.requesterUserId} · {item.durationMinutes}分 · 期限 {formatDateTime(item.deadlineAt)}</p>
                   </div>
                   <div className="option-list" aria-label={`${item.title}の候補`}>
-                    <ConfirmedMeeting request={item} onDownload={downloadConfirmedMeeting} />
+                    <ConfirmedMeeting request={item} onDownload={downloadConfirmedMeeting} onCancel={cancelConfirmedMeeting} />
                     {item.options.map((option) => (
                       <div className="option-row" key={option.id}>
                         <span>{option.type === 'meeting' ? 'MEETING' : 'ASYNC'}</span>
@@ -1356,7 +1369,7 @@ function App() {
                       <p>{item.targetUserId} 宛 · {item.durationMinutes}分 · 期限 {formatDateTime(item.deadlineAt)}</p>
                     </div>
                     <div className="option-list">
-                      <ConfirmedMeeting request={item} onDownload={downloadConfirmedMeeting} />
+                      <ConfirmedMeeting request={item} onDownload={downloadConfirmedMeeting} onCancel={cancelConfirmedMeeting} />
                       <strong>{item.options.length}件の調整候補</strong>
                       {cancellable ? (
                         <button className="decline-button" type="button" disabled={respondingRequestID === item.id} onClick={() => cancelSentRequest(item.id)}>

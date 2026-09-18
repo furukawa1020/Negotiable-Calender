@@ -2,6 +2,7 @@ import { type FormEvent, useEffect, useMemo, useState } from 'react'
 import SharingPolicyEditor from './SharingPolicyEditor'
 import { ConfirmedMeeting } from './ConfirmedMeeting'
 import { CalendarSyncStatus } from './CalendarSyncStatus'
+import { AccountAvatar } from './AccountAvatar'
 import { RescheduleMeeting } from './RescheduleMeeting'
 import type { RescheduleCommand, RescheduleProposal } from './RescheduleMeeting'
 import { sharingPolicyError, type SharingPolicyDraft } from './sharingPolicy'
@@ -271,6 +272,7 @@ function App() {
   const activeUserID = authUser?.userId ?? 'demo-manager'
   const activeOrganizationID = authUser?.organizationId ?? 'demo-org'
   const requesterUserID = authUser?.userId ?? 'demo-member'
+  const accountName = authUser ? authUser.displayName.trim() || authUser.email.trim() || 'アカウント' : '山田 太郎'
   const policyDraftError = sharingPolicyError(sharingPolicy)
 
   useEffect(() => {
@@ -287,6 +289,9 @@ function App() {
         setDemoMode(payload.demoMode === true)
         if (payload.authenticated && payload.user) {
           setAuthUser(payload.user)
+          setProjections([])
+          setMemberProjections([])
+          setMemberPreview(false)
           if (authCompleted) setNotice('Googleアカウントでログインしました。')
           if (calendarCompleted) setNotice('Google Calendarを接続しました。同期を開始できます。')
           const calendarResponse = await apiFetch(`${apiURL}/api/v1/calendar/connection`)
@@ -1103,10 +1108,12 @@ function App() {
             ) : null}
           </div>
           <div className="account-wrap">
-            <button className="avatar" type="button" aria-label="山田太郎のアカウントメニュー" aria-expanded={accountOpen} onClick={() => setAccountOpen(!accountOpen)}>山</button>
+            <button className="avatar" type="button" aria-label={`${accountName}のアカウントメニュー`} aria-expanded={accountOpen} onClick={() => setAccountOpen(!accountOpen)}>
+              <AccountAvatar name={accountName} imageUrl={authUser?.avatarUrl} />
+            </button>
             {accountOpen ? (
               <div className="account-menu">
-                <strong>{authUser?.displayName ?? '山田 太郎'}</strong>
+                <strong>{accountName}</strong>
                 <span>{authUser ? `${authUser.role} · ${authUser.email}` : 'Manager · Demo mode'}</span>
                 {authUser ? (
                   <>
@@ -1249,6 +1256,9 @@ function App() {
               ))}
               {memberPreview && displayedProjections.length === 0 ? (
                 <p className="empty-state">この日に共有されている状態はありません。</p>
+              ) : null}
+              {!memberPreview && authUser && displayedProjections.length === 0 ? (
+                <p className="empty-state">表示できる公開状態はありません。共有ルールとカレンダー接続・同期状態を確認してください。</p>
               ) : null}
             </div>
             <button className="preview-button" type="button" disabled={previewLoading} onClick={toggleMemberPreview}>

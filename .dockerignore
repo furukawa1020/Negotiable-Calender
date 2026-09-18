@@ -3,6 +3,7 @@
 .agents
 .codex
 gha-creds-*.json
+**/client_secret_*.json
 **/node_modules
 **/dist
 **/.env*

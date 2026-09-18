@@ -53,3 +53,32 @@ Startup validation checks configuration syntax and completeness, not whether
 Google accepts the client or the consent screen is published. Verify login,
 Calendar consent, sync, and logout with real test accounts before declaring
 real-account production ready. The currently published service remains a demo.
+
+## Single-secret runtime bundle
+
+Alternatively, bind a pinned Secret Manager version to `AUTH_SECRETS_JSON`.
+Its JSON object has `version: 1` and three string fields: `googleClientId`,
+`googleClientSecret`, and `calendarTokenEncryptionKey` (base64, 32 random bytes).
+The API expands this bundle before auth validation or storage initialization.
+Do not supply the original Google download directly: it lacks the encryption key
+and uses a different schema. Keep redirects and `DEMO_MODE` as ordinary settings.
+
+Malformed, oversized, unknown-field, incomplete, unsupported-version and conflicting
+direct-environment configurations fail startup with value-free errors. Existing
+direct environment settings remain supported. Never print the bundle, commit it,
+pass it as a command-line argument, or provide it to a frontend build. Downloaded
+`client_secret_*.json` files are excluded from Git and Docker build contexts.
+
+Grant the runtime service account Secret Accessor on this app's secret only, not
+the entire project. Generate the encryption key once with a cryptographic RNG;
+preserve it when updating OAuth credentials. Do not blindly overwrite an existing
+bundle or key. Pin numeric versions and stage a no-traffic revision before routing
+production traffic. Verify unauthenticated sessions report `demoMode: false`,
+demo headers cannot grant access, and login redirects to the expected Google client
+and callback. Account-owner login and separate Calendar consent remain mandatory
+acceptance steps in #76; no anonymous probe substitutes for them.
+
+A single bundle reduces active secret-version usage; it does not guarantee zero
+cost. Secret Manager free-tier usage is shared across the billing account, including
+other applications and retained versions. See the official
+[Secret Manager pricing](https://cloud.google.com/secret-manager/pricing).

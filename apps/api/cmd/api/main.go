@@ -39,6 +39,10 @@ func main() {
 	}
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	if err := loadAuthSecretBundle(os.Getenv, os.Setenv); err != nil {
+		logger.Error("invalid authentication secret bundle", "error", err)
+		os.Exit(1)
+	}
 	if err := validateSyncConfig(os.Getenv); err != nil {
 		logger.Error("invalid sync configuration", "error", err)
 		os.Exit(1)

@@ -63,7 +63,7 @@ func testPostgresReschedule(t *testing.T, ctx context.Context, db *sql.DB, store
 					t.Fatal("old booking lost")
 				}
 				var count int
-				if err := db.QueryRowContext(ctx, "SELECT count(*) FROM notifications WHERE request_id=$1", value.ID).Scan(&count); err != nil || count != 1 {
+				if err := db.QueryRowContext(ctx, "SELECT count(*) FROM notifications WHERE request_id=$1 AND type<>'request_accepted'", value.ID).Scan(&count); err != nil || count != 1 {
 					t.Fatal("partial effect")
 				}
 				return
@@ -108,7 +108,7 @@ func testPostgresReschedule(t *testing.T, ctx context.Context, db *sql.DB, store
 			if err := store.Reschedule(ctx, value.ID, other, command); !errors.Is(err, coordinationrequest.ErrRescheduleRepeated) {
 				t.Fatal(err)
 			}
-			for _, query := range []string{"SELECT count(*) FROM notifications WHERE request_id=$1", "SELECT count(*) FROM audit_logs WHERE resource_id=$1"} {
+			for _, query := range []string{"SELECT count(*) FROM notifications WHERE request_id=$1 AND type<>'request_accepted'", "SELECT count(*) FROM audit_logs WHERE resource_id=$1 AND action<>'request_accepted'"} {
 				var count int
 				if err := db.QueryRowContext(ctx, query, value.ID).Scan(&count); err != nil || count != 2 {
 					t.Fatal("duplicated effect", count, err)

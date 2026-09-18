@@ -42,7 +42,14 @@ func (store *Request) acceptMeeting(ctx context.Context, requestID, userID, opti
 			return err
 		}
 		value.Status, value.AcceptedOptionID, value.UpdatedAt = coordinationrequest.Accepted, optionID, time.Now().UTC()
-		return tx.Set(ref, value)
+		note, event := coordinationrequest.ConfirmationEffects(value, value.UpdatedAt)
+		if err := tx.Set(ref, value); err != nil {
+			return err
+		}
+		if err := tx.Create(store.Client.Collection("users").Doc(note.UserID).Collection("notifications").Doc(note.ID), note); err != nil {
+			return err
+		}
+		return tx.Create(store.Client.Collection("organizations").Doc(event.OrganizationID).Collection("auditLogs").Doc(event.ID), event)
 	})
 	if firestoreNotFound(err) {
 		return coordinationrequest.ErrNotFound

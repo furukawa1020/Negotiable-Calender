@@ -63,7 +63,15 @@ func (store *PostgresStore) acceptMeeting(ctx context.Context, requestID, userID
 	if err := checkMeetingSlotPostgres(ctx, tx, value, selected); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE coordination_requests SET status=$1,accepted_option_id=$2,updated_at=$3 WHERE id=$4`, Accepted, optionID, time.Now().UTC(), requestID); err != nil {
+	now := time.Now().UTC()
+	note, event := ConfirmationEffects(value, now)
+	if _, err := tx.ExecContext(ctx, `UPDATE coordination_requests SET status=$1,accepted_option_id=$2,updated_at=$3 WHERE id=$4`, Accepted, optionID, now, requestID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO notifications(id,user_id,type,request_id,message,created_at) VALUES($1,$2,$3,$4,$5,$6)`, note.ID, note.UserID, note.Type, note.RequestID, note.Message, note.CreatedAt); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO audit_logs(id,organization_id,actor_user_id,action,resource_type,resource_id,created_at) VALUES($1,$2,$3,$4,$5,$6,$7)`, event.ID, event.OrganizationID, event.ActorUserID, event.Action, event.ResourceType, event.ResourceID, event.CreatedAt); err != nil {
 		return err
 	}
 	return tx.Commit()

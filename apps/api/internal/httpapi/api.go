@@ -452,16 +452,11 @@ func (api *API) respondToCoordinationRequest(response http.ResponseWriter, reque
 		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to update request"})
 		return
 	}
-	kind, message := notification.RequestAccepted, "依頼の候補を承認しました。"
+	// Acceptance effects are part of the storage transaction, not best-effort HTTP work.
 	if status == coordinationrequest.Declined {
-		kind, message = notification.RequestDeclined, "依頼を辞退しました。"
+		api.notify(request.Context(), value.RequesterUserID, notification.RequestDeclined, requestID, "依頼を辞退しました。")
+		api.recordAudit(request.Context(), targetUserID, audit.RequestDeclined, requestID)
 	}
-	api.notify(request.Context(), value.RequesterUserID, kind, requestID, message)
-	auditAction := audit.RequestAccepted
-	if status == coordinationrequest.Declined {
-		auditAction = audit.RequestDeclined
-	}
-	api.recordAudit(request.Context(), targetUserID, auditAction, request.PathValue("requestId"))
 	writeJSON(response, http.StatusOK, map[string]any{"id": request.PathValue("requestId"), "status": status, "acceptedOptionId": optionID})
 }
 

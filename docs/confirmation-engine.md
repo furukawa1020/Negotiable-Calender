@@ -47,13 +47,27 @@ or booking_conflict. The UI keeps the request unchanged and points to another
 time or refreshing sync. Repeating the same accepted option returns 200 without
 duplicating audit/notification creation. Different options cannot overwrite an
 accepted choice. Transport failures after commit are therefore safe to retry.
-Acceptance notification delivery remains best-effort: this is not a durable delivery
-outbox. The separate [confirmed cancellation](confirmed-cancellation.md) operation
+New acceptance commits its requester app notification and audit in the same storage
+transaction as the reservation (#113). A failed effect insert rolls everything back;
+stable insert-only IDs fail closed on collisions. Concurrent/repeated acceptance
+does not duplicate effects or reset an existing notification's read state. The HTTP
+handler never writes a second acceptance notification/audit after commit.
+
+This is durable app-inbox persistence, not an external-delivery outbox or an email,
+push, or Google Calendar delivery guarantee. Pre-existing accepted requests are not
+backfilled: replay preserves their historical state, including any legacy missing
+effects. Deploy both storage and HTTP changes together; old revisions must be drained
+before relying on the new guarantee. No schema migration or bulk repair is performed.
+Decline/async/delegation still use their existing best-effort notification path.
+The separate [confirmed cancellation](confirmed-cancellation.md) operation likewise
 persists its counterpart app notification and audit in the cancellation transaction.
 
 Tests exercise real Firestore emulator and PostgreSQL concurrent transactions,
 cross-organization/opposite-role conflicts, adjacent meetings, pending/dirty
 publication, time/coverage validation, unchanged state on error and API retries.
+Effect tests inject notification/audit insertion collisions in both databases,
+verify complete rollback, race same-request acceptance, and replay after marking
+the resulting notification read. Firestore deletion fences remain in the transaction.
 
 These guarantees concern app-confirmed requests and the currently imported public
 availability snapshot. They do not reserve Google Calendar or detect an external

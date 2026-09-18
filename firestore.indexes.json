@@ -1,0 +1,13 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "calendarConnections",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "ReconnectRequired", "order": "ASCENDING" },
+        { "fieldPath": "NextAttemptAt", "order": "ASCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

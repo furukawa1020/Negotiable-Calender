@@ -1,6 +1,7 @@
 import { type FormEvent, useEffect, useMemo, useState } from 'react'
 import SharingPolicyEditor from './SharingPolicyEditor'
 import { ConfirmedMeeting } from './ConfirmedMeeting'
+import { CalendarSyncStatus } from './CalendarSyncStatus'
 import { RescheduleMeeting } from './RescheduleMeeting'
 import type { RescheduleCommand, RescheduleProposal } from './RescheduleMeeting'
 import { sharingPolicyError, type SharingPolicyDraft } from './sharingPolicy'
@@ -254,6 +255,7 @@ function App() {
   const [authUser, setAuthUser] = useState<AuthUser | null>(null)
   const [demoMode, setDemoMode] = useState(import.meta.env.DEV)
   const [calendarConnection, setCalendarConnection] = useState<CalendarConnection | null>(null)
+  const [calendarSyncMode, setCalendarSyncMode] = useState('off')
   const [calendarBusy, setCalendarBusy] = useState(false)
   const [workspaces, setWorkspaces] = useState<Workspace[]>([])
   const [invitationToken, setInvitationToken] = useState('')
@@ -288,8 +290,9 @@ function App() {
           if (calendarCompleted) setNotice('Google Calendarを接続しました。同期を開始できます。')
           const calendarResponse = await apiFetch(`${apiURL}/api/v1/calendar/connection`)
           if (calendarResponse.ok) {
-            const calendarPayload = await calendarResponse.json() as { connected: boolean; connection?: CalendarConnection }
+            const calendarPayload = await calendarResponse.json() as { connected: boolean; connection?: CalendarConnection; syncMode?: string }
             setCalendarConnection(calendarPayload.connected ? calendarPayload.connection ?? null : null)
+            setCalendarSyncMode(calendarPayload.syncMode ?? 'off')
           }
           const workspaceResponse = await apiFetch(`${apiURL}/api/v1/workspaces`)
           if (workspaceResponse.ok) {
@@ -1123,13 +1126,7 @@ function App() {
                     ) : null}
                     {calendarConnection ? (
                       <>
-                        <span>{calendarConnection.reconnectRequired ? 'Calendarの再接続が必要です' : 'Calendar 自動同期中'}{calendarConnection.lastSyncedAt ? ` · 最終成功 ${formatDateTime(calendarConnection.lastSyncedAt)}` : ''}</span>
-                        {!calendarConnection.reconnectRequired && calendarConnection.lastErrorCode ? (
-                          <span role="status">前回の自動同期に失敗しました（{calendarConnection.lastErrorCode}）。{calendarConnection.nextAttemptAt ? `次回 ${formatDateTime(calendarConnection.nextAttemptAt)}` : '自動で再試行します。'}</span>
-                        ) : null}
-                        {!calendarConnection.reconnectRequired && !calendarConnection.lastErrorCode && calendarConnection.nextAttemptAt ? (
-                          <span>次回の自動同期 {formatDateTime(calendarConnection.nextAttemptAt)}</span>
-                        ) : null}
+                        <CalendarSyncStatus mode={calendarSyncMode} connection={calendarConnection} />
                         {calendarConnection.reconnectRequired ? (
                           <a href={`${apiURL}/api/v1/calendar/google/connect`}>Google Calendarを再接続</a>
                         ) : (

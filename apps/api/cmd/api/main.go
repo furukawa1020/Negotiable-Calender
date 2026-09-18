@@ -39,6 +39,10 @@ func main() {
 	}
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	if err := validateSyncConfig(os.Getenv); err != nil {
+		logger.Error("invalid sync configuration", "error", err)
+		os.Exit(1)
+	}
 	if err := validateAuthConfig(os.Getenv); err != nil {
 		logger.Error("invalid authentication configuration", "error", err)
 		os.Exit(1)
@@ -142,7 +146,7 @@ func main() {
 	apiHandler := httpapi.NewWithStoresAndRebuilder(db, policy.NewPostgresStore(db), projection.NewPostgresStore(db), organization.NewPostgresStore(db), coordinationrequest.NewPostgresStore(db), notification.NewPostgresStore(db), audit.NewPostgresStore(db), projectionRebuilder, os.Getenv("WEB_ORIGIN"), logger)
 	calendarStore := calendarintegration.NewPostgresStore(db)
 	calendarHandler := calendarintegration.NewHandler(apiHandler, calendarStore, calendarProvider, calendarCipher, projectionRebuilder, calendarintegration.HandlerConfig{
-		WebOrigin: os.Getenv("WEB_ORIGIN"), SecureCookies: secureCookies,
+		WebOrigin: os.Getenv("WEB_ORIGIN"), SecureCookies: secureCookies, SyncMode: syncMode(os.Getenv),
 	}, logger)
 	invitationHandler := organization.NewInvitationHandler(calendarHandler, organization.NewPostgresStore(db), organization.InvitationHandlerConfig{
 		WebOrigin: os.Getenv("WEB_ORIGIN"),
@@ -150,7 +154,7 @@ func main() {
 	authHandler := auth.NewHandlerWithAccountRevoker(invitationHandler, auth.NewPostgresStore(db), googleProvider, calendarHandler, auth.HandlerConfig{
 		WebOrigin: os.Getenv("WEB_ORIGIN"), DemoMode: demoMode, SecureCookies: secureCookies,
 	}, logger)
-	applicationHandler := withStaticFiles(authHandler, os.Getenv("WEB_ROOT"))
+	applicationHandler := scheduledSyncHandler(withStaticFiles(authHandler, os.Getenv("WEB_ROOT")), calendarStore, calendarHandler, os.Getenv, logger)
 	handler := security.New(applicationHandler, security.Config{WebOrigin: os.Getenv("WEB_ORIGIN")})
 
 	server := &http.Server{
@@ -164,7 +168,7 @@ func main() {
 
 	shutdownSignal, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	if calendarProvider.Configured() && calendarCipher != nil {
+	if syncMode(os.Getenv) == "background" && calendarHandler.Configured() {
 		worker := calendarintegration.NewWorker(calendarStore, calendarHandler, calendarintegration.WorkerConfig{}, logger)
 		go worker.Run(shutdownSignal)
 	}
@@ -242,16 +246,16 @@ func runFirestore(logger *slog.Logger) error {
 	}
 
 	apiHandler := httpapi.NewWithStoresAndRebuilder(backend, policyStore, projectionStore, organizationStore, requestStore, notificationStore, auditStore, projectionRebuilder, webOrigin, logger)
-	calendarHandler := calendarintegration.NewHandler(apiHandler, calendarStore, calendarProvider, calendarCipher, projectionRebuilder, calendarintegration.HandlerConfig{WebOrigin: webOrigin, SecureCookies: secureCookies}, logger)
+	calendarHandler := calendarintegration.NewHandler(apiHandler, calendarStore, calendarProvider, calendarCipher, projectionRebuilder, calendarintegration.HandlerConfig{WebOrigin: webOrigin, SecureCookies: secureCookies, SyncMode: syncMode(os.Getenv)}, logger)
 	invitationHandler := organization.NewInvitationHandler(calendarHandler, organizationStore, organization.InvitationHandlerConfig{WebOrigin: webOrigin}, logger)
 	authHandler := auth.NewHandlerWithAccountRevoker(invitationHandler, authStore, googleProvider, calendarHandler, auth.HandlerConfig{WebOrigin: webOrigin, DemoMode: demoMode, SecureCookies: secureCookies}, logger)
-	handler := security.New(withStaticFiles(authHandler, os.Getenv("WEB_ROOT")), security.Config{WebOrigin: webOrigin})
+	handler := security.New(scheduledSyncHandler(withStaticFiles(authHandler, os.Getenv("WEB_ROOT")), calendarStore, calendarHandler, os.Getenv, logger), security.Config{WebOrigin: webOrigin})
 	port := envOrDefault("PORT", defaultPort)
 	server := &http.Server{Addr: ":" + port, Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 60 * time.Second, IdleTimeout: 60 * time.Second}
 
 	shutdownSignal, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	if calendarProvider.Configured() && calendarCipher != nil {
+	if syncMode(os.Getenv) == "background" && calendarHandler.Configured() {
 		worker := calendarintegration.NewWorker(calendarStore, calendarHandler, calendarintegration.WorkerConfig{}, logger)
 		go worker.Run(shutdownSignal)
 	}

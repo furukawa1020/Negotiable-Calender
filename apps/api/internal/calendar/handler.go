@@ -20,6 +20,7 @@ const (
 )
 
 type HandlerConfig struct {
+	SyncMode             string
 	WebOrigin            string
 	SecureCookies        bool
 	FlowTTL              time.Duration
@@ -170,7 +171,11 @@ func (handler *Handler) status(response http.ResponseWriter, request *http.Reque
 		writeJSON(response, 500, map[string]string{"error": "unable to load calendar connection"})
 		return
 	}
-	writeJSON(response, 200, map[string]any{"connected": true, "connection": value})
+	mode := handler.config.SyncMode
+	if !handler.Configured() || (mode != "external" && mode != "background") {
+		mode = "off"
+	}
+	writeJSON(response, 200, map[string]any{"connected": true, "connection": value, "syncMode": mode})
 }
 
 func (handler *Handler) sync(response http.ResponseWriter, request *http.Request) {

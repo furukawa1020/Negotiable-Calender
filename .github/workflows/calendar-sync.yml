@@ -1,0 +1,58 @@
+name: Scheduled calendar sync
+
+on:
+  schedule:
+    - cron: '7,22,37,52 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: calendar-sync-production
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    if: github.ref == 'refs/heads/main' && vars.CALENDAR_SYNC_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      SYNC_URL: https://negotiable-calendar-480760664246.asia-northeast1.run.app/internal/calendar/sync-due
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - id: auth
+        name: Mint a short-lived token for the dedicated sync caller
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          project_id: improve-production-management
+          workload_identity_provider: projects/480760664246/locations/global/workloadIdentityPools/github-actions/providers/negotiable-calendar
+          service_account: negotiable-calendar-sync@improve-production-management.iam.gserviceaccount.com
+          token_format: id_token
+          id_token_audience: ${{ env.SYNC_URL }}
+          id_token_include_email: true
+          create_credentials_file: false
+          export_environment_variables: false
+      - name: Run one bounded synchronous batch
+        env:
+          SYNC_ID_TOKEN: ${{ steps.auth.outputs.id_token }}
+        shell: bash
+        run: |
+          # No HTTP retry: the next scheduled invocation resumes due work safely.
+          curl --fail --silent --show-error --request POST \
+            --connect-timeout 5 --max-time 55 --retry 0 \
+            --header "Authorization: Bearer ${SYNC_ID_TOKEN}" \
+            --output "${RUNNER_TEMP}/calendar-sync-result.json" "${SYNC_URL}"
+          jq '{status, configured, result}' "${RUNNER_TEMP}/calendar-sync-result.json" >> "$GITHUB_STEP_SUMMARY"
+          if jq -e '.status == "not_configured" and .configured == false' "${RUNNER_TEMP}/calendar-sync-result.json" >/dev/null; then
+            echo '::warning::Trigger authenticated, but Google Calendar is not configured; no connections were processed.'
+            exit 0
+          fi
+          jq -e '.configured == true and .status == "completed" and .result.failed == 0 and .result.unprocessed == 0' "${RUNNER_TEMP}/calendar-sync-result.json" >/dev/null
+          if jq -e '.result.capacityReached == true' "${RUNNER_TEMP}/calendar-sync-result.json" >/dev/null; then
+            echo '::warning::Batch capacity reached; more work may wait until the next invocation.'
+          fi

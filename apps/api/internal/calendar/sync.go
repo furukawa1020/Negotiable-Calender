@@ -126,6 +126,12 @@ func (handler *Handler) syncUser(ctx context.Context, userID string) (SyncResult
 }
 
 func (handler *Handler) markFailure(ctx context.Context, connection Connection, code string, reconnect bool) {
+	// Preserve the fencing token but allow a bounded failure record after a sync timeout.
+	if ctx.Err() != nil {
+		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+		defer cancel()
+		ctx = cleanup
+	}
 	store, ok := handler.store.(BackgroundStore)
 	if !ok {
 		if reconnect {
@@ -175,6 +181,7 @@ func syncBackoff(userID string, failures int) time.Duration {
 }
 
 type WorkerConfig struct {
+	RunTimeout   time.Duration
 	PollInterval time.Duration
 	ClaimLimit   int
 	ClaimLease   time.Duration
@@ -199,10 +206,14 @@ func NewWorker(store BackgroundStore, syncer interface {
 	if config.ClaimLimit <= 0 {
 		config.ClaimLimit = 10
 	}
+	config.ClaimLimit = min(config.ClaimLimit, 20)
+	if config.RunTimeout <= 0 || config.RunTimeout > 50*time.Second {
+		config.RunTimeout = 50 * time.Second
+	}
 	if config.ClaimLease <= 0 {
 		config.ClaimLease = defaultClaimLease
 	}
-	if config.SyncTimeout <= 0 {
+	if config.SyncTimeout <= 0 || config.SyncTimeout > 45*time.Second {
 		config.SyncTimeout = 45 * time.Second
 	}
 	return &Worker{store: store, syncer: syncer, config: config, logger: logger}
@@ -223,22 +234,49 @@ func (worker *Worker) Run(ctx context.Context) {
 }
 
 func (worker *Worker) runDue(ctx context.Context) {
+	if _, err := worker.RunDue(ctx); err != nil {
+		worker.logger.Warn("calendar sync batch incomplete", "failure_code", failureCode(err))
+	}
+}
+
+func (worker *Worker) RunDue(ctx context.Context) (BatchResult, error) {
+	ctx, cancel := context.WithTimeout(ctx, worker.config.RunTimeout)
+	defer cancel()
+	result := BatchResult{}
+	if err := ctx.Err(); err != nil {
+		return result, err
+	}
 	connections, err := worker.store.ClaimDueConnections(ctx, time.Now().UTC(), worker.config.ClaimLimit, worker.config.ClaimLease)
 	if err != nil {
 		worker.logger.Error("claim calendar sync work", "failure_code", "claim_failed")
-		return
+		return result, err
 	}
+	if len(connections) > worker.config.ClaimLimit {
+		return result, errors.New("claim limit exceeded")
+	}
+	result.Claimed = len(connections)
+	result.Unprocessed = len(connections)
+	result.CapacityReached = len(connections) == worker.config.ClaimLimit
 	for _, connection := range connections {
+		if err := ctx.Err(); err != nil {
+			return result, err
+		}
+		result.Attempted++
+		result.Unprocessed--
 		syncContext, cancel := context.WithTimeout(ctx, worker.config.SyncTimeout)
 		_, err := worker.syncer.SyncUser(syncContext, connection.UserID)
 		cancel()
 		if err != nil {
+			result.Failed++
 			var failure *SyncFailure
 			code := "temporary_failure"
 			if errors.As(err, &failure) {
 				code = failure.Code
 			}
 			worker.logger.Warn("background calendar sync incomplete", "failure_code", code)
+		} else {
+			result.Succeeded++
 		}
 	}
+	return result, ctx.Err()
 }

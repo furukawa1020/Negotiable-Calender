@@ -60,8 +60,18 @@ func (store *PostgresStore) acceptMeeting(ctx context.Context, requestID, userID
 	if _, err := ConfirmableMeeting(value, optionID, time.Now().UTC()); err != nil {
 		return err
 	}
+	if err := checkMeetingSlotPostgres(ctx, tx, value, selected); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE coordination_requests SET status=$1,accepted_option_id=$2,updated_at=$3 WHERE id=$4`, Accepted, optionID, time.Now().UTC(), requestID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func checkMeetingSlotPostgres(ctx context.Context, tx *sql.Tx, value CoordinationRequest, selected Option) error {
 	// Serializable predicate reads prevent write skew for both roles, even across orgs.
-	rows, err := tx.QueryContext(ctx, `SELECT r.id,r.accepted_option_id,o.type,o.start_at,o.end_at FROM coordination_requests r LEFT JOIN coordination_request_options o ON o.id=r.accepted_option_id AND o.request_id=r.id WHERE r.status=$1 AND r.id<>$2 AND (r.requester_user_id IN ($3,$4) OR r.target_user_id IN ($3,$4))`, Accepted, requestID, value.RequesterUserID, value.TargetUserID)
+	rows, err := tx.QueryContext(ctx, `SELECT r.id,r.accepted_option_id,o.type,o.start_at,o.end_at FROM coordination_requests r LEFT JOIN coordination_request_options o ON o.id=r.accepted_option_id AND o.request_id=r.id WHERE r.status=$1 AND r.id<>$2 AND (r.requester_user_id IN ($3,$4) OR r.target_user_id IN ($3,$4))`, Accepted, value.ID, value.RequesterUserID, value.TargetUserID)
 	if err != nil {
 		return err
 	}
@@ -102,7 +112,7 @@ func (store *PostgresStore) acceptMeeting(ctx context.Context, requestID, userID
 	}
 	rows.Close()
 	now := time.Now().UTC()
-	if _, err := ConfirmableMeeting(value, optionID, now); err != nil {
+	if _, err := ConfirmableMeeting(value, selected.ID, now); err != nil {
 		return err
 	}
 	for i := range values {
@@ -114,8 +124,5 @@ func (store *PostgresStore) acceptMeeting(ctx context.Context, requestID, userID
 	if err := ValidateMeetingAvailability(value.TargetUserID, selected, values, now); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE coordination_requests SET status=$1,accepted_option_id=$2,updated_at=$3 WHERE id=$4`, Accepted, optionID, now, requestID); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return nil
 }

@@ -414,6 +414,26 @@ describe('App', () => {
     )
   })
 
+  it.each(['送信済み', '依頼'])('accepts a reschedule from %s and updates the confirmed selection', async (view) => {
+    const future = new Date(Date.now() + 86400000).toISOString()
+    const later = new Date(Date.now() + 90000000).toISOString()
+    const value = { id: 'reschedule-1', requesterUserId: 'demo-member', targetUserId: 'demo-manager', title: '日時変更テスト', type: 'meeting', durationMinutes: 30, deadlineAt: later, priority: 'normal', status: 'accepted', acceptedOptionId: 'old', createdAt: future,
+      rescheduleProposal: { id: 'proposal-new', proposerUserId: view === '送信済み' ? 'demo-manager' : 'demo-member', expectedOptionId: 'old', status: 'proposed' },
+      options: [{ id: 'old', type: 'meeting', startAt: future, endAt: later }, { id: 'proposal-new', type: 'meeting', startAt: later, endAt: new Date(Date.parse(later) + 1800000).toISOString() }] }
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({ requests: [value] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ...value, acceptedOptionId: 'proposal-new', rescheduleProposal: { ...value.rescheduleProposal, status: 'accepted' } }), { status: 200 }))
+    const { container } = render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: view }))
+    fireEvent.click(await screen.findByRole('button', { name: 'この日時への変更を承認' }))
+    expect(await screen.findByRole('status')).toHaveTextContent('日時変更を確定')
+    expect(container.querySelector('.confirmed-meeting time')?.getAttribute('datetime')).toBe(later)
+    expect(globalThis.fetch).toHaveBeenLastCalledWith(expect.stringContaining('/requests/reschedule-1/reschedule'), expect.objectContaining({
+      method: 'POST', credentials: 'include', body: JSON.stringify({ action: 'accept', proposalId: 'proposal-new', expectedOptionId: 'old' }),
+      headers: { 'Content-Type': 'application/json', 'X-Demo-User-ID': view === '送信済み' ? 'demo-member' : 'demo-manager' },
+    }))
+  })
+
   it('loads sent requests and lets the requester cancel an active request', async () => {
     vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(new Response(JSON.stringify({

@@ -1,6 +1,8 @@
 import { type FormEvent, useEffect, useMemo, useState } from 'react'
 import SharingPolicyEditor from './SharingPolicyEditor'
 import { ConfirmedMeeting } from './ConfirmedMeeting'
+import { RescheduleMeeting } from './RescheduleMeeting'
+import type { RescheduleCommand, RescheduleProposal } from './RescheduleMeeting'
 import { sharingPolicyError, type SharingPolicyDraft } from './sharingPolicy'
 
 const defaultSharingPolicy: SharingPolicyDraft = {
@@ -90,6 +92,7 @@ type CoordinationRequest = {
   status: string
   asyncMessage?: string
   acceptedOptionId?: string
+  rescheduleProposal?: RescheduleProposal
   options: CoordinationOption[]
   createdAt: string
 }
@@ -677,6 +680,20 @@ function App() {
     } finally {
       setRespondingRequestID('')
     }
+  }
+
+  const rescheduleMeeting = async (requestID: string, command: RescheduleCommand) => {
+    const response = await apiFetch(`${apiURL}/api/v1/requests/${encodeURIComponent(requestID)}/reschedule`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Demo-User-ID': currentView === 'sent' ? requesterUserID : activeUserID },
+      body: JSON.stringify(command),
+    })
+    if (!response.ok) throw new Error('reschedule failed')
+    const value = await response.json() as CoordinationRequest
+    const update = (current: CoordinationRequest[]) => current.map((item) => item.id === requestID ? value : item)
+    setInboxRequests(update)
+    setSentRequests(update)
+    setNotice(command.action === 'accept' ? '日時変更を確定しました。外部カレンダーの予定は手動で更新してください。' : '日時変更の交渉を更新しました。元の予約は維持されています。')
   }
 
   const cancelConfirmedMeeting = async (requestID: string, optionID: string) => {
@@ -1308,6 +1325,7 @@ function App() {
                   </div>
                   <div className="option-list" aria-label={`${item.title}の候補`}>
                     <ConfirmedMeeting request={item} onDownload={downloadConfirmedMeeting} onCancel={cancelConfirmedMeeting} />
+                    <RescheduleMeeting request={item} actor={activeUserID} onChange={rescheduleMeeting} />
                     {item.options.map((option) => (
                       <div className="option-row" key={option.id}>
                         <span>{option.type === 'meeting' ? 'MEETING' : 'ASYNC'}</span>
@@ -1370,6 +1388,7 @@ function App() {
                     </div>
                     <div className="option-list">
                       <ConfirmedMeeting request={item} onDownload={downloadConfirmedMeeting} onCancel={cancelConfirmedMeeting} />
+                      <RescheduleMeeting request={item} actor={requesterUserID} onChange={rescheduleMeeting} />
                       <strong>{item.options.length}件の調整候補</strong>
                       {cancellable ? (
                         <button className="decline-button" type="button" disabled={respondingRequestID === item.id} onClick={() => cancelSentRequest(item.id)}>

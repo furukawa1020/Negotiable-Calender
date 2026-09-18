@@ -3,6 +3,7 @@ package request
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -69,6 +70,7 @@ CREATE INDEX IF NOT EXISTS coordination_request_options_request_idx
 ALTER TABLE coordination_requests ADD COLUMN IF NOT EXISTS accepted_option_id text;
 ALTER TABLE coordination_requests ADD COLUMN IF NOT EXISTS delegated_user_id text;
 ALTER TABLE coordination_requests ADD COLUMN IF NOT EXISTS async_message text;
+ALTER TABLE coordination_requests ADD COLUMN IF NOT EXISTS reschedule_proposal jsonb NOT NULL DEFAULT 'null';
 `
 	if _, err := database.ExecContext(ctx, schema); err != nil {
 		return fmt.Errorf("create coordination request schema: %w", err)
@@ -131,7 +133,7 @@ func (store *PostgresStore) listForUser(ctx context.Context, userID string, incl
 	rows, err := store.database.QueryContext(ctx, `
 SELECT id, organization_id, requester_user_id, target_user_id, type, title,
        duration_minutes, deadline_at, sync_preference, priority, status,
-       created_at, updated_at, accepted_option_id, delegated_user_id, async_message
+       created_at, updated_at, accepted_option_id, delegated_user_id, async_message, reschedule_proposal
 FROM coordination_requests
 WHERE ($2 AND target_user_id = $1) OR ($3 AND requester_user_id = $1)
 ORDER BY created_at DESC, id DESC
@@ -144,11 +146,12 @@ ORDER BY created_at DESC, id DESC
 	for rows.Next() {
 		var value CoordinationRequest
 		var acceptedOptionID, delegatedUserID, asyncMessage sql.NullString
+		var proposalJSON []byte
 		if err := rows.Scan(
 			&value.ID, &value.OrganizationID, &value.RequesterUserID, &value.TargetUserID,
 			&value.Type, &value.Title, &value.DurationMinutes, &value.DeadlineAt,
 			&value.SyncPreference, &value.Priority, &value.Status,
-			&value.CreatedAt, &value.UpdatedAt, &acceptedOptionID, &delegatedUserID, &asyncMessage,
+			&value.CreatedAt, &value.UpdatedAt, &acceptedOptionID, &delegatedUserID, &asyncMessage, &proposalJSON,
 		); err != nil {
 			return nil, fmt.Errorf("scan coordination request: %w", err)
 		}
@@ -158,6 +161,9 @@ ORDER BY created_at DESC, id DESC
 		value.AcceptedOptionID = acceptedOptionID.String
 		value.DelegatedUserID = delegatedUserID.String
 		value.AsyncMessage = asyncMessage.String
+		if err := json.Unmarshal(proposalJSON, &value.RescheduleProposal); err != nil {
+			return nil, err
+		}
 		value.Options = []Option{}
 		values = append(values, value)
 	}
@@ -180,17 +186,18 @@ ORDER BY created_at DESC, id DESC
 func (store *PostgresStore) GetForUser(ctx context.Context, requestID, userID string) (CoordinationRequest, error) {
 	var value CoordinationRequest
 	var acceptedOptionID, delegatedUserID, asyncMessage sql.NullString
+	var proposalJSON []byte
 	err := store.database.QueryRowContext(ctx, `
 SELECT id, organization_id, requester_user_id, target_user_id, type, title,
        duration_minutes, deadline_at, sync_preference, priority, status,
-       created_at, updated_at, accepted_option_id, delegated_user_id, async_message
+       created_at, updated_at, accepted_option_id, delegated_user_id, async_message, reschedule_proposal
 FROM coordination_requests
 WHERE id = $1 AND (requester_user_id = $2 OR target_user_id = $2)
 `, requestID, userID).Scan(
 		&value.ID, &value.OrganizationID, &value.RequesterUserID, &value.TargetUserID,
 		&value.Type, &value.Title, &value.DurationMinutes, &value.DeadlineAt,
 		&value.SyncPreference, &value.Priority, &value.Status,
-		&value.CreatedAt, &value.UpdatedAt, &acceptedOptionID, &delegatedUserID, &asyncMessage,
+		&value.CreatedAt, &value.UpdatedAt, &acceptedOptionID, &delegatedUserID, &asyncMessage, &proposalJSON,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return CoordinationRequest{}, ErrNotFound
@@ -204,6 +211,9 @@ WHERE id = $1 AND (requester_user_id = $2 OR target_user_id = $2)
 	value.AcceptedOptionID = acceptedOptionID.String
 	value.DelegatedUserID = delegatedUserID.String
 	value.AsyncMessage = asyncMessage.String
+	if err := json.Unmarshal(proposalJSON, &value.RescheduleProposal); err != nil {
+		return CoordinationRequest{}, err
+	}
 	value.Options, err = store.listOptions(ctx, value.ID)
 	if err != nil {
 		return CoordinationRequest{}, err

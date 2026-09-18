@@ -87,6 +87,7 @@ func newAPI(database databasePinger, policies policy.Store, projections projecti
 	mux.HandleFunc("POST /api/v1/requests/{requestId}/async", api.asyncCoordinationRequest)
 	mux.HandleFunc("POST /api/v1/requests/{requestId}/cancel", api.cancelCoordinationRequest)
 	mux.HandleFunc("POST /api/v1/requests/{requestId}/cancel-confirmed", api.cancelConfirmedMeeting)
+	mux.HandleFunc("POST /api/v1/requests/{requestId}/reschedule", api.rescheduleMeeting)
 	mux.HandleFunc("GET /api/v1/notifications", api.listNotifications)
 	mux.HandleFunc("POST /api/v1/notifications/{notificationId}/read", api.readNotification)
 	mux.HandleFunc("GET /api/v1/audit-logs", api.listAuditLogs)

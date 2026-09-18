@@ -38,54 +38,10 @@ func (store *Request) acceptMeeting(ctx context.Context, requestID, userID, opti
 		if err != nil {
 			return err
 		}
-		// Both roles share the same per-person serialization document across all orgs.
-		locks := []*firestore.DocumentRef{}
-		for _, participant := range []string{value.RequesterUserID, value.TargetUserID} {
-			lock := store.Client.Collection("users").Doc(participant).Collection("projectionControls").Doc("coordinationConfirmation")
-			if _, err := tx.Get(lock); err != nil && !firestoreNotFound(err) {
-				return err
-			}
-			locks = append(locks, lock)
-			for _, field := range []string{"RequesterUserID", "TargetUserID"} {
-				docs, err := tx.Documents(store.Client.Collection("coordinationRequests").Where(field, "==", participant).Limit(5001)).GetAll()
-				if err != nil {
-					return err
-				}
-				if len(docs) > 5000 {
-					return coordinationrequest.ErrAvailabilityChanged
-				}
-				for _, doc := range docs {
-					if doc.Ref.ID == requestID {
-						continue
-					}
-					var other coordinationrequest.CoordinationRequest
-					if err := doc.DataTo(&other); err != nil {
-						return err
-					}
-					if coordinationrequest.ConflictsWithMeeting(selected, other) {
-						return coordinationrequest.ErrBookingConflict
-					}
-				}
-			}
-		}
-		values, err := store.confirmationProjections(ctx, tx, value.TargetUserID)
-		if err != nil {
+		if err := store.checkMeetingSlot(ctx, tx, value, selected); err != nil {
 			return err
 		}
-		now := time.Now().UTC()
-		if _, err := coordinationrequest.ConfirmableMeeting(value, optionID, now); err != nil {
-			return err
-		}
-		if err := coordinationrequest.ValidateMeetingAvailability(value.TargetUserID, selected, values, now); err != nil {
-			return err
-		}
-		// All reads precede writes. The marker lives in an already-cleaned user collection.
-		for _, lock := range locks {
-			if err := tx.Set(lock, map[string]any{"Revision": randomID("confirmation")}); err != nil {
-				return err
-			}
-		}
-		value.Status, value.AcceptedOptionID, value.UpdatedAt = coordinationrequest.Accepted, optionID, now
+		value.Status, value.AcceptedOptionID, value.UpdatedAt = coordinationrequest.Accepted, optionID, time.Now().UTC()
 		return tx.Set(ref, value)
 	})
 	if firestoreNotFound(err) {
@@ -95,6 +51,59 @@ func (store *Request) acceptMeeting(ctx context.Context, requestID, userID, opti
 		return coordinationrequest.ErrBookingConflict
 	}
 	return err
+}
+
+// Reads the conflict/publication snapshot, then writes only the shared participant locks.
+// Callers must finish all other transaction reads before calling this helper.
+func (store *Request) checkMeetingSlot(ctx context.Context, tx *firestore.Transaction, value coordinationrequest.CoordinationRequest, selected coordinationrequest.Option) error {
+	// Both roles share the same per-person serialization document across all orgs.
+	locks := []*firestore.DocumentRef{}
+	for _, participant := range []string{value.RequesterUserID, value.TargetUserID} {
+		lock := store.Client.Collection("users").Doc(participant).Collection("projectionControls").Doc("coordinationConfirmation")
+		if _, err := tx.Get(lock); err != nil && !firestoreNotFound(err) {
+			return err
+		}
+		locks = append(locks, lock)
+		for _, field := range []string{"RequesterUserID", "TargetUserID"} {
+			docs, err := tx.Documents(store.Client.Collection("coordinationRequests").Where(field, "==", participant).Limit(5001)).GetAll()
+			if err != nil {
+				return err
+			}
+			if len(docs) > 5000 {
+				return coordinationrequest.ErrAvailabilityChanged
+			}
+			for _, doc := range docs {
+				if doc.Ref.ID == value.ID {
+					continue
+				}
+				var other coordinationrequest.CoordinationRequest
+				if err := doc.DataTo(&other); err != nil {
+					return err
+				}
+				if coordinationrequest.ConflictsWithMeeting(selected, other) {
+					return coordinationrequest.ErrBookingConflict
+				}
+			}
+		}
+	}
+	values, err := store.confirmationProjections(ctx, tx, value.TargetUserID)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	if _, err := coordinationrequest.ConfirmableMeeting(value, selected.ID, now); err != nil {
+		return err
+	}
+	if err := coordinationrequest.ValidateMeetingAvailability(value.TargetUserID, selected, values, now); err != nil {
+		return err
+	}
+	// All reads precede writes. The marker lives in an already-cleaned user collection.
+	for _, lock := range locks {
+		if err := tx.Set(lock, map[string]any{"Revision": randomID("confirmation")}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (store *Request) confirmationProjections(ctx context.Context, tx *firestore.Transaction, userID string) ([]projection.ScheduleProjection, error) {

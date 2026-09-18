@@ -1778,3 +1778,11 @@ footer {
 }
 .confirmed-meeting p { line-height: 1.6; }
 .confirmed-meeting p:last-child { font-size: 0.85rem; }
+.local-planning { display: grid; gap: 12px; min-width: 0; }
+.local-planning p, .local-planning ul, .local-planning ol { margin: 0; }
+.local-planning label { display: flex; gap: 8px; align-items: flex-start; line-height: 1.6; }
+.local-planning select { min-width: 0; padding: 6px; font: inherit; }
+.local-planning input[type="checkbox"] { flex: 0 0 auto; margin-top: 5px; }
+.local-planning button { justify-self: start; padding: 9px 12px; border: 1px solid var(--green); border-radius: 6px; color: var(--green); background: white; font: inherit; cursor: pointer; }
+.local-planning button:disabled { opacity: 0.55; cursor: not-allowed; }
+.local-planning [role="alert"] { color: #8a3e2c; }

@@ -16,10 +16,18 @@ numeric subject, and its email. Invalid configuration prevents startup.
 
 Production activation is gated by repository variable `CALENDAR_SYNC_ENABLED=true`
 and `CALENDAR_SYNC_SUBJECT`. Without activation, deploy explicitly sets off and the
-scheduled workflow is skipped. **IAM provisioning requires operator approval and
-has not been performed as part of the initial implementation.** #89 remains open
-until identity/index provisioning and a real authenticated trigger are verified.
+scheduled workflow is skipped. **Production activation was explicitly approved on
+2026-09-18.** Provisioning and index readiness checks passed; deployment now selects
+external mode. The authenticated manual trigger passed, and anonymous/forged-token
+requests returned 401. This verifies the trigger, not actual calendar synchronization.
 Real Google OAuth/consent is separately tracked in #76; do not claim it was tested.
+
+Activation evidence (no newly provisioned identity identifiers are recorded here):
+- [Production deployment](https://github.com/furukawa1020/Negotiable-Calender/actions/runs/35313119913) passed.
+- [Authenticated trigger](https://github.com/furukawa1020/Negotiable-Calender/actions/runs/35313371655) returned
+  `not_configured`, with a visible warning and no connections processed. Demo mode
+  remains enabled. Google OAuth setup and real-account acceptance remain #76.
+- Verification of a timer-initiated run is pending; #89 stays open until recorded.
 
 ## Authentication and least privilege
 
@@ -74,7 +82,7 @@ grant the narrowly scoped federation binding (do not grant project-level roles):
 ```powershell
 gcloud iam service-accounts create negotiable-calendar-sync --project=improve-production-management --display-name='Negotiable Calendar scheduled sync caller'
 gcloud iam service-accounts add-iam-policy-binding negotiable-calendar-sync@improve-production-management.iam.gserviceaccount.com --project=improve-production-management --role=roles/iam.workloadIdentityUser --member='principalSet://iam.googleapis.com/projects/480760664246/locations/global/workloadIdentityPools/github-actions/attribute.repository/furukawa1020/Negotiable-Calender'
-gcloud firestore indexes composite create --project=improve-production-management --collection-group=calendarConnections --query-scope=COLLECTION --field-config=field-path=ReconnectRequired,order=ascending --field-config=field-path=NextAttemptAt,order=ascending
+gcloud firestore indexes composite create --project=improve-production-management --collection-group=calendarConnections --query-scope=COLLECTION '--field-config=field-path=ReconnectRequired,order=ascending' '--field-config=field-path=NextAttemptAt,order=ascending'
 gcloud iam service-accounts describe negotiable-calendar-sync@improve-production-management.iam.gserviceaccount.com --project=improve-production-management --format='value(uniqueId)'
 ```
 

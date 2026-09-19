@@ -78,6 +78,13 @@ func testPostgresCreation(t *testing.T, ctx context.Context, db *sql.DB, store *
 			value := fixture("dispatch-"+collision, "alice", "bob", now.Add(time.Hour))
 			note, event := coordinationrequest.CreationEffects(value)
 			if collision == "notification" {
+				// Seed a valid notification for a different request, sharing only
+				// the ID whose collision should roll back the new command.
+				seed := fixture(value.ID+"-seed", "alice", "bob", now.Add(time.Hour))
+				if err := store.Create(ctx, seed); err != nil {
+					t.Fatal(err)
+				}
+				note.RequestID = seed.ID
 				_, err := db.ExecContext(ctx, `INSERT INTO notifications(id,user_id,type,request_id,message,created_at) VALUES($1,$2,$3,$4,$5,$6)`, note.ID, note.UserID, note.Type, note.RequestID, note.Message, now)
 				if err != nil {
 					t.Fatal(err)

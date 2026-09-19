@@ -392,6 +392,9 @@ func (api *API) asyncCoordinationRequest(response http.ResponseWriter, request *
 		writeJSON(response, http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
 		return
 	}
+	if api.resolveRequest(response, request, coordinationrequest.ResolutionCommand{Status: coordinationrequest.Async, Message: input.Message}) {
+		return
+	}
 	requestID := request.PathValue("requestId")
 	value, err := api.requests.GetForUser(request.Context(), requestID, targetUserID)
 	if errors.Is(err, coordinationrequest.ErrNotFound) {
@@ -423,6 +426,9 @@ func (api *API) asyncCoordinationRequest(response http.ResponseWriter, request *
 }
 
 func (api *API) respondToCoordinationRequest(response http.ResponseWriter, request *http.Request, targetUserID string, status coordinationrequest.Status, optionID string) {
+	if status == coordinationrequest.Declined && api.resolveRequest(response, request, coordinationrequest.ResolutionCommand{Status: status}) {
+		return
+	}
 	requestID := request.PathValue("requestId")
 	value, err := api.requests.GetForUser(request.Context(), requestID, targetUserID)
 	if errors.Is(err, coordinationrequest.ErrNotFound) {
@@ -513,6 +519,9 @@ func (api *API) cancelCoordinationRequest(response http.ResponseWriter, request 
 	userID := request.Header.Get("X-Demo-User-ID")
 	if userID == "" {
 		writeJSON(response, http.StatusUnauthorized, map[string]string{"error": "request identity is required"})
+		return
+	}
+	if api.resolveRequest(response, request, coordinationrequest.ResolutionCommand{Status: coordinationrequest.Cancelled}) {
 		return
 	}
 	requestID := request.PathValue("requestId")

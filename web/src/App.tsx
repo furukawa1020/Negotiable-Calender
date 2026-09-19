@@ -4,6 +4,7 @@ import { ConfirmedMeeting } from './ConfirmedMeeting'
 import { CalendarSyncStatus } from './CalendarSyncStatus'
 import { AccountAvatar } from './AccountAvatar'
 import { RequestComposer } from './RequestComposer'
+import { useRequestResolution } from './useRequestResolution'
 import { RescheduleMeeting } from './RescheduleMeeting'
 import { LocalPlanning } from './LocalPlanningPanel'
 import { PlanningRateLimitError } from './localPlanning'
@@ -289,6 +290,7 @@ function App() {
   const activeUserID = authUser?.userId ?? 'demo-manager'
   const activeOrganizationID = authUser?.organizationId ?? 'demo-org'
   const requesterUserID = authUser?.userId ?? 'demo-member'
+  const resolution = useRequestResolution(apiURL, activeOrganizationID, `${activeUserID}:${requesterUserID}`)
   const accountName = authUser ? authUser.displayName.trim() || authUser.email.trim() || 'アカウント' : '山田 太郎'
   const policyDraftError = sharingPolicyError(sharingPolicy)
 
@@ -552,20 +554,15 @@ function App() {
   }
 
   const cancelSentRequest = async (requestID: string) => {
-    setRespondingRequestID(requestID)
     try {
-      const response = await apiFetch(`${apiURL}/api/v1/requests/${requestID}/cancel`, {
-        method: 'POST', headers: { 'X-Demo-User-ID': requesterUserID },
-      })
-      if (!response.ok) throw new Error('request cancellation failed')
+      const result = await resolution.resolve(requestID, requesterUserID, 'cancel')
+      if (!result) return
       setSentRequests((current) => current.map((item) => item.id === requestID
         ? { ...item, status: 'cancelled' }
         : item))
       setNotice('依頼をキャンセルしました。相手にも通知しました。')
-    } catch {
-      setNotice('依頼をキャンセルできませんでした。最新状態を確認してください。')
-    } finally {
-      setRespondingRequestID('')
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : '一覧を更新して状態を確認してください。')
     }
   }
 
@@ -629,6 +626,15 @@ function App() {
   }
 
   const respondToRequest = async (requestID: string, action: 'accept' | 'decline', optionID?: string) => {
+    if (action === 'decline') {
+      try {
+        const result = await resolution.resolve(requestID, activeUserID, 'decline')
+        if (!result) return
+        setInboxRequests(current => current.map(item => item.id === requestID ? { ...item, status: result.status } : item))
+        setNotice('依頼を辞退しました。')
+      } catch (error) { setNotice(error instanceof Error ? error.message : '一覧を更新して状態を確認してください。') }
+      return
+    }
     setRespondingRequestID(requestID)
     try {
       const response = await apiFetch(`${apiURL}/api/v1/requests/${requestID}/${action}`, {
@@ -637,7 +643,7 @@ function App() {
           'Content-Type': 'application/json',
           'X-Demo-User-ID': activeUserID,
         },
-        body: action === 'accept' ? JSON.stringify({ optionId: optionID }) : undefined,
+        body: JSON.stringify({ optionId: optionID }),
       })
       if (!response.ok) {
         if (response.status === 409) {
@@ -654,9 +660,9 @@ function App() {
         throw new Error('response failed')
       }
       setInboxRequests((current) => current.map((item) => item.id === requestID
-        ? { ...item, status: action === 'accept' ? 'accepted' : 'declined', acceptedOptionId: action === 'accept' ? optionID : undefined }
+        ? { ...item, status: 'accepted', acceptedOptionId: optionID }
         : item))
-      setNotice(action === 'accept' ? '候補を承認しました。' : '依頼を辞退しました。')
+      setNotice('候補を承認しました。')
     } catch {
       setNotice('依頼を更新できませんでした。最新状態を確認してください。')
     } finally {
@@ -710,27 +716,16 @@ function App() {
     event.preventDefault()
     const formElement = event.currentTarget
     const message = String(new FormData(formElement).get('asyncMessage')).trim()
-    setRespondingRequestID(requestID)
     try {
-      const response = await apiFetch(`${apiURL}/api/v1/requests/${requestID}/async`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Demo-User-ID': activeUserID,
-        },
-        body: JSON.stringify({ message }),
-      })
-      if (!response.ok) throw new Error('async response failed')
-      const payload = await response.json() as { status: string; asyncMessage: string }
+      const payload = await resolution.resolve(requestID, activeUserID, 'async', message)
+      if (!payload) return
       setInboxRequests((current) => current.map((item) => item.id === requestID
         ? { ...item, status: payload.status, asyncMessage: payload.asyncMessage }
         : item))
       setNotice('非同期で回答しました。依頼者に通知しました。')
       formElement.reset()
-    } catch {
-      setNotice('非同期で回答できませんでした。最新状態とメッセージを確認してください。')
-    } finally {
-      setRespondingRequestID('')
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : '一覧を更新して状態を確認してください。')
     }
   }
 
@@ -1331,7 +1326,7 @@ function App() {
                           ? `${formatDateTime(option.startAt)} — ${new Intl.DateTimeFormat('ja-JP', { hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(option.endAt))}`
                           : '非同期で回答'}</strong>
                         {item.status === 'suggested' && option.type === 'meeting' ? (
-                          <button type="button" disabled={respondingRequestID === item.id} onClick={() => respondToRequest(item.id, 'accept', option.id)}>この候補を承認</button>
+                          <button type="button" disabled={respondingRequestID === item.id || resolution.pending(item.id)} onClick={() => respondToRequest(item.id, 'accept', option.id)}>この候補を承認</button>
                         ) : null}
                       </div>
                     ))}
@@ -1340,17 +1335,17 @@ function App() {
                         <form className="suggest-form" onSubmit={(event) => suggestTime(event, item.id)}>
                           <label>別の開始時間<input name="suggestStart" type="datetime-local" required /></label>
                           <label>終了時間<input name="suggestEnd" type="datetime-local" required /></label>
-                          <button type="submit" disabled={respondingRequestID === item.id}>別時間を提案</button>
+                          <button type="submit" disabled={respondingRequestID === item.id || resolution.pending(item.id)}>別時間を提案</button>
                         </form>
                         <form className="async-form" onSubmit={(event) => respondAsync(event, item.id)}>
-                          <label>非同期メッセージ<textarea name="asyncMessage" maxLength={500} rows={2} placeholder="回答方法や次のアクションを500文字以内で入力" required /></label>
-                          <button type="submit" disabled={respondingRequestID === item.id}>非同期で回答</button>
+                          <label>非同期メッセージ<textarea name="asyncMessage" maxLength={500} rows={2} placeholder="回答方法や次のアクションを500文字以内で入力" disabled={resolution.pending(item.id)} required /></label>
+                          <button type="submit" disabled={respondingRequestID === item.id || resolution.pending(item.id)}>非同期で回答</button>
                         </form>
                         <form className="delegate-form" onSubmit={(event) => delegateRequest(event, item.id)}>
                           <label>委譲先ユーザー<input name="delegateUserId" defaultValue="demo-member" required /></label>
-                          <button type="submit" disabled={respondingRequestID === item.id}>委譲する</button>
+                          <button type="submit" disabled={respondingRequestID === item.id || resolution.pending(item.id)}>委譲する</button>
                         </form>
-                        <button className="decline-button" type="button" disabled={respondingRequestID === item.id} onClick={() => respondToRequest(item.id, 'decline')}>今回は辞退</button>
+                        <button className="decline-button" type="button" disabled={respondingRequestID === item.id || resolution.pending(item.id)} onClick={() => respondToRequest(item.id, 'decline')}>今回は辞退</button>
                       </>
                     ) : <div><p className="response-complete">回答済み · {requestStatusLabel(item.status)}</p>{item.asyncMessage ? <p className="async-message">{item.asyncMessage}</p> : null}</div>}
                   </div>
@@ -1388,8 +1383,8 @@ function App() {
                       <RescheduleMeeting request={item} actor={requesterUserID} onChange={rescheduleMeeting} />
                       <strong>{item.options.length}件の調整候補</strong>
                       {cancellable ? (
-                        <button className="decline-button" type="button" disabled={respondingRequestID === item.id} onClick={() => cancelSentRequest(item.id)}>
-                          {respondingRequestID === item.id ? 'キャンセル中…' : '依頼をキャンセル'}
+                        <button className="decline-button" type="button" disabled={respondingRequestID === item.id || resolution.pending(item.id)} onClick={() => cancelSentRequest(item.id)}>
+                          {respondingRequestID === item.id || resolution.pending(item.id) ? 'キャンセル中…' : '依頼をキャンセル'}
                         </button>
                       ) : <div><p className="response-complete">更新済み · {requestStatusLabel(item.status)}</p>{item.asyncMessage ? <p className="async-message">{item.asyncMessage}</p> : null}</div>}
                     </div>

@@ -466,7 +466,7 @@ describe('App', () => {
     )
     expect(globalThis.fetch).toHaveBeenNthCalledWith(2,
       expect.stringContaining('/api/v1/requests/request-1/cancel'),
-      expect.objectContaining({ method: 'POST', headers: { 'X-Demo-User-ID': 'demo-member' }, credentials: 'include' }),
+      expect.objectContaining({ method: 'POST', headers: expect.objectContaining({ 'X-Demo-User-ID': 'demo-member', 'X-Organization-ID': 'demo-org' }), credentials: 'include' }),
     )
   })
 

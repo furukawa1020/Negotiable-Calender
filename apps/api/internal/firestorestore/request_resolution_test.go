@@ -176,7 +176,14 @@ func TestResolutionRacesWithConfirmation(t *testing.T) {
 	p := publicationFixtures(now, "available", 1)[0]
 	p.UserID = "bob"
 	p.EndAt = now.Add(4 * time.Hour)
-	putDocument(t, ctx, b.Client.Collection("scheduleProjections").Doc(p.ID), p)
+	putDocument(t, ctx, b.Client.Collection("users").Doc("bob").Collection("scheduleProjections").Doc(p.ID), p)
+	available, err := b.Projection().ListForUser(ctx, "bob")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := coord.ValidateMeetingAvailability("bob", value.Options[0], available, now); err != nil {
+		t.Fatal("invalid race fixture", err)
+	}
 	if err := b.Request().Create(ctx, value); err != nil {
 		t.Fatal(err)
 	}

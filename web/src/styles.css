@@ -175,6 +175,7 @@ main { grid-column: 2; min-width: 0; width: min(1400px, calc(100% - 64px)); marg
 .suggest-form { grid-template-columns: 1fr 1fr; padding-top: 14px; border-top: 1px solid var(--line); }
 .suggest-form button { grid-column: 1 / -1; justify-self: start; }
 .async-form, .delegate-form { grid-template-columns: minmax(0, 1fr) auto; }
+.delegate-form > p { grid-column: 1 / -1; }
 .suggest-form label, .async-form label, .delegate-form label { display: grid; gap: 6px; color: var(--muted); font-size: 12px; min-width: 0; }
 input, select, textarea { min-width: 0; max-width: 100%; padding: 9px 10px; border: 1px solid #b8c6cd; color: var(--ink); background: white; box-shadow: 0 1px 2px #142c3510 inset; }
 textarea { resize: vertical; }

@@ -71,6 +71,7 @@ CREATE INDEX IF NOT EXISTS coordination_request_options_request_idx
     ON coordination_request_options(request_id, created_at, id);
 ALTER TABLE coordination_requests ADD COLUMN IF NOT EXISTS accepted_option_id text;
 ALTER TABLE coordination_requests ADD COLUMN IF NOT EXISTS delegated_user_id text;
+ALTER TABLE coordination_requests ADD COLUMN IF NOT EXISTS delegated_from_user_id text;
 ALTER TABLE coordination_requests ADD COLUMN IF NOT EXISTS async_message text;
 ALTER TABLE coordination_requests ADD COLUMN IF NOT EXISTS reschedule_proposal jsonb NOT NULL DEFAULT 'null';
 `
@@ -136,10 +137,17 @@ func (store *PostgresStore) ListForUser(ctx context.Context, userID string) ([]C
 }
 
 func (store *PostgresStore) listForUser(ctx context.Context, userID string, includeTarget, includeRequested bool) ([]CoordinationRequest, error) {
-	rows, err := store.database.QueryContext(ctx, `
+	// Read authorization, envelope and options from one snapshot. A concurrent
+	// handoff must never combine the former owner's envelope with new options.
+	tx, err := store.database.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	rows, err := tx.QueryContext(ctx, `
 SELECT id, organization_id, requester_user_id, target_user_id, type, title,
        duration_minutes, deadline_at, sync_preference, priority, status,
-       created_at, updated_at, accepted_option_id, delegated_user_id, async_message, reschedule_proposal
+       created_at, updated_at, accepted_option_id, delegated_user_id, async_message, reschedule_proposal, delegated_from_user_id
 FROM coordination_requests
 WHERE ($2 AND target_user_id = $1) OR ($3 AND requester_user_id = $1)
 ORDER BY created_at DESC, id DESC
@@ -151,13 +159,13 @@ ORDER BY created_at DESC, id DESC
 	values := make([]CoordinationRequest, 0)
 	for rows.Next() {
 		var value CoordinationRequest
-		var acceptedOptionID, delegatedUserID, asyncMessage sql.NullString
+		var acceptedOptionID, delegatedUserID, asyncMessage, delegatedFromUserID sql.NullString
 		var proposalJSON []byte
 		if err := rows.Scan(
 			&value.ID, &value.OrganizationID, &value.RequesterUserID, &value.TargetUserID,
 			&value.Type, &value.Title, &value.DurationMinutes, &value.DeadlineAt,
 			&value.SyncPreference, &value.Priority, &value.Status,
-			&value.CreatedAt, &value.UpdatedAt, &acceptedOptionID, &delegatedUserID, &asyncMessage, &proposalJSON,
+			&value.CreatedAt, &value.UpdatedAt, &acceptedOptionID, &delegatedUserID, &asyncMessage, &proposalJSON, &delegatedFromUserID,
 		); err != nil {
 			return nil, fmt.Errorf("scan coordination request: %w", err)
 		}
@@ -166,6 +174,7 @@ ORDER BY created_at DESC, id DESC
 		value.UpdatedAt = value.UpdatedAt.UTC()
 		value.AcceptedOptionID = acceptedOptionID.String
 		value.DelegatedUserID = delegatedUserID.String
+		value.DelegatedFromUserID = delegatedFromUserID.String
 		value.AsyncMessage = asyncMessage.String
 		if err := json.Unmarshal(proposalJSON, &value.RescheduleProposal); err != nil {
 			return nil, err
@@ -180,30 +189,38 @@ ORDER BY created_at DESC, id DESC
 		return nil, fmt.Errorf("close coordination request rows: %w", err)
 	}
 	for index := range values {
-		options, err := store.listOptions(ctx, values[index].ID)
+		options, err := listOptions(ctx, tx, values[index].ID)
 		if err != nil {
 			return nil, err
 		}
 		values[index].Options = options
 	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
 	return values, nil
 }
 
 func (store *PostgresStore) GetForUser(ctx context.Context, requestID, userID string) (CoordinationRequest, error) {
+	tx, err := store.database.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+	if err != nil {
+		return CoordinationRequest{}, err
+	}
+	defer tx.Rollback()
 	var value CoordinationRequest
-	var acceptedOptionID, delegatedUserID, asyncMessage sql.NullString
+	var acceptedOptionID, delegatedUserID, asyncMessage, delegatedFromUserID sql.NullString
 	var proposalJSON []byte
-	err := store.database.QueryRowContext(ctx, `
+	err = tx.QueryRowContext(ctx, `
 SELECT id, organization_id, requester_user_id, target_user_id, type, title,
        duration_minutes, deadline_at, sync_preference, priority, status,
-       created_at, updated_at, accepted_option_id, delegated_user_id, async_message, reschedule_proposal
+       created_at, updated_at, accepted_option_id, delegated_user_id, async_message, reschedule_proposal, delegated_from_user_id
 FROM coordination_requests
 WHERE id = $1 AND (requester_user_id = $2 OR target_user_id = $2)
 `, requestID, userID).Scan(
 		&value.ID, &value.OrganizationID, &value.RequesterUserID, &value.TargetUserID,
 		&value.Type, &value.Title, &value.DurationMinutes, &value.DeadlineAt,
 		&value.SyncPreference, &value.Priority, &value.Status,
-		&value.CreatedAt, &value.UpdatedAt, &acceptedOptionID, &delegatedUserID, &asyncMessage, &proposalJSON,
+		&value.CreatedAt, &value.UpdatedAt, &acceptedOptionID, &delegatedUserID, &asyncMessage, &proposalJSON, &delegatedFromUserID,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return CoordinationRequest{}, ErrNotFound
@@ -216,12 +233,16 @@ WHERE id = $1 AND (requester_user_id = $2 OR target_user_id = $2)
 	value.UpdatedAt = value.UpdatedAt.UTC()
 	value.AcceptedOptionID = acceptedOptionID.String
 	value.DelegatedUserID = delegatedUserID.String
+	value.DelegatedFromUserID = delegatedFromUserID.String
 	value.AsyncMessage = asyncMessage.String
 	if err := json.Unmarshal(proposalJSON, &value.RescheduleProposal); err != nil {
 		return CoordinationRequest{}, err
 	}
-	value.Options, err = store.listOptions(ctx, value.ID)
+	value.Options, err = listOptions(ctx, tx, value.ID)
 	if err != nil {
+		return CoordinationRequest{}, err
+	}
+	if err := tx.Commit(); err != nil {
 		return CoordinationRequest{}, err
 	}
 	return value, nil
@@ -386,8 +407,8 @@ INSERT INTO coordination_request_options (
 	return nil
 }
 
-func (store *PostgresStore) listOptions(ctx context.Context, requestID string) ([]Option, error) {
-	rows, err := store.database.QueryContext(ctx, `
+func listOptions(ctx context.Context, tx *sql.Tx, requestID string) ([]Option, error) {
+	rows, err := tx.QueryContext(ctx, `
 SELECT id, request_id, type, start_at, end_at, response_by, delegate_user_id, created_at
 FROM coordination_request_options
 WHERE request_id = $1

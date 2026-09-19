@@ -258,7 +258,7 @@ func (store *Auth) DeleteAccount(ctx context.Context, userID string) error {
 			requestIter.Stop()
 			return err
 		}
-		owned := value.RequesterUserID == userID || value.TargetUserID == userID || value.DelegatedUserID == userID
+		owned := value.RequesterUserID == userID || value.TargetUserID == userID || value.DelegatedUserID == userID || value.DelegatedFromUserID == userID
 		for _, option := range value.Options {
 			owned = owned || option.DelegateUserID == userID
 		}

@@ -4,6 +4,7 @@ import { ConfirmedMeeting } from './ConfirmedMeeting'
 import { CalendarSyncStatus } from './CalendarSyncStatus'
 import { AccountAvatar } from './AccountAvatar'
 import { RequestComposer } from './RequestComposer'
+import { RequestHandoff } from './RequestHandoff'
 import { useRequestResolution } from './useRequestResolution'
 import { RescheduleMeeting } from './RescheduleMeeting'
 import { LocalPlanning } from './LocalPlanningPanel'
@@ -111,6 +112,7 @@ type CoordinationRequest = {
   priority: string
   status: string
   asyncMessage?: string
+  delegatedFromUserId?: string
   acceptedOptionId?: string
   rescheduleProposal?: RescheduleProposal
   options: CoordinationOption[]
@@ -761,33 +763,6 @@ function App() {
     }
   }
 
-  const delegateRequest = async (event: FormEvent<HTMLFormElement>, requestID: string) => {
-    event.preventDefault()
-    const form = new FormData(event.currentTarget)
-    const delegateUserId = String(form.get('delegateUserId'))
-    setRespondingRequestID(requestID)
-    try {
-      const response = await apiFetch(`${apiURL}/api/v1/requests/${requestID}/delegate`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Demo-User-ID': activeUserID,
-        },
-        body: JSON.stringify({ delegateUserId }),
-      })
-      if (!response.ok) {
-        throw new Error('delegate failed')
-      }
-      setInboxRequests((current) => current.map((item) => item.id === requestID
-        ? { ...item, status: 'delegated' }
-        : item))
-      setNotice(`${delegateUserId} に依頼を委譲しました。`)
-    } catch {
-      setNotice('委譲できませんでした。同じ組織のユーザーIDを確認してください。')
-    } finally {
-      setRespondingRequestID('')
-    }
-  }
 
   const exportUserData = async () => {
     setExporting(true)
@@ -1341,10 +1316,12 @@ function App() {
                           <label>非同期メッセージ<textarea name="asyncMessage" maxLength={500} rows={2} placeholder="回答方法や次のアクションを500文字以内で入力" disabled={resolution.pending(item.id)} required /></label>
                           <button type="submit" disabled={respondingRequestID === item.id || resolution.pending(item.id)}>非同期で回答</button>
                         </form>
-                        <form className="delegate-form" onSubmit={(event) => delegateRequest(event, item.id)}>
-                          <label>委譲先ユーザー<input name="delegateUserId" defaultValue="demo-member" required /></label>
-                          <button type="submit" disabled={respondingRequestID === item.id || resolution.pending(item.id)}>委譲する</button>
-                        </form>
+                        {!item.delegatedFromUserId ? <RequestHandoff
+                          key={`${activeOrganizationID}:${activeUserID}:${item.id}`}
+                          apiURL={apiURL} organizationID={activeOrganizationID} actor={activeUserID} requestID={item.id} requesterID={item.requesterUserId}
+                          disabled={respondingRequestID === item.id || resolution.pending(item.id)}
+                          onDone={name => { setInboxRequests(current => current.filter(request => request.id !== item.id)); setNotice(`${name} に担当を引き継ぎました。依頼者にも通知しました。`) }}
+                        /> : <p className="field-help">引き継いだ依頼です。再委譲はできません。</p>}
                         <button className="decline-button" type="button" disabled={respondingRequestID === item.id || resolution.pending(item.id)} onClick={() => respondToRequest(item.id, 'decline')}>今回は辞退</button>
                       </>
                     ) : <div><p className="response-complete">回答済み · {requestStatusLabel(item.status)}</p>{item.asyncMessage ? <p className="async-message">{item.asyncMessage}</p> : null}</div>}
@@ -1382,6 +1359,7 @@ function App() {
                       <ConfirmedMeeting request={item} onDownload={downloadConfirmedMeeting} onCancel={cancelConfirmedMeeting} />
                       <RescheduleMeeting request={item} actor={requesterUserID} onChange={rescheduleMeeting} />
                       <strong>{item.options.length}件の調整候補</strong>
+                      {item.delegatedFromUserId ? <p className="field-help">担当変更済み · 現在の担当: {item.targetUserId}</p> : null}
                       {cancellable ? (
                         <button className="decline-button" type="button" disabled={respondingRequestID === item.id || resolution.pending(item.id)} onClick={() => cancelSentRequest(item.id)}>
                           {respondingRequestID === item.id || resolution.pending(item.id) ? 'キャンセル中…' : '依頼をキャンセル'}

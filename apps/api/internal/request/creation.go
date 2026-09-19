@@ -36,10 +36,17 @@ func CreationID(organizationID, actor, key string) (string, error) {
 // Normalize timestamps to the precision supported by both persistence backends.
 func SameCreation(a, b CoordinationRequest) bool {
 	return a.ID == b.ID && a.OrganizationID == b.OrganizationID &&
-		a.RequesterUserID == b.RequesterUserID && a.TargetUserID == b.TargetUserID &&
+		a.RequesterUserID == b.RequesterUserID && CreationTarget(a) == CreationTarget(b) &&
 		a.Type == b.Type && a.Title == b.Title && a.DurationMinutes == b.DurationMinutes &&
 		a.DeadlineAt.Truncate(time.Microsecond).Equal(b.DeadlineAt.Truncate(time.Microsecond)) &&
 		a.SyncPreference == b.SyncPreference && a.Priority == b.Priority
+}
+
+func CreationTarget(value CoordinationRequest) string {
+	if value.DelegatedFromUserID != "" {
+		return value.DelegatedFromUserID
+	}
+	return value.TargetUserID
 }
 
 func CreationEffects(value CoordinationRequest) (notification.Notification, audit.Event) {

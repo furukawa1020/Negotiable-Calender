@@ -228,14 +228,14 @@ FOR UPDATE OF organizations
 WHERE actor_user_id = $1 OR (
   resource_type = 'request' AND resource_id IN (
     SELECT id FROM coordination_requests
-    WHERE requester_user_id = $1 OR target_user_id = $1 OR delegated_user_id = $1
+    WHERE requester_user_id = $1 OR target_user_id = $1 OR delegated_user_id = $1 OR delegated_from_user_id = $1
        OR EXISTS (SELECT 1 FROM coordination_request_options WHERE request_id = coordination_requests.id AND delegate_user_id = $1)
   )
 )`,
 		`DELETE FROM organization_invitations WHERE invited_by = $1 OR accepted_by = $1`,
 		`DELETE FROM notifications WHERE user_id = $1`,
 		`DELETE FROM coordination_requests
-WHERE requester_user_id = $1 OR target_user_id = $1 OR delegated_user_id = $1
+WHERE requester_user_id = $1 OR target_user_id = $1 OR delegated_user_id = $1 OR delegated_from_user_id = $1
    OR EXISTS (SELECT 1 FROM coordination_request_options WHERE request_id = coordination_requests.id AND delegate_user_id = $1)`,
 		`DELETE FROM schedule_projections WHERE user_id = $1`,
 		`DELETE FROM manual_overrides WHERE user_id = $1`,

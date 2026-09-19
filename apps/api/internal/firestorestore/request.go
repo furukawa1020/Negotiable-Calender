@@ -231,7 +231,7 @@ func (store *Backend) guardRequestAccounts(ctx context.Context, tx *firestore.Tr
 }
 
 func requestParticipants(value coordinationrequest.CoordinationRequest) []string {
-	users := []string{value.RequesterUserID, value.TargetUserID, value.DelegatedUserID}
+	users := []string{value.RequesterUserID, value.TargetUserID, value.DelegatedUserID, value.DelegatedFromUserID}
 	for _, option := range value.Options {
 		users = append(users, option.DelegateUserID)
 	}

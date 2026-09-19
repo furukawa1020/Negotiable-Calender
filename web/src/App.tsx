@@ -3,6 +3,7 @@ import SharingPolicyEditor from './SharingPolicyEditor'
 import { ConfirmedMeeting } from './ConfirmedMeeting'
 import { CalendarSyncStatus } from './CalendarSyncStatus'
 import { AccountAvatar } from './AccountAvatar'
+import { RequestComposer } from './RequestComposer'
 import { RescheduleMeeting } from './RescheduleMeeting'
 import { LocalPlanning } from './LocalPlanningPanel'
 import { PlanningRateLimitError } from './localPlanning'
@@ -233,6 +234,7 @@ function ShieldIcon() {
 
 function App() {
   const [activeDialog, setActiveDialog] = useState('')
+  const [requestTargetID, setRequestTargetID] = useState('')
   const [memberPreview, setMemberPreview] = useState(false)
   const [accountOpen, setAccountOpen] = useState(false)
   const [notificationsOpen, setNotificationsOpen] = useState(false)
@@ -253,7 +255,6 @@ function App() {
   const [people, setPeople] = useState<PersonCard[]>([])
   const [peopleLoading, setPeopleLoading] = useState(false)
   const [peopleError, setPeopleError] = useState('')
-  const [requestSaving, setRequestSaving] = useState(false)
   const [inboxRequests, setInboxRequests] = useState<CoordinationRequest[]>([])
   const [inboxLoading, setInboxLoading] = useState(false)
   const [inboxError, setInboxError] = useState('')
@@ -393,50 +394,6 @@ function App() {
     ? privateCalendarEvents.map((event) => privateEventRow(event, calendarView))
     : demoMode ? demoPrivateEvents : []
 
-  const submitRequest = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    const form = new FormData(event.currentTarget)
-    const deadline = new Date()
-    const [hour, minute] = String(form.get('deadline')).split(':').map(Number)
-    deadline.setHours(hour, minute, 0, 0)
-    if (deadline.getTime() <= Date.now()) {
-      deadline.setDate(deadline.getDate() + 1)
-    }
-    setRequestSaving(true)
-    try {
-      const response = await apiFetch(`${apiURL}/api/v1/requests`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Demo-User-ID': requesterUserID,
-          'X-Organization-ID': activeOrganizationID,
-        },
-        body: JSON.stringify({
-          targetUserId: authUser ? activeUserID : 'demo-manager',
-          type: 'review',
-          title: String(form.get('title')),
-          durationMinutes: Number(form.get('duration')),
-          deadlineAt: deadline.toISOString(),
-          syncPreference: String(form.get('sync')),
-          priority: String(form.get('priority')),
-        }),
-      })
-      if (!response.ok) {
-        throw new Error('request failed')
-      }
-      const created = await response.json() as CoordinationRequest
-      const optionCount = Array.isArray(created.options) ? created.options.length : 0
-      setSentRequests((current) => [created, ...current.filter((item) => item.id !== created.id)])
-      setActiveDialog('')
-      setNotice(optionCount > 0
-        ? `レビュー依頼を送信し、${optionCount}件の候補を生成しました。`
-        : 'レビュー依頼を送信しました。')
-    } catch {
-      setNotice('依頼を送信できませんでした。入力内容とAPI接続を確認してください。')
-    } finally {
-      setRequestSaving(false)
-    }
-  }
 
   const submitOverride = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -1196,7 +1153,7 @@ function App() {
             <h1 id="page-title">カレンダー</h1>
             <p className="hero-copy">自分の予定と、組織に共有する相談可能な時間を確認できます。</p>
           </div>
-          <button className="primary-button" type="button" onClick={() => setActiveDialog('request')}>
+          <button className="primary-button" type="button" onClick={() => { setRequestTargetID(''); setActiveDialog('request') }}>
             <span aria-hidden="true">＋</span> 依頼を作成
           </button>
         </section>
@@ -1313,7 +1270,7 @@ function App() {
                       <h2>{person.displayName}</h2>
                       <p>{person.role} · {person.timezone}</p>
                     </div>
-                    <button type="button" onClick={() => setActiveDialog('request')}>依頼を作成</button>
+                    <button type="button" disabled={person.id === requesterUserID} onClick={() => { setRequestTargetID(person.id); setActiveDialog('request') }}>依頼を作成</button>
                   </div>
                   <div className="person-timeline" aria-label={`${person.displayName}の公開状態`}>
                     {person.segments.map((segment) => (
@@ -1469,58 +1426,13 @@ function App() {
         )}
       </main>
 
-      {activeDialog === 'request' ? (
-        <div className="modal-backdrop" role="presentation">
-          <section className="modal" role="dialog" aria-modal="true" aria-labelledby="request-title">
-            <div className="modal-heading">
-              <div>
-                <h2 id="request-title">依頼を作成</h2>
-              </div>
-              <button className="close-button" type="button" aria-label="閉じる" onClick={() => setActiveDialog('')}>×</button>
-            </div>
-            <form className="request-form" onSubmit={submitRequest}>
-              <label>
-                依頼内容
-                <input name="title" defaultValue="新API設計レビュー" required />
-              </label>
-              <div className="form-row">
-                <label>
-                  必要時間
-                  <select name="duration" defaultValue="15">
-                    <option value="5">5分</option>
-                    <option value="15">15分</option>
-                    <option value="30">30分</option>
-                  </select>
-                </label>
-                <label>
-                  期限
-                  <input name="deadline" type="time" defaultValue="17:00" required />
-                </label>
-              </div>
-              <label>
-                回答方法
-                <select name="sync" defaultValue="either">
-                  <option value="either">できれば会話・非同期でも可</option>
-                  <option value="meeting">直接相談したい</option>
-                  <option value="async">非同期回答でよい</option>
-                </select>
-              </label>
-              <label>
-                重要度
-                <select name="priority" defaultValue="normal">
-                  <option value="normal">通常</option>
-                  <option value="high">高</option>
-                  <option value="urgent">緊急</option>
-                </select>
-              </label>
-              <div className="modal-actions">
-                <button className="secondary-button" type="button" onClick={() => setActiveDialog('')}>キャンセル</button>
-                <button className="primary-button" type="submit" disabled={requestSaving}>{requestSaving ? '送信中…' : '候補を生成して送信'}</button>
-              </div>
-            </form>
-          </section>
-        </div>
-      ) : null}
+      {activeDialog === 'request' ? <RequestComposer
+        key={`${activeOrganizationID}:${requesterUserID}`}
+        apiURL={apiURL} organizationID={activeOrganizationID} requesterID={requesterUserID}
+        initialTargetID={requestTargetID} demo={demoMode && !authUser}
+        onClose={() => setActiveDialog('')}
+        onCreated={(count) => { setActiveDialog(''); setNotice(count > 0 ? `依頼を送信し、${count}件の候補を生成しました。` : '依頼を送信しました。') }}
+      /> : null}
 
       {activeDialog === 'rules' ? (
         <div className="modal-backdrop" role="presentation">

@@ -89,7 +89,14 @@ func (store *PostgresStore) Create(ctx context.Context, value CoordinationReques
 		return fmt.Errorf("begin coordination request: %w", err)
 	}
 	defer transaction.Rollback()
-	_, err = transaction.ExecContext(ctx, `
+	if err := insertCoordinationRequest(ctx, transaction, value); err != nil {
+		return err
+	}
+	return transaction.Commit()
+}
+
+func insertCoordinationRequest(ctx context.Context, transaction *sql.Tx, value CoordinationRequest) error {
+	_, err := transaction.ExecContext(ctx, `
 INSERT INTO coordination_requests (
     id, organization_id, requester_user_id, target_user_id, type, title,
     duration_minutes, deadline_at, sync_preference, priority, status,
@@ -112,9 +119,6 @@ INSERT INTO coordination_request_options (
 		if err != nil {
 			return fmt.Errorf("create coordination option: %w", err)
 		}
-	}
-	if err := transaction.Commit(); err != nil {
-		return fmt.Errorf("commit coordination request: %w", err)
 	}
 	return nil
 }

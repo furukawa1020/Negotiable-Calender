@@ -575,15 +575,46 @@ func (api *API) createCoordinationRequest(response http.ResponseWriter, request 
 		ID: newID("request"), OrganizationID: organizationID,
 		RequesterUserID: requesterID, TargetUserID: input.TargetUserID,
 		Type: input.Type, Title: input.Title, DurationMinutes: input.DurationMinutes,
-		DeadlineAt: input.DeadlineAt.UTC(), SyncPreference: input.SyncPreference,
+		DeadlineAt: input.DeadlineAt.UTC().Truncate(time.Microsecond), SyncPreference: input.SyncPreference,
 		Priority: input.Priority, Status: coordinationrequest.Pending,
 		Options: []coordinationrequest.Option{}, CreatedAt: now, UpdatedAt: now,
 	}
-	if err := value.Validate(); err != nil {
-		writeJSON(response, http.StatusUnprocessableEntity, map[string]string{"error": fmt.Sprintf("invalid coordination request: %s", err)})
+	if value.TargetUserID == "" || len(value.TargetUserID) > 256 || strings.ContainsAny(value.TargetUserID, "/\\\r\n") {
+		writeJSON(response, http.StatusUnprocessableEntity, map[string]string{"error": "invalid target user"})
 		return
 	}
 	if !api.requireMembership(response, request, organizationID, value.TargetUserID) {
+		return
+	}
+	creationStore, transactional := api.requests.(coordinationrequest.CreationStore)
+	if keys, present := request.Header["Idempotency-Key"]; present {
+		if len(keys) != 1 {
+			writeJSON(response, http.StatusBadRequest, map[string]string{"error": "invalid idempotency key"})
+			return
+		}
+		id, err := coordinationrequest.CreationID(organizationID, requesterID, keys[0])
+		if err != nil {
+			writeJSON(response, http.StatusBadRequest, map[string]string{"error": "invalid idempotency key"})
+			return
+		}
+		if !transactional {
+			writeJSON(response, http.StatusServiceUnavailable, map[string]string{"error": "reliable request creation unavailable"})
+			return
+		}
+		value.ID = id
+		previous, err := creationStore.LookupCreation(request.Context(), value)
+		if err == nil {
+			response.Header().Set("Idempotency-Replayed", "true")
+			writeJSON(response, http.StatusOK, previous)
+			return
+		}
+		if !errors.Is(err, coordinationrequest.ErrNotFound) {
+			writeCreationError(response, err)
+			return
+		}
+	}
+	if err := value.Validate(); err != nil {
+		writeJSON(response, http.StatusUnprocessableEntity, map[string]string{"error": fmt.Sprintf("invalid coordination request: %s", err)})
 		return
 	}
 	publicProjections, err := api.projections.List(request.Context(), value.TargetUserID, now, value.DeadlineAt)
@@ -616,6 +647,25 @@ func (api *API) createCoordinationRequest(response http.ResponseWriter, request 
 	}
 	value.Options = options
 	value.Status = coordinationrequest.Suggested
+	if transactional {
+		created, err := creationStore.CreateOnce(request.Context(), value)
+		if err != nil {
+			writeCreationError(response, err)
+			return
+		}
+		if !created {
+			previous, err := creationStore.LookupCreation(request.Context(), value)
+			if err != nil {
+				writeCreationError(response, err)
+				return
+			}
+			response.Header().Set("Idempotency-Replayed", "true")
+			writeJSON(response, http.StatusOK, previous)
+			return
+		}
+		writeJSON(response, http.StatusCreated, value)
+		return
+	}
 	if err := api.requests.Create(request.Context(), value); err != nil {
 		api.logger.Error("create coordination request", "error", err)
 		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to create request"})
@@ -894,7 +944,7 @@ func (api *API) middleware(next http.Handler) http.Handler {
 		if api.webOrigin != "" && request.Header.Get("Origin") == api.webOrigin {
 			response.Header().Set("Access-Control-Allow-Origin", api.webOrigin)
 			response.Header().Set("Access-Control-Allow-Credentials", "true")
-			response.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Demo-User-ID, X-Organization-ID")
+			response.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Demo-User-ID, X-Organization-ID, Idempotency-Key")
 			response.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 			response.Header().Set("Vary", "Origin")
 		}

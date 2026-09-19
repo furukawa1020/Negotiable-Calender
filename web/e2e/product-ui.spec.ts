@@ -29,6 +29,46 @@ async function noPageOverflow(page: Page) {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true)
 }
 
+test('authenticated organization recipient is carried into reliable request submission', async ({ page }) => {
+  const commands: { body: Record<string, unknown>; key: string | undefined }[] = []
+  await page.route('**/api/v1/**', async route => {
+    const request = route.request()
+    const path = new URL(request.url()).pathname
+    let json: object = {}
+    if (path.endsWith('/auth/session')) json = { authenticated: true, user: { userId: 'alice', organizationId: 'org-1', displayName: '依頼者A', role: 'OWNER', email: 'alice@example.com' } }
+    if (path.endsWith('/calendar/connection')) json = { connected: false }
+    if (path.endsWith('/workspaces')) json = { activeWorkspaceId: 'org-1', workspaces: [{ id: 'org-1', name: '試験組織', role: 'OWNER' }] }
+    if (path.endsWith('/people')) json = { people: [
+      { id: 'alice', displayName: '依頼者A', role: 'OWNER', timezone: 'Asia/Tokyo' },
+      { id: 'bob', displayName: '依頼先B', role: 'MANAGER', timezone: 'Asia/Tokyo' },
+    ] }
+    if (path.endsWith('/projection')) json = { segments: [] }
+    if (path.endsWith('/requests') && request.method() === 'POST') {
+      commands.push({ body: request.postDataJSON(), key: request.headers()['idempotency-key'] })
+      if (commands.length === 1) return route.abort('failed')
+      return route.fulfill({ status: 200, json: { options: [{ id: 'generated-option' }] } })
+    }
+    return route.fulfill({ status: 200, json })
+  })
+  await page.goto('http://127.0.0.1:5190/?auth=success')
+  await expect(page.getByRole('button', { name: '依頼者Aのアカウントメニュー' })).toBeVisible()
+  await page.getByRole('navigation').getByRole('button', { name: '組織', exact: true }).click()
+  await expect(page.locator('.person-row').filter({ hasText: '依頼者A' }).getByRole('button', { name: '依頼を作成' })).toBeDisabled()
+  await page.locator('.person-row').filter({ hasText: '依頼先B' }).getByRole('button', { name: '依頼を作成' }).click()
+  await expect(page.getByRole('dialog').getByLabel('依頼先')).toHaveValue('bob')
+  await page.getByLabel('依頼内容').fill('設計を確認してください')
+  await page.getByLabel('回答方法').selectOption('sync')
+  await page.getByRole('button', { name: '候補を生成して送信' }).click()
+  await expect(page.getByRole('alert')).toContainText('同じ内容で再送')
+  await page.getByRole('button', { name: '候補を生成して送信' }).click()
+  await expect(page.getByRole('dialog')).toBeHidden()
+  await expect(page.getByRole('status')).toContainText('1件の候補を生成')
+  expect(commands).toHaveLength(2)
+  expect(commands[0].body).toMatchObject({ targetUserId: 'bob', type: 'review', syncPreference: 'sync' })
+  expect(commands[0].key).toMatch(/^[A-Za-z0-9_-]{16,128}$/)
+  expect(commands[1]).toEqual(commands[0])
+})
+
 for (const width of [1440, 1024, 390, 320]) {
   test.describe(`viewport ${width}`, () => {
     test.use({ viewport: { width, height: 1000 } })

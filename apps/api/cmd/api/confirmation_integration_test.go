@@ -70,6 +70,7 @@ func TestPostgresAtomicConfirmation(t *testing.T) {
 		return coordinationrequest.CoordinationRequest{ID: id, OrganizationID: "org", RequesterUserID: requester, TargetUserID: target, Type: coordinationrequest.Meeting, Title: "Synthetic", DurationMinutes: 30, DeadlineAt: now.Add(24 * time.Hour), SyncPreference: coordinationrequest.Either, Priority: coordinationrequest.PriorityNormal, Status: coordinationrequest.Suggested, CreatedAt: now, UpdatedAt: now, Options: []coordinationrequest.Option{{ID: id + "-option", RequestID: id, Type: coordinationrequest.OptionMeeting, StartAt: &at, EndAt: &end, CreatedAt: now}}}
 	}
 	testPostgresConfirmationEffects(t, ctx, db, store, fixture, now)
+	testPostgresCreation(t, ctx, db, store, fixture, now)
 	testPostgresReschedule(t, ctx, db, store, fixture, now)
 	t.Run("confirmed-cancellation", func(t *testing.T) {
 		for i, actor := range []string{"alice", "bob"} {

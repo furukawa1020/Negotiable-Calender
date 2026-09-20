@@ -123,7 +123,7 @@ func TestHandoffRollbackAndDeletion(t *testing.T) {
 	for _, scenario := range []string{"recipient-note", "requester-note", "audit", "membership", "deleting"} {
 		t.Run(scenario, func(t *testing.T) {
 			b, ctx := emulatorBackend(t)
-			now := time.Now().UTC()
+			now := time.Now().UTC().Truncate(time.Microsecond)
 			value := confirmationRequest("handoff-fail", "alice", "bob", now, now.Add(time.Hour))
 			for _, u := range []string{"alice", "bob", "carol"} {
 				if scenario == "membership" && u == "carol" {
@@ -204,7 +204,9 @@ func TestDeletionOfOriginalHandoffOwnerRemovesLinkedData(t *testing.T) {
 
 func TestHandoffRacesWithAnswerAndConfirmation(t *testing.T) {
 	b, ctx := emulatorBackend(t)
-	now := time.Now().UTC()
+	// Firestore persists timestamps at microsecond precision. Match that
+	// precision so the synthetic response deadline equals the saved deadline.
+	now := time.Now().UTC().Truncate(time.Microsecond)
 	value := confirmationRequest("handoff-race", "alice", "bob", now, now.Add(time.Hour))
 	for _, u := range []string{"alice", "bob", "carol"} {
 		putDocument(t, ctx, b.Client.Collection("organizations").Doc("org").Collection("members").Doc(u), membershipRecord{UserID: u, Role: organization.Manager})
@@ -276,7 +278,7 @@ func TestHandoffRacesWithAnswerAndConfirmation(t *testing.T) {
 
 func TestNewHandoffOwnerCanConfirmMeeting(t *testing.T) {
 	b, ctx := emulatorBackend(t)
-	now := time.Now().UTC()
+	now := time.Now().UTC().Truncate(time.Microsecond)
 	value := confirmationRequest("handoff-meeting", "alice", "bob", now, now.Add(time.Hour))
 	for _, u := range []string{"alice", "bob", "carol"} {
 		putDocument(t, ctx, b.Client.Collection("organizations").Doc("org").Collection("members").Doc(u), membershipRecord{UserID: u, Role: organization.Manager})

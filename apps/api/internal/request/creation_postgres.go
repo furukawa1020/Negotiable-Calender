@@ -25,7 +25,7 @@ func guardCreationMembers(ctx context.Context, tx *sql.Tx, value CoordinationReq
 
 func lookupCreationEnvelope(ctx context.Context, tx *sql.Tx, command CoordinationRequest) error {
 	var value CoordinationRequest
-	err := tx.QueryRowContext(ctx, `SELECT id,organization_id,requester_user_id,target_user_id,type,title,duration_minutes,deadline_at,sync_preference,priority FROM coordination_requests WHERE id=$1`, command.ID).
+	err := tx.QueryRowContext(ctx, `SELECT id,organization_id,requester_user_id,COALESCE(NULLIF(delegated_from_user_id,''),target_user_id),type,title,duration_minutes,deadline_at,sync_preference,priority FROM coordination_requests WHERE id=$1`, command.ID).
 		Scan(&value.ID, &value.OrganizationID, &value.RequesterUserID, &value.TargetUserID, &value.Type, &value.Title, &value.DurationMinutes, &value.DeadlineAt, &value.SyncPreference, &value.Priority)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound

@@ -159,7 +159,7 @@ func TestRequestAuditCleanupResumesAtEveryBoundary(t *testing.T) {
 }
 
 func TestRequestWritesFenceEveryParticipant(t *testing.T) {
-	for _, participant := range []string{"requester", "target", "delegate", "option"} {
+	for _, participant := range []string{"requester", "target", "delegate", "original-target", "option"} {
 		t.Run(participant, func(t *testing.T) {
 			b, ctx := emulatorBackend(t)
 			request := deletionRequest(time.Now().UTC())
@@ -170,6 +170,9 @@ func TestRequestWritesFenceEveryParticipant(t *testing.T) {
 			case "delegate":
 				deleting = "carol"
 				request.DelegatedUserID = deleting
+			case "original-target":
+				deleting = "carol"
+				request.DelegatedFromUserID = deleting
 			case "option":
 				deleting = "carol"
 				request.Options = []coordinationrequest.Option{{ID: "option", RequestID: request.ID, Type: coordinationrequest.OptionDelegate, DelegateUserID: deleting, CreatedAt: request.CreatedAt}}

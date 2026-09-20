@@ -271,6 +271,9 @@ func (api *API) delegateCoordinationRequest(response http.ResponseWriter, reques
 		writeJSON(response, http.StatusBadRequest, map[string]string{"error": "delegateUserId is required"})
 		return
 	}
+	if api.handoffRequest(response, request, input.DelegateUserID) {
+		return
+	}
 	option := coordinationrequest.Option{
 		ID: newID("option"), RequestID: request.PathValue("requestId"),
 		Type: coordinationrequest.OptionDelegate, DelegateUserID: input.DelegateUserID,

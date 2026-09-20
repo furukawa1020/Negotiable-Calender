@@ -105,6 +105,11 @@ VALUES('audit-1','shared-org','owner-2','request_changed','request','request-1',
 VALUES('invitation-1','shared-org','owner-2','MEMBER',$1,$2,'owner-1',$3)`, []byte("invite-hash"), now.Add(time.Hour), now)
 
 	store := auth.NewPostgresStore(database)
+	exec(`INSERT INTO memberships(id,organization_id,user_id,role,created_at) VALUES('handoff-member','shared-org','solo-1','MEMBER',$1)`, now)
+	exec(`INSERT INTO coordination_requests(id,organization_id,requester_user_id,target_user_id,delegated_from_user_id,type,title,duration_minutes,deadline_at,sync_preference,priority,status,created_at,updated_at)
+VALUES('handed-off','shared-org','owner-2','solo-1','owner-1','review','Historical request',15,$1,'either','normal','suggested',$2,$2)`, now.Add(time.Hour), now)
+	exec(`INSERT INTO notifications(id,user_id,type,request_id,message,created_at) VALUES('handoff-note','solo-1','request_received','handed-off','generic',$1)`, now)
+	exec(`INSERT INTO audit_logs(id,organization_id,actor_user_id,action,resource_type,resource_id,created_at) VALUES('handoff-audit','shared-org','owner-2','request_delegated','request','handed-off',$1)`, now)
 	if err := store.DeleteAccount(ctx, "owner-1"); !errors.Is(err, auth.ErrLastOrganizationOwner) {
 		t.Fatalf("last owner was not protected: %v", err)
 	}
@@ -134,6 +139,9 @@ VALUES('invitation-1','shared-org','owner-2','MEMBER',$1,$2,'owner-1',$3)`, []by
 		assertCount(t, ctx, database, check.table, check.predicate, 0)
 	}
 	assertCount(t, ctx, database, "users", "id = 'owner-2'", 1)
+	assertCount(t, ctx, database, "coordination_requests", "id = 'handed-off'", 0)
+	assertCount(t, ctx, database, "notifications", "request_id = 'handed-off'", 0)
+	assertCount(t, ctx, database, "audit_logs", "resource_id = 'handed-off'", 0)
 	assertCount(t, ctx, database, "organizations", "id = 'shared-org'", 1)
 
 	if err := store.DeleteAccount(ctx, "solo-1"); err != nil {

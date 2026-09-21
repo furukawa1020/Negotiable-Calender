@@ -1279,7 +1279,7 @@ function App() {
                     ))}
                     {item.status === 'suggested' ? (
                       <>
-                        <CounterproposalForm key={`${activeOrganizationID}:${activeUserID}:${item.id}`}
+                        <CounterproposalForm key={`proposal:${activeOrganizationID}:${activeUserID}:${item.id}`}
                           apiURL={apiURL} organizationID={activeOrganizationID} actor={activeUserID} requestID={item.id}
                           durationMinutes={item.durationMinutes} disabled={respondingRequestID === item.id || resolution.pending(item.id)}
                           onProposed={option => { setInboxRequests(current => current.map(row => row.id === item.id ? { ...row, options: [...row.options.filter(old => old.id !== option.id), option] } : row)); setNotice('別の時間を提案しました。依頼者の承認を待っています。') }} />

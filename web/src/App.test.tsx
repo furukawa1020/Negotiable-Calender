@@ -320,7 +320,7 @@ describe('App', () => {
         }],
       }],
     }), { status: 200 })).mockResolvedValueOnce(new Response(JSON.stringify({
-      id: 'option-2', type: 'meeting',
+      id: 'option-2', requestId: 'request-1', type: 'meeting', proposedByUserId: 'demo-manager',
       startAt: '2026-08-28T01:00:00Z', endAt: '2026-08-28T01:15:00Z',
     }), { status: 201 })).mockResolvedValue(new Response('{}', { status: 200 }))
     render(<App />)
@@ -332,7 +332,7 @@ describe('App', () => {
     fireEvent.change(screen.getByLabelText('別の開始時間'), { target: { value: '2026-08-28T10:00' } })
     fireEvent.change(screen.getByLabelText('終了時間'), { target: { value: '2026-08-28T10:15' } })
     fireEvent.click(screen.getByRole('button', { name: '別時間を提案' }))
-    expect(await screen.findByText('別の時間候補を追加しました。')).toBeInTheDocument()
+    expect(await screen.findByText('別の時間を提案しました。依頼者の承認を待っています。')).toBeInTheDocument()
     fireEvent.click(screen.getAllByRole('button', { name: 'この候補を承認' })[0])
     expect(await screen.findByText('候補を承認しました。')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'カレンダーに登録（ICS）' })).toBeInTheDocument()

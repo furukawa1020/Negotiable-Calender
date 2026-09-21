@@ -74,6 +74,7 @@ ALTER TABLE coordination_requests ADD COLUMN IF NOT EXISTS delegated_user_id tex
 ALTER TABLE coordination_requests ADD COLUMN IF NOT EXISTS delegated_from_user_id text;
 ALTER TABLE coordination_requests ADD COLUMN IF NOT EXISTS async_message text;
 ALTER TABLE coordination_requests ADD COLUMN IF NOT EXISTS reschedule_proposal jsonb NOT NULL DEFAULT 'null';
+ALTER TABLE coordination_request_options ADD COLUMN IF NOT EXISTS proposed_by_user_id text;
 `
 	if _, err := database.ExecContext(ctx, schema); err != nil {
 		return fmt.Errorf("create coordination request schema: %w", err)
@@ -409,7 +410,7 @@ INSERT INTO coordination_request_options (
 
 func listOptions(ctx context.Context, tx *sql.Tx, requestID string) ([]Option, error) {
 	rows, err := tx.QueryContext(ctx, `
-SELECT id, request_id, type, start_at, end_at, response_by, delegate_user_id, created_at
+SELECT id, request_id, type, start_at, end_at, response_by, delegate_user_id, created_at, proposed_by_user_id
 FROM coordination_request_options
 WHERE request_id = $1
 ORDER BY created_at, id
@@ -422,10 +423,10 @@ ORDER BY created_at, id
 	for rows.Next() {
 		var option Option
 		var startAt, endAt, responseBy sql.NullTime
-		var delegateUserID sql.NullString
+		var delegateUserID, proposedByUserID sql.NullString
 		if err := rows.Scan(
 			&option.ID, &option.RequestID, &option.Type, &startAt, &endAt,
-			&responseBy, &delegateUserID, &option.CreatedAt,
+			&responseBy, &delegateUserID, &option.CreatedAt, &proposedByUserID,
 		); err != nil {
 			return nil, fmt.Errorf("scan coordination option: %w", err)
 		}
@@ -433,6 +434,7 @@ ORDER BY created_at, id
 		option.EndAt = utcPointer(endAt)
 		option.ResponseBy = utcPointer(responseBy)
 		option.DelegateUserID = delegateUserID.String
+		option.ProposedByUserID = proposedByUserID.String
 		option.CreatedAt = option.CreatedAt.UTC()
 		options = append(options, option)
 	}

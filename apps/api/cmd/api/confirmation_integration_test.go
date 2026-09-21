@@ -73,6 +73,7 @@ func TestPostgresAtomicConfirmation(t *testing.T) {
 	testPostgresCreation(t, ctx, db, store, fixture, now)
 	testPostgresResolution(t, ctx, db, store, fixture, now)
 	testPostgresHandoff(t, ctx, db, store, fixture, now)
+	testPostgresCounterproposal(t, ctx, db, store, fixture, now)
 	testPostgresReschedule(t, ctx, db, store, fixture, now)
 	t.Run("confirmed-cancellation", func(t *testing.T) {
 		for i, actor := range []string{"alice", "bob"} {

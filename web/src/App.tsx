@@ -5,6 +5,7 @@ import { CalendarSyncStatus } from './CalendarSyncStatus'
 import { AccountAvatar } from './AccountAvatar'
 import { RequestComposer } from './RequestComposer'
 import { RequestHandoff } from './RequestHandoff'
+import { CounterproposalForm, CounterproposalAgreement } from './Counterproposal'
 import { useRequestResolution } from './useRequestResolution'
 import { RescheduleMeeting } from './RescheduleMeeting'
 import { LocalPlanning } from './LocalPlanningPanel'
@@ -99,6 +100,7 @@ type CoordinationOption = {
   startAt?: string
   endAt?: string
   responseBy?: string
+  proposedByUserId?: string
 }
 
 type CoordinationRequest = {
@@ -644,6 +646,7 @@ function App() {
         headers: {
           'Content-Type': 'application/json',
           'X-Demo-User-ID': activeUserID,
+          'X-Organization-ID': activeOrganizationID,
         },
         body: JSON.stringify({ optionId: optionID }),
       })
@@ -731,37 +734,6 @@ function App() {
     }
   }
 
-  const suggestTime = async (event: FormEvent<HTMLFormElement>, requestID: string) => {
-    event.preventDefault()
-    const formElement = event.currentTarget
-    const form = new FormData(formElement)
-    const startAt = new Date(String(form.get('suggestStart')))
-    const endAt = new Date(String(form.get('suggestEnd')))
-    setRespondingRequestID(requestID)
-    try {
-      const response = await apiFetch(`${apiURL}/api/v1/requests/${requestID}/suggest`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Demo-User-ID': activeUserID,
-        },
-        body: JSON.stringify({ startAt: startAt.toISOString(), endAt: endAt.toISOString() }),
-      })
-      if (!response.ok) {
-        throw new Error('suggest failed')
-      }
-      const option = await response.json() as CoordinationOption
-      setInboxRequests((current) => current.map((item) => item.id === requestID
-        ? { ...item, options: [...item.options, option] }
-        : item))
-      setNotice('別の時間候補を追加しました。')
-      formElement.reset()
-    } catch {
-      setNotice('時間候補を追加できませんでした。未来の日時を確認してください。')
-    } finally {
-      setRespondingRequestID('')
-    }
-  }
 
 
   const exportUserData = async () => {
@@ -1300,18 +1272,17 @@ function App() {
                         <strong>{option.startAt && option.endAt
                           ? `${formatDateTime(option.startAt)} — ${new Intl.DateTimeFormat('ja-JP', { hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(option.endAt))}`
                           : '非同期で回答'}</strong>
-                        {item.status === 'suggested' && option.type === 'meeting' ? (
+                        {item.status === 'suggested' && option.type === 'meeting' && !option.proposedByUserId ? (
                           <button type="button" disabled={respondingRequestID === item.id || resolution.pending(item.id)} onClick={() => respondToRequest(item.id, 'accept', option.id)}>この候補を承認</button>
-                        ) : null}
+                        ) : item.status === 'suggested' && option.proposedByUserId && option.proposedByUserId === item.targetUserId ? <span>依頼者の承認待ち</span> : null}
                       </div>
                     ))}
                     {item.status === 'suggested' ? (
                       <>
-                        <form className="suggest-form" onSubmit={(event) => suggestTime(event, item.id)}>
-                          <label>別の開始時間<input name="suggestStart" type="datetime-local" required /></label>
-                          <label>終了時間<input name="suggestEnd" type="datetime-local" required /></label>
-                          <button type="submit" disabled={respondingRequestID === item.id || resolution.pending(item.id)}>別時間を提案</button>
-                        </form>
+                        <CounterproposalForm key={`${activeOrganizationID}:${activeUserID}:${item.id}`}
+                          apiURL={apiURL} organizationID={activeOrganizationID} actor={activeUserID} requestID={item.id}
+                          durationMinutes={item.durationMinutes} disabled={respondingRequestID === item.id || resolution.pending(item.id)}
+                          onProposed={option => { setInboxRequests(current => current.map(row => row.id === item.id ? { ...row, options: [...row.options.filter(old => old.id !== option.id), option] } : row)); setNotice('別の時間を提案しました。依頼者の承認を待っています。') }} />
                         <form className="async-form" onSubmit={(event) => respondAsync(event, item.id)}>
                           <label>非同期メッセージ<textarea name="asyncMessage" maxLength={500} rows={2} placeholder="回答方法や次のアクションを500文字以内で入力" disabled={resolution.pending(item.id)} required /></label>
                           <button type="submit" disabled={respondingRequestID === item.id || resolution.pending(item.id)}>非同期で回答</button>
@@ -1335,7 +1306,7 @@ function App() {
             <div className="people-heading">
               <div>
                 <h1 id="sent-title">送信した依頼</h1>
-                <p className="hero-copy">依頼者本人だけが送信状況を確認し、回答前の依頼をキャンセルできます。</p>
+                <p className="hero-copy">相手からの時間提案を承認し、確定日時を確認できます。回答前の依頼は取り消せます。</p>
               </div>
               <button className="secondary-button" type="button" onClick={openSentRequests}>更新</button>
             </div>
@@ -1359,6 +1330,11 @@ function App() {
                       <ConfirmedMeeting request={item} onDownload={downloadConfirmedMeeting} onCancel={cancelConfirmedMeeting} />
                       <RescheduleMeeting request={item} actor={requesterUserID} onChange={rescheduleMeeting} />
                       <strong>{item.options.length}件の調整候補</strong>
+                      <CounterproposalAgreement key={`${activeOrganizationID}:${requesterUserID}:${item.id}`}
+                        apiURL={apiURL} organizationID={activeOrganizationID} actor={requesterUserID} requestID={item.id}
+                        targetID={item.targetUserId} status={item.status} options={item.options}
+                        disabled={respondingRequestID === item.id || resolution.pending(item.id)}
+                        onConfirmed={optionID => { setSentRequests(current => current.map(row => row.id === item.id ? { ...row, status: 'accepted', acceptedOptionId: optionID } : row)); setNotice('提案を承認し、会議を確定しました。相手に通知しました。') }} />
                       {item.delegatedFromUserId ? <p className="field-help">担当変更済み · 現在の担当: {item.targetUserId}</p> : null}
                       {cancellable ? (
                         <button className="decline-button" type="button" disabled={respondingRequestID === item.id || resolution.pending(item.id)} onClick={() => cancelSentRequest(item.id)}>

@@ -193,3 +193,7 @@ jobs:
             sleep 5
           done
           exit 1
+
+      - name: Verify identity-only Google login redirect
+        if: steps.configuration.outputs.demo_mode == 'false'
+        run: python3 .github/scripts/check-login-redirect.py "$SERVICE_URL"

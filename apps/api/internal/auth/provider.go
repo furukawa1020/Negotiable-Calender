@@ -52,14 +52,15 @@ func (provider *GoogleProvider) Configured() bool {
 
 func (provider *GoogleProvider) AuthorizationURL(state, codeChallenge string) string {
 	query := url.Values{
-		"client_id":              {provider.config.ClientID},
-		"redirect_uri":           {provider.config.RedirectURL},
-		"response_type":          {"code"},
-		"scope":                  {"openid profile email"},
-		"state":                  {state},
-		"code_challenge":         {codeChallenge},
-		"code_challenge_method":  {"S256"},
-		"include_granted_scopes": {"true"},
+		"client_id":             {provider.config.ClientID},
+		"redirect_uri":          {provider.config.RedirectURL},
+		"response_type":         {"code"},
+		"scope":                 {"openid profile email"},
+		"state":                 {state},
+		"code_challenge":        {codeChallenge},
+		"code_challenge_method": {"S256"},
+		// Login must not pull earlier Calendar/project grants into identity consent.
+		"include_granted_scopes": {"false"},
 	}
 	return provider.config.AuthorizeURL + "?" + query.Encode()
 }

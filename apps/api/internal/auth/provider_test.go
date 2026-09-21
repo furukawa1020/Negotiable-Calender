@@ -24,6 +24,9 @@ func TestGoogleAuthorizationURLUsesLoginScopesAndPKCE(t *testing.T) {
 	if query.Get("scope") != "openid profile email" || strings.Contains(query.Get("scope"), "calendar") {
 		t.Fatalf("login requested incorrect scopes: %q", query.Get("scope"))
 	}
+	if query.Get("include_granted_scopes") != "false" || query.Get("access_type") == "offline" {
+		t.Fatal("identity login must not combine past grants or request background access")
+	}
 }
 
 func TestGoogleExchangeUsesVerifierAndVerifiedUserInfo(t *testing.T) {

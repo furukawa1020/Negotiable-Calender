@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useMemo, useState } from 'react'
+import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import SharingPolicyEditor from './SharingPolicyEditor'
 import { ConfirmedMeeting } from './ConfirmedMeeting'
 import { CalendarSyncStatus } from './CalendarSyncStatus'
@@ -283,6 +283,7 @@ function App() {
   const [calendarConnection, setCalendarConnection] = useState<CalendarConnection | null>(null)
   const [calendarSyncMode, setCalendarSyncMode] = useState('off')
   const [calendarBusy, setCalendarBusy] = useState(false)
+  const calendarLifecycle = useRef(0)
   const [workspaces, setWorkspaces] = useState<Workspace[]>([])
   const [invitationToken, setInvitationToken] = useState('')
   const [invitationPreview, setInvitationPreview] = useState<InvitationPreview | null>(null)
@@ -354,6 +355,8 @@ function App() {
   useEffect(() => {
     if (!authUser || !calendarConnection || currentView !== 'calendar') return
     let cancelled = false
+    const lifecycle = calendarLifecycle.current
+    const isCurrent = () => !cancelled && lifecycle === calendarLifecycle.current
     const load = async () => {
       setPrivateEventsLoading(true)
       setPrivateEventsError('')
@@ -369,20 +372,20 @@ function App() {
           throw new Error(privateResponse.status === 409 ? 'reconnect' : 'private')
         }
         const privatePayload = await privateResponse.json() as PrivateCalendarResponse
-        if (!cancelled) setPrivateCalendarEvents(privatePayload.events ?? [])
+        if (isCurrent()) setPrivateCalendarEvents(privatePayload.events ?? [])
         if (projectionResponse.ok) {
           const projectionPayload = await projectionResponse.json() as PublicProjection
-          if (!cancelled) setProjections(mapPublicSegments(projectionPayload))
+          if (isCurrent()) setProjections(mapPublicSegments(projectionPayload))
         }
       } catch (error) {
-        if (!cancelled) {
+        if (isCurrent()) {
           setPrivateCalendarEvents([])
           setPrivateEventsError(error instanceof Error && error.message === 'reconnect'
             ? 'Google Calendarの再接続が必要です。'
             : '本人用カレンダーを取得できませんでした。')
         }
       } finally {
-        if (!cancelled) setPrivateEventsLoading(false)
+        if (isCurrent()) setPrivateEventsLoading(false)
       }
     }
     void load()
@@ -400,7 +403,7 @@ function App() {
   }
 
   const privateRows = authUser
-    ? privateCalendarEvents.map((event) => privateEventRow(event, calendarView))
+    ? calendarConnection ? privateCalendarEvents.map((event) => privateEventRow(event, calendarView)) : []
     : demoMode ? demoPrivateEvents : []
 
 
@@ -857,6 +860,10 @@ function App() {
         method: 'POST',
       })
       if (!response.ok) throw new Error('logout failed')
+      calendarLifecycle.current++
+      setPrivateCalendarEvents([])
+      setProjections([])
+      setSelectedPrivateEventID('')
       setAuthUser(null)
       setCalendarConnection(null)
       setAccountOpen(false)
@@ -867,11 +874,14 @@ function App() {
   }
 
   const syncCalendar = async () => {
+    const lifecycle = calendarLifecycle.current
+    const isCurrent = () => lifecycle === calendarLifecycle.current
     setCalendarBusy(true)
     try {
       const response = await apiFetch(`${apiURL}/api/v1/calendar/sync`, { method: 'POST' })
       if (!response.ok) throw new Error('sync failed')
       const payload = await response.json() as { busySpanCount: number; lastSyncedAt: string }
+      if (!isCurrent()) return
       setCalendarConnection((current) => current ? { ...current, lastSyncedAt: payload.lastSyncedAt, reconnectRequired: false, lastErrorCode: '', sourceFresh: true } : current)
       setNotice(`Google Calendarから${payload.busySpanCount}件のbusy時間を同期しました。予定名は保存していません。`)
       try {
@@ -889,16 +899,17 @@ function App() {
         })
         if (projectionResponse.ok) {
           const view = await projectionResponse.json() as PublicProjection
-          setProjections(mapPublicSegments(view))
+          if (isCurrent()) setProjections(mapPublicSegments(view))
         }
       } catch {
-        setNotice(`Google Calendarから${payload.busySpanCount}件を同期しましたが、表示の再読込に失敗しました。`)
+        if (isCurrent()) setNotice(`Google Calendarから${payload.busySpanCount}件を同期しましたが、表示の再読込に失敗しました。`)
       }
     } catch {
+      if (!isCurrent()) return
       setNotice('Calendarを同期できませんでした。再接続が必要な場合があります。')
       setCalendarConnection((current) => current ? { ...current, sourceFresh: false } : current)
     } finally {
-      setCalendarBusy(false)
+      if (isCurrent()) setCalendarBusy(false)
     }
   }
 
@@ -907,6 +918,8 @@ function App() {
     try {
       const response = await apiFetch(`${apiURL}/api/v1/calendar/connection`, { method: 'DELETE' })
       if (!response.ok) throw new Error('disconnect failed')
+      // Invalidate pending responses now, before React runs effect cleanup.
+      calendarLifecycle.current++
       setCalendarConnection(null)
       setPrivateCalendarEvents([])
       setSelectedPrivateEventID('')

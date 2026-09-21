@@ -148,7 +148,7 @@ func (handler *Handler) callback(response http.ResponseWriter, request *http.Req
 		handler.redirectConsentResult(response, request, "exchange_failed")
 		return
 	}
-	if tokens.RefreshToken == "" || !contains(tokens.Scopes, CalendarReadonlyScope) {
+	if tokens.RefreshToken == "" || !hasCalendarReadScope(tokens.Scopes) {
 		handler.redirectConsentResult(response, request, "permission_required")
 		return
 	}

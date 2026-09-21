@@ -59,6 +59,10 @@ func TestConsentFailuresConsumeValidStateAndPreserveConnection(t *testing.T) {
 		{name: "unknown provider error", query: "error=secret-error&error_description=secret-description", result: "provider_failed"},
 		{name: "exchange rejected", query: "code=secret-code", result: "exchange_failed", err: errors.New("rejected"), exchanges: 1},
 		{name: "missing scope", query: "code=secret-code", result: "permission_required", tokens: TokenSet{RefreshToken: "secret-refresh"}, exchanges: 1},
+		{name: "freebusy only", query: "code=secret-code", result: "permission_required", tokens: TokenSet{RefreshToken: "secret-refresh", Scopes: []string{"https://www.googleapis.com/auth/calendar.freebusy"}}, exchanges: 1},
+		{name: "write grant only", query: "code=secret-code", result: "permission_required", tokens: TokenSet{RefreshToken: "secret-refresh", Scopes: []string{"https://www.googleapis.com/auth/calendar.events.owned"}}, exchanges: 1},
+		{name: "scope prefix spoof", query: "code=secret-code", result: "permission_required", tokens: TokenSet{RefreshToken: "secret-refresh", Scopes: []string{CalendarOwnedEventsReadonlyScope + ".invalid"}}, exchanges: 1},
+		{name: "minimal missing offline grant", query: "code=secret-code", result: "permission_required", tokens: TokenSet{Scopes: []string{CalendarOwnedEventsReadonlyScope}}, exchanges: 1},
 		{name: "missing offline grant", query: "code=secret-code", result: "permission_required", tokens: TokenSet{Scopes: []string{CalendarReadonlyScope}}, exchanges: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

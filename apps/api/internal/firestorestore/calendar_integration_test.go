@@ -50,7 +50,7 @@ func TestCalendarOAuthSyncPublicationAndDisconnect(t *testing.T) {
 			} else if r.Form.Get("refresh_token") != "synthetic-refresh" {
 				return nil, errors.New("invalid decrypted refresh token")
 			}
-			body = map[string]any{"access_token": "synthetic-access", "refresh_token": "synthetic-refresh", "expires_in": 3600, "scope": calendarintegration.CalendarReadonlyScope}
+			body = map[string]any{"access_token": "synthetic-access", "refresh_token": "synthetic-refresh", "expires_in": 3600, "scope": calendarintegration.CalendarOwnedEventsReadonlyScope}
 		case "www.googleapis.com/calendar/v3/calendars/primary/events":
 			if r.Header.Get("Authorization") != "Bearer synthetic-access" {
 				return nil, errors.New("missing access token")
@@ -102,7 +102,7 @@ func TestCalendarOAuthSyncPublicationAndDisconnect(t *testing.T) {
 			t.Fatal(err)
 		}
 		challenge = target.Query().Get("code_challenge")
-		if challenge == "" || target.Query().Get("scope") != calendarintegration.CalendarReadonlyScope {
+		if challenge == "" || target.Query().Get("scope") != calendarintegration.CalendarOwnedEventsReadonlyScope {
 			t.Fatal("invalid consent request")
 		}
 		callback := "/api/v1/calendar/google/callback?state=" + url.QueryEscape(target.Query().Get("state")) + "&code=synthetic-code"
@@ -136,6 +136,9 @@ func TestCalendarOAuthSyncPublicationAndDisconnect(t *testing.T) {
 	connection, err := b.Calendar().GetConnection(ctx, "alice")
 	if err != nil || len(connection.RefreshTokenCipher) == 0 || strings.Contains(string(connection.RefreshTokenCipher), "synthetic-refresh") {
 		t.Fatal("grant not encrypted")
+	}
+	if len(connection.GrantedScopes) != 1 || connection.GrantedScopes[0] != calendarintegration.CalendarOwnedEventsReadonlyScope {
+		t.Fatal("minimal grant was not preserved")
 	}
 	// A denied re-consent must consume its real Firestore flow without replacing
 	// an existing grant. No Google token exchange is needed for this path.

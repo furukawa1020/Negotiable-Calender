@@ -12,7 +12,9 @@ document, not evidence of submission, approval, or successful real-user consent.
 - Calendar API is enabled. Cloud Run is deployed, but deployment is not an
   OAuth publishing or verification status.
 - Login scopes: openid profile email.
-- Calendar scope: https://www.googleapis.com/auth/calendar.readonly.
+- New Calendar scope: https://www.googleapis.com/auth/calendar.events.owned.readonly.
+  Legacy calendar.readonly grants remain compatible; this is not evidence of
+  approval of either scope in Google Console.
 - Calendar callback:
   https://negotiable-calendar-480760664246.asia-northeast1.run.app/api/v1/calendar/google/callback
 - Google consent uses offline access, explicit consent, PKCE S256, and a
@@ -31,11 +33,12 @@ included in organization-facing availability projections.
 
 The free/busy-only permission is insufficient for the implemented owner event
 view and event-level incremental synchronization. No calendar write operation
-is implemented. The current scope also permits broader read access than the
-primary-calendar-only implementation uses. Before submission, document the
-minimum-scope review; consider calendar.events.readonly with equivalent coverage
-and regression tests, rather than claiming calendar.readonly is the narrowest
-possible scope. Do not change scopes solely to evade verification.
+is implemented. New consent uses calendar.events.owned.readonly, covering event
+reading on calendars owned by the consenting user. All requests are limited to
+primary/events; shared calendars owned by someone else and calendar settings
+are not requested. See the [minimum-scope review and migration](google-calendar-scope-migration.md).
+The older calendar.readonly grant is accepted for compatibility but is no longer
+requested. Scope narrowing is not a way to evade verification.
 
 This text is a reviewer draft describing implementation, not an attestation
 of compliance or an approved privacy policy.

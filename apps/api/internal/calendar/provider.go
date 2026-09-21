@@ -11,11 +11,20 @@ import (
 	"time"
 )
 
-const CalendarReadonlyScope = "https://www.googleapis.com/auth/calendar.readonly"
+const (
+	// CalendarOwnedEventsReadonlyScope covers the primary-calendar-only event API.
+	CalendarOwnedEventsReadonlyScope = "https://www.googleapis.com/auth/calendar.events.owned.readonly"
+	// CalendarReadonlyScope is accepted only for compatibility with existing grants.
+	CalendarReadonlyScope = "https://www.googleapis.com/auth/calendar.readonly"
+)
+
+func hasCalendarReadScope(scopes []string) bool {
+	return contains(scopes, CalendarOwnedEventsReadonlyScope) || contains(scopes, CalendarReadonlyScope)
+}
 
 var (
 	ErrReconnectRequired = errors.New("calendar reconnect required")
-	ErrSyncTokenExpired   = errors.New("calendar sync token expired")
+	ErrSyncTokenExpired  = errors.New("calendar sync token expired")
 )
 
 type Provider interface {
@@ -37,8 +46,8 @@ type IncrementalProvider interface {
 type GoogleConfig struct{ ClientID, ClientSecret, RedirectURL, RevokeURL string }
 
 type GoogleProvider struct {
-	config                       GoogleConfig
-	client                       *http.Client
+	config                                  GoogleConfig
+	client                                  *http.Client
 	authURL, tokenURL, eventsURL, revokeURL string
 }
 
@@ -65,9 +74,9 @@ func (provider *GoogleProvider) Configured() bool {
 
 func (provider *GoogleProvider) AuthorizationURL(state, challenge string) string {
 	query := url.Values{"client_id": {provider.config.ClientID}, "redirect_uri": {provider.config.RedirectURL},
-		"response_type": {"code"}, "scope": {CalendarReadonlyScope}, "state": {state},
+		"response_type": {"code"}, "scope": {CalendarOwnedEventsReadonlyScope}, "state": {state},
 		"code_challenge": {challenge}, "code_challenge_method": {"S256"}, "access_type": {"offline"},
-		"prompt": {"consent"}, "include_granted_scopes": {"true"}}
+		"prompt": {"consent"}, "include_granted_scopes": {"false"}}
 	return provider.authURL + "?" + query.Encode()
 }
 
@@ -245,7 +254,6 @@ func googleTime(dateTime, date string) (time.Time, error) {
 	return value.UTC(), err
 }
 
-
 func (provider *GoogleProvider) ListPrivateEvents(ctx context.Context, accessToken string, from, to time.Time) ([]PrivateEventView, error) {
 	query := url.Values{
 		"timeMin": {from.UTC().Format(time.RFC3339)}, "timeMax": {to.UTC().Format(time.RFC3339)},
@@ -278,9 +286,9 @@ func (provider *GoogleProvider) ListPrivateEvents(ctx context.Context, accessTok
 		}
 		var body struct {
 			NextPageToken string `json:"nextPageToken"`
-			Items []struct {
+			Items         []struct {
 				ID, Summary, Description, Location, Status, HTMLLink, HangoutLink string
-				Attendees []struct {
+				Attendees                                                         []struct {
 					DisplayName string `json:"displayName"`
 					Email       string `json:"email"`
 					Self        bool   `json:"self"`

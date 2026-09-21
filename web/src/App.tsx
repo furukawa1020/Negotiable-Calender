@@ -2,6 +2,8 @@ import { type FormEvent, useEffect, useMemo, useState } from 'react'
 import SharingPolicyEditor from './SharingPolicyEditor'
 import { ConfirmedMeeting } from './ConfirmedMeeting'
 import { CalendarSyncStatus } from './CalendarSyncStatus'
+import { CalendarConsent, CalendarConnectionHelp } from './CalendarConsent'
+import { calendarConsentNotice } from './calendarConsentNotice'
 import { AccountAvatar } from './AccountAvatar'
 import { RequestComposer } from './RequestComposer'
 import { RequestHandoff } from './RequestHandoff'
@@ -245,7 +247,7 @@ function App() {
   const [notificationsOpen, setNotificationsOpen] = useState(false)
   const [notifications, setNotifications] = useState<AppNotification[]>([])
   const [notificationsLoading, setNotificationsLoading] = useState(false)
-  const [notice, setNotice] = useState('')
+  const [notice, setNotice] = useState(() => calendarConsentNotice(new URLSearchParams(window.location.search).get('calendar')))
   const [calendarAnchor, setCalendarAnchor] = useState(() => new Date())
   const [calendarView, setCalendarView] = useState<CalendarView>('day')
   const [calendarLayer, setCalendarLayer] = useState<'both' | 'private' | 'projection'>('both')
@@ -302,8 +304,9 @@ function App() {
     const params = new URLSearchParams(window.location.search)
     const authCompleted = params.get('auth') === 'success'
     const calendarCompleted = params.get('calendar') === 'connected'
+    const calendarFailure = calendarConsentNotice(params.get('calendar'))
     const incomingInvitation = params.get('invite') ?? ''
-    if (!authCompleted && !calendarCompleted && !incomingInvitation && import.meta.env.DEV) return
+    if (!authCompleted && !calendarCompleted && !calendarFailure && !incomingInvitation && import.meta.env.DEV) return
     const loadSession = async () => {
       try {
         const response = await apiFetch(`${apiURL}/api/v1/auth/session`)
@@ -339,9 +342,9 @@ function App() {
           }
         }
       } catch {
-        if (authCompleted || calendarCompleted) setNotice('ログイン状態を確認できませんでした。')
+        if (authCompleted || calendarCompleted || calendarFailure) setNotice('ログイン状態を確認できませんでした。もう一度ログインして接続状態を確認してください。')
       } finally {
-        if (authCompleted || calendarCompleted || incomingInvitation) window.history.replaceState({}, '', window.location.pathname)
+        if (authCompleted || calendarCompleted || calendarFailure || incomingInvitation) window.history.replaceState({}, '', window.location.pathname)
       }
     }
     void loadSession()
@@ -983,6 +986,7 @@ function App() {
           <p className="signin-help">Google ログインとカレンダーの接続は別の操作です。予定の読み取りには、ログイン後に接続の許可が必要です。</p>
           {notice ? <p role="status">{notice}</p> : null}
           <a className="primary-button" href={`${apiURL}/api/v1/auth/google/login`}>Googleでログイン</a>
+          <CalendarConnectionHelp />
         </main>
       </div>
     )
@@ -1046,14 +1050,14 @@ function App() {
                       <>
                         <CalendarSyncStatus mode={calendarSyncMode} connection={calendarConnection} />
                         {calendarConnection.reconnectRequired ? (
-                          <a href={`${apiURL}/api/v1/calendar/google/connect`}>Google Calendarを再接続</a>
+                          <CalendarConsent connectURL={`${apiURL}/api/v1/calendar/google/connect`} reconnect />
                         ) : (
                           <button type="button" onClick={syncCalendar} disabled={calendarBusy}>{calendarBusy ? '処理中…' : 'busy時間を同期'}</button>
                         )}
                         <button type="button" onClick={disconnectCalendar} disabled={calendarBusy}>Calendar接続を解除</button>
                       </>
                     ) : (
-                      <a href={`${apiURL}/api/v1/calendar/google/connect`}>Google Calendarを接続</a>
+                      <CalendarConsent connectURL={`${apiURL}/api/v1/calendar/google/connect`} />
                     )}
                     <button type="button" onClick={logout}>ログアウト</button>
                     <button className="danger-link" type="button" onClick={() => { setAccountOpen(false); setActiveDialog('delete-account') }}>アカウントを削除</button>

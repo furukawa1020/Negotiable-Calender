@@ -137,6 +137,28 @@ func TestCalendarOAuthSyncPublicationAndDisconnect(t *testing.T) {
 	if err != nil || len(connection.RefreshTokenCipher) == 0 || strings.Contains(string(connection.RefreshTokenCipher), "synthetic-refresh") {
 		t.Fatal("grant not encrypted")
 	}
+	// A denied re-consent must consume its real Firestore flow without replacing
+	// an existing grant. No Google token exchange is needed for this path.
+	denialStart := call(http.MethodGet, "/api/v1/calendar/google/connect")
+	if denialStart.Code != http.StatusFound {
+		t.Fatal("denial flow not created")
+	}
+	denialURL, err := url.Parse(denialStart.Header().Get("Location"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	denialPath := "/api/v1/calendar/google/callback?state=" + url.QueryEscape(denialURL.Query().Get("state")) + "&error=access_denied&error_description=do-not-reflect"
+	denialResponse := call(http.MethodGet, denialPath, denialStart.Result().Cookies()...)
+	if denialResponse.Code != http.StatusSeeOther || !strings.HasSuffix(denialResponse.Header().Get("Location"), "/?calendar=denied") || strings.Contains(denialResponse.Body.String(), "do-not-reflect") {
+		t.Fatal("denial did not recover safely")
+	}
+	if replay := call(http.MethodGet, denialPath, denialStart.Result().Cookies()...); replay.Code != http.StatusBadRequest {
+		t.Fatal("denied Firestore flow reused")
+	}
+	afterDenial, err := b.Calendar().GetConnection(ctx, "alice")
+	if err != nil || string(afterDenial.RefreshTokenCipher) != string(connection.RefreshTokenCipher) {
+		t.Fatal("denial changed existing grant")
+	}
 	sync(http.StatusOK)
 	sync(http.StatusOK)
 	if len(cursors) != 2 || cursors[0] != "" || cursors[1] != "cursor-1" {

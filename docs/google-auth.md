@@ -11,6 +11,13 @@ Negotiable Calendar uses the OAuth 2.0 authorization-code flow with PKCE S256 an
 
 The login flow requests only `openid profile email`. Google Calendar permission is intentionally requested later, when the user explicitly connects a calendar.
 
+Login also sets `include_granted_scopes=false` and does not request offline
+access. This prevents the login request from asking Google to combine previous
+Calendar/project grants into basic identity consent. It does not revoke existing
+grants or prove that Google has approved the application. The production smoke
+check verifies the first redirect's host, identity-only scope, callback, PKCE and
+no-combination setting without following Google or logging state/cookies.
+
 ## Production requirements
 
 - Set `DEMO_MODE=false`; production middleware removes all incoming demo identity headers.

@@ -10,7 +10,11 @@ import (
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/projection"
 )
 
-func (store *PostgresStore) acceptMeeting(ctx context.Context, requestID, userID, optionID string) (err error) {
+func (store *PostgresStore) acceptMeeting(ctx context.Context, requestID, userID, optionID string) error {
+	return store.confirmMeeting(ctx, requestID, userID, "", optionID)
+}
+
+func (store *PostgresStore) confirmMeeting(ctx context.Context, requestID, userID, org, optionID string) (err error) {
 	defer func() {
 		var state interface{ SQLState() string }
 		if errors.As(err, &state) && (state.SQLState() == "40001" || state.SQLState() == "40P01") {
@@ -31,17 +35,17 @@ func (store *PostgresStore) acceptMeeting(ctx context.Context, requestID, userID
 	if err != nil {
 		return err
 	}
-	if value.TargetUserID != userID {
+	if (value.TargetUserID != userID && value.RequesterUserID != userID) || (org != "" && org != value.OrganizationID) {
 		return ErrNotFound
 	}
-	if value.Status == Accepted && accepted.String == optionID {
-		return ErrAlreadyAccepted
-	}
-	if value.Status != Suggested {
-		return ErrNotFound
+	if org != "" {
+		if err := guardCreationMembers(ctx, tx, value); err != nil {
+			return err
+		}
 	}
 	var selected Option
-	err = tx.QueryRowContext(ctx, `SELECT id,request_id,type,start_at,end_at,created_at FROM coordination_request_options WHERE request_id=$1 AND id=$2`, requestID, optionID).Scan(&selected.ID, &selected.RequestID, &selected.Type, &selected.StartAt, &selected.EndAt, &selected.CreatedAt)
+	var proposer sql.NullString
+	err = tx.QueryRowContext(ctx, `SELECT id,request_id,type,start_at,end_at,created_at,proposed_by_user_id FROM coordination_request_options WHERE request_id=$1 AND id=$2`, requestID, optionID).Scan(&selected.ID, &selected.RequestID, &selected.Type, &selected.StartAt, &selected.EndAt, &selected.CreatedAt, &proposer)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrCandidateInvalid
 	}
@@ -57,7 +61,17 @@ func (store *PostgresStore) acceptMeeting(ctx context.Context, requestID, userID
 		utc := selected.EndAt.UTC()
 		selected.EndAt = &utc
 	}
+	selected.ProposedByUserID = proposer.String
 	value.Options = []Option{selected}
+	if err := AuthorizeConfirmation(value, userID, optionID); err != nil {
+		return err
+	}
+	if value.Status == Accepted && accepted.String == optionID {
+		return ErrAlreadyAccepted
+	}
+	if value.Status != Suggested {
+		return ErrNotFound
+	}
 	if _, err := ConfirmableMeeting(value, optionID, time.Now().UTC()); err != nil {
 		return err
 	}
@@ -65,7 +79,7 @@ func (store *PostgresStore) acceptMeeting(ctx context.Context, requestID, userID
 		return err
 	}
 	now := time.Now().UTC()
-	note, event := ConfirmationEffects(value, now)
+	note, event := ConfirmationEffectsForActor(value, userID, now)
 	if _, err := tx.ExecContext(ctx, `UPDATE coordination_requests SET status=$1,accepted_option_id=$2,updated_at=$3 WHERE id=$4`, Accepted, optionID, now, requestID); err != nil {
 		return err
 	}

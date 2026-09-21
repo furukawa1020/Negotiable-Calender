@@ -64,6 +64,7 @@ func ApplyHandoff(value *CoordinationRequest, actor, recipient string, options [
 			return ErrHandoffExpired
 		}
 		option.ID = fmt.Sprintf("handoff-option-%x", sha256.Sum256([]byte(value.ID+"\x00"+recipient+"\x00"+option.ID)))
+		option.ProposedByUserID = ""
 		if seen[option.ID] {
 			return ErrHandoffConflict
 		}

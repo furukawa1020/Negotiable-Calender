@@ -315,6 +315,9 @@ func (api *API) suggestCoordinationRequest(response http.ResponseWriter, request
 		writeJSON(response, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
 		return
 	}
+	if api.proposeMeeting(response, request, input) {
+		return
+	}
 	now := time.Now().UTC()
 	startAt, endAt := input.StartAt.UTC(), input.EndAt.UTC()
 	option := coordinationrequest.Option{
@@ -443,8 +446,18 @@ func (api *API) respondToCoordinationRequest(response http.ResponseWriter, reque
 		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to update request"})
 		return
 	}
-	err = api.requests.Respond(request.Context(), requestID, targetUserID, status, optionID)
+	if store, ok := api.requests.(coordinationrequest.CounterproposalStore); ok && status == coordinationrequest.Accepted {
+		org := request.Header.Get("X-Organization-ID")
+		if org == "" {
+			writeJSON(response, http.StatusUnauthorized, map[string]string{"error": "organization is required"})
+			return
+		}
+		err = store.ConfirmMeeting(request.Context(), requestID, targetUserID, org, optionID)
+	} else {
+		err = api.requests.Respond(request.Context(), requestID, targetUserID, status, optionID)
+	}
 	if errors.Is(err, coordinationrequest.ErrAlreadyAccepted) {
+		response.Header().Set("Idempotency-Replayed", "true")
 		writeJSON(response, http.StatusOK, map[string]any{"id": requestID, "status": coordinationrequest.Accepted, "acceptedOptionId": optionID})
 		return
 	}
@@ -456,6 +469,10 @@ func (api *API) respondToCoordinationRequest(response http.ResponseWriter, reque
 	}
 	if errors.Is(err, coordinationrequest.ErrNotFound) {
 		writeJSON(response, http.StatusConflict, map[string]string{"error": "request cannot be updated"})
+		return
+	}
+	if errors.Is(err, coordinationrequest.ErrCreationForbidden) {
+		writeJSON(response, http.StatusForbidden, map[string]string{"error": "current membership required"})
 		return
 	}
 	if err != nil {

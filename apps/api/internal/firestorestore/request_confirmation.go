@@ -12,6 +12,10 @@ import (
 )
 
 func (store *Request) acceptMeeting(ctx context.Context, requestID, userID, optionID string) error {
+	return store.confirmMeeting(ctx, requestID, userID, "", optionID)
+}
+
+func (store *Request) confirmMeeting(ctx context.Context, requestID, userID, org, optionID string) error {
 	ref := store.Client.Collection("coordinationRequests").Doc(requestID)
 	err := store.Client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
 		doc, err := tx.Get(ref)
@@ -22,11 +26,19 @@ func (store *Request) acceptMeeting(ctx context.Context, requestID, userID, opti
 		if err := doc.DataTo(&value); err != nil {
 			return err
 		}
-		if value.TargetUserID != userID {
+		if org != "" && org != value.OrganizationID {
 			return coordinationrequest.ErrNotFound
+		}
+		if err := coordinationrequest.AuthorizeConfirmation(value, userID, optionID); err != nil {
+			return err
 		}
 		if err := store.guardRequestAccounts(ctx, tx, value); err != nil {
 			return err
+		}
+		if org != "" {
+			if err := store.guardCreation(ctx, tx, value); err != nil {
+				return err
+			}
 		}
 		if value.Status == coordinationrequest.Accepted && value.AcceptedOptionID == optionID {
 			return coordinationrequest.ErrAlreadyAccepted
@@ -42,7 +54,7 @@ func (store *Request) acceptMeeting(ctx context.Context, requestID, userID, opti
 			return err
 		}
 		value.Status, value.AcceptedOptionID, value.UpdatedAt = coordinationrequest.Accepted, optionID, time.Now().UTC()
-		note, event := coordinationrequest.ConfirmationEffects(value, value.UpdatedAt)
+		note, event := coordinationrequest.ConfirmationEffectsForActor(value, userID, value.UpdatedAt)
 		if err := tx.Set(ref, value); err != nil {
 			return err
 		}

@@ -52,7 +52,9 @@ HTTP loopback URLs are allowed for local development. Only explicit
 Startup validation checks configuration syntax and completeness, not whether
 Google accepts the client or the consent screen is published. Verify login,
 Calendar consent, sync, and logout with real test accounts before declaring
-real-account production ready. The currently published service remains a demo.
+real-account production ready. Cloud Run now runs with real-account authentication;
+Google's OAuth publishing and verification status and live Calendar consent
+remain separate release checks. See [review evidence and 403 triage](google-oauth-review-evidence.md).
 
 ## Single-secret runtime bundle
 

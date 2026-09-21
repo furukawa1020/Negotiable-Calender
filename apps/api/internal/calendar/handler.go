@@ -106,6 +106,8 @@ func (handler *Handler) connect(response http.ResponseWriter, request *http.Requ
 }
 
 func (handler *Handler) callback(response http.ResponseWriter, request *http.Request) {
+	response.Header().Set("Cache-Control", "no-store")
+	response.Header().Set("Referrer-Policy", "no-referrer")
 	userID, ok := handler.userID(response, request)
 	if !ok {
 		return
@@ -116,7 +118,8 @@ func (handler *Handler) callback(response http.ResponseWriter, request *http.Req
 	}
 	cookie, err := request.Cookie(flowCookieName)
 	state, code := request.URL.Query().Get("state"), request.URL.Query().Get("code")
-	if err != nil || state == "" || code == "" || request.URL.Query().Get("error") != "" {
+	providerError := request.URL.Query().Get("error")
+	if err != nil || state == "" || (code == "" && providerError == "") || (code != "" && providerError != "") {
 		writeJSON(response, 400, map[string]string{"error": "invalid calendar oauth callback"})
 		return
 	}
@@ -130,14 +133,23 @@ func (handler *Handler) callback(response http.ResponseWriter, request *http.Req
 		writeJSON(response, 500, map[string]string{"error": "unable to connect calendar"})
 		return
 	}
+	expireCookie(response, flowCookieName, "/api/v1/calendar/google/callback", handler.config.SecureCookies)
+	if providerError != "" {
+		result := "provider_failed"
+		if providerError == "access_denied" {
+			result = "denied"
+		}
+		handler.redirectConsentResult(response, request, result)
+		return
+	}
 	tokens, err := handler.provider.Exchange(request.Context(), code, flow.CodeVerifier)
 	if err != nil {
 		handler.logger.Warn("calendar oauth exchange rejected", "error", err)
-		writeJSON(response, 502, map[string]string{"error": "calendar permission could not be verified"})
+		handler.redirectConsentResult(response, request, "exchange_failed")
 		return
 	}
 	if tokens.RefreshToken == "" || !contains(tokens.Scopes, CalendarReadonlyScope) {
-		writeJSON(response, 403, map[string]string{"error": "calendar readonly permission and offline access are required"})
+		handler.redirectConsentResult(response, request, "permission_required")
 		return
 	}
 	encrypted, err := handler.cipher.Encrypt(tokens.RefreshToken)
@@ -152,8 +164,12 @@ func (handler *Handler) callback(response http.ResponseWriter, request *http.Req
 		writeJSON(response, 500, map[string]string{"error": "unable to store calendar permission"})
 		return
 	}
-	expireCookie(response, flowCookieName, "/api/v1/calendar/google/callback", handler.config.SecureCookies)
 	http.Redirect(response, request, strings.TrimRight(handler.config.WebOrigin, "/")+"/?calendar=connected", http.StatusFound)
+}
+
+// result is an internal label, never Google's raw error or description.
+func (handler *Handler) redirectConsentResult(response http.ResponseWriter, request *http.Request, result string) {
+	http.Redirect(response, request, strings.TrimRight(handler.config.WebOrigin, "/")+"/?calendar="+result, http.StatusSeeOther)
 }
 
 func (handler *Handler) status(response http.ResponseWriter, request *http.Request) {

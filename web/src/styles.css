@@ -199,6 +199,11 @@ input[type="checkbox"] { accent-color: var(--green); }
   padding: 16px; border: 1px solid #8399a3; background: white; color: var(--ink); box-shadow: 4px 4px 0 #172d3626;
 }
 .account-menu { display: grid; gap: 8px; }
+.calendar-consent { display: grid; gap: 10px; border-top: 1px solid var(--line); padding-top: 12px; }
+.calendar-consent p, .calendar-consent-help p { margin: 0 0 10px; font-size: 12px; line-height: 1.8; overflow-wrap: anywhere; }
+.calendar-consent-help { margin-top: 10px; font-size: 12px; line-height: 1.8; }
+.calendar-consent-help summary { cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.calendar-consent-help[open] summary { margin-bottom: 10px; }
 .account-menu strong { font-size: 14px; overflow-wrap: anywhere; }
 .account-menu span { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
 .account-menu button, .account-menu a { padding: 9px; border: 1px solid var(--line); background: white; color: var(--ink); text-align: left; text-decoration: none; font-size: 12px; }

@@ -47,6 +47,27 @@ describe('App', () => {
     expect(globalThis.fetch).toHaveBeenNthCalledWith(4, expect.stringContaining('/api/v1/auth/logout'), { method: 'POST', credentials: 'include' })
   })
 
+  it.each(['denied', 'permission_required', 'exchange_failed', 'provider_failed'])('restores the real session after %s without retrying consent automatically', async (result) => {
+    window.history.replaceState({}, '', '/?calendar=' + result)
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = String(input)
+      if (url.includes('/api/v1/auth/session')) return new Response(JSON.stringify({
+        authenticated: true,
+        user: { userId: 'user-1', organizationId: 'org-1', email: 'person@example.com', displayName: 'Person', role: 'OWNER' },
+      }))
+      if (url.includes('/api/v1/calendar/connection')) return new Response(JSON.stringify({ connected: false }))
+      if (url.includes('/api/v1/workspaces')) return new Response(JSON.stringify({ workspaces: [] }))
+      return new Response('{}', { status: 404 })
+    })
+    render(<App />)
+    expect(await screen.findByRole('button', { name: 'Personのアカウントメニュー' })).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('既存の接続は変更していません')
+    await waitFor(() => expect(window.location.search).toBe(''))
+    fireEvent.click(screen.getByRole('button', { name: 'Personのアカウントメニュー' }))
+    expect(screen.getByRole('region', { name: 'カレンダー接続前の確認' })).toBeInTheDocument()
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/google/connect') || String(url).includes('/calendar/sync'))).toBe(false)
+  })
+
   it('loads the owners real calendar across day week and month views', async () => {
     window.history.replaceState({}, '', '/?calendar=connected')
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {

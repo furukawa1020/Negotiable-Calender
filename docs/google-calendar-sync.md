@@ -1,8 +1,15 @@
 # Google Calendar read-only sync
 
 Calendar access uses separate consent from login. Negotiable Calendar asks for
-`calendar.readonly` only and stores no title, description, attendee, location,
-conference URL, or calendar name.
+`calendar.events.owned.readonly` only for new consent. All current event reads
+use the signed-in user's primary calendar. Stored legacy `calendar.readonly`
+grants remain usable without forced reconnection. No title, description,
+attendee, location, conference URL, or calendar name is stored by sync.
+
+Changing the requested scope does not revoke an older Google grant. The app
+records the scopes Google actually returns, and does not request incremental
+combination with previously granted scopes. It does not request calendar-list,
+settings, ACL, or write access. See [scope migration](google-calendar-scope-migration.md).
 
 ## Local setup
 

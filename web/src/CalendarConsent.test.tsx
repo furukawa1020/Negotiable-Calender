@@ -8,6 +8,7 @@ describe('Calendar consent', () => {
     render(<CalendarConsent connectURL="/api/v1/calendar/google/connect" />)
     expect(screen.getByRole('region', { name: 'カレンダー接続前の確認' })).toBeInTheDocument()
     expect(screen.getByText(/Google上の予定は作成・変更しません/)).toBeInTheDocument()
+    expect(screen.getByText(/自分が所有するカレンダーの予定の読み取り/)).toBeInTheDocument()
     expect(screen.getByText(/認証情報は暗号化して保管/)).toBeInTheDocument()
     expect(screen.getByText(/カレンダー接続は任意/)).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Google Calendarを接続' })).toHaveAttribute('href', '/api/v1/calendar/google/connect')

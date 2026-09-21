@@ -19,7 +19,7 @@ func TestCalendarAuthorizationUsesSeparateReadonlyConsentAndPKCE(t *testing.T) {
 		t.Fatal(err)
 	}
 	query := parsed.Query()
-	if query.Get("scope") != CalendarReadonlyScope {
+	if query.Get("scope") != "https://www.googleapis.com/auth/calendar.events.owned.readonly" {
 		t.Fatalf("unexpected scope %q", query.Get("scope"))
 	}
 	if query.Get("access_type") != "offline" || query.Get("prompt") != "consent" {
@@ -28,8 +28,8 @@ func TestCalendarAuthorizationUsesSeparateReadonlyConsentAndPKCE(t *testing.T) {
 	if query.Get("code_challenge") != "challenge-1" || query.Get("code_challenge_method") != "S256" {
 		t.Fatal("PKCE missing")
 	}
-	if strings.Contains(query.Get("scope"), "calendar.events") {
-		t.Fatal("write permission requested")
+	if query.Get("include_granted_scopes") != "false" {
+		t.Fatal("consent must not request combination of previous broader grants")
 	}
 }
 
@@ -41,7 +41,7 @@ func TestCalendarProviderExchangesRefreshTokenAndRedactsEventDetails(t *testing.
 			if request.Form.Get("code_verifier") != "verifier-1" {
 				t.Errorf("missing verifier")
 			}
-			_ = json.NewEncoder(response).Encode(map[string]any{"access_token": "access-1", "refresh_token": "refresh-1", "scope": CalendarReadonlyScope, "expires_in": 3600})
+			_ = json.NewEncoder(response).Encode(map[string]any{"access_token": "access-1", "refresh_token": "refresh-1", "scope": CalendarOwnedEventsReadonlyScope, "expires_in": 3600})
 		case "/events":
 			if request.Header.Get("Authorization") != "Bearer access-1" {
 				t.Errorf("missing bearer token")
@@ -67,7 +67,7 @@ func TestCalendarProviderExchangesRefreshTokenAndRedactsEventDetails(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if tokens.RefreshToken != "refresh-1" || !contains(tokens.Scopes, CalendarReadonlyScope) {
+	if tokens.RefreshToken != "refresh-1" || !contains(tokens.Scopes, CalendarOwnedEventsReadonlyScope) {
 		t.Fatalf("unexpected tokens %#v", tokens)
 	}
 	spans, err := provider.ListBusy(context.Background(), tokens.AccessToken, time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
@@ -81,7 +81,6 @@ func TestCalendarProviderExchangesRefreshTokenAndRedactsEventDetails(t *testing.
 		t.Fatal("busy span not normalized to UTC")
 	}
 }
-
 
 func TestCalendarProviderUsesIncrementalCursorAndDeletesCancelledInstances(t *testing.T) {
 	t.Parallel()
@@ -143,7 +142,6 @@ func TestCalendarRefreshClassifiesRevokedGrant(t *testing.T) {
 	}
 }
 
-
 func TestPrivateCalendarProviderReturnsOwnerDetailsWithoutPersistingThem(t *testing.T) {
 	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
@@ -158,13 +156,13 @@ func TestPrivateCalendarProviderReturnsOwnerDetailsWithoutPersistingThem(t *test
 				"id": "timed-1", "summary": "役員会議", "description": "confidential",
 				"location": "Tokyo", "hangoutLink": "https://meet.google.com/example",
 				"attendees": []map[string]any{{"email": "self@example.com", "self": true}, {"displayName": "Partner", "email": "partner@example.com"}},
-				"start": map[string]string{"dateTime": "2026-09-03T09:00:00+09:00"},
-				"end": map[string]string{"dateTime": "2026-09-03T10:00:00+09:00"},
+				"start":     map[string]string{"dateTime": "2026-09-03T09:00:00+09:00"},
+				"end":       map[string]string{"dateTime": "2026-09-03T10:00:00+09:00"},
 			},
 			{
 				"id": "all-day-1", "summary": "休暇",
 				"start": map[string]string{"date": "2026-09-04"},
-				"end": map[string]string{"date": "2026-09-05"},
+				"end":   map[string]string{"date": "2026-09-05"},
 			},
 		}})
 	}))

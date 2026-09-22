@@ -19,9 +19,11 @@ document, not evidence of submission, approval, or successful real-user consent.
   https://negotiable-calendar-480760664246.asia-northeast1.run.app/api/v1/calendar/google/callback
 - Google consent uses offline access, explicit consent, PKCE S256, and a
   one-time flow bound to the authenticated app user.
-- Audience, publishing status, user-cap usage, and verification status have
-  **not** been directly inspected. The user reports In production. Earlier
-  notes asserting that the project is still Testing are not verified facts.
+- On 2026-09-23 the user's screenshot of this exact project confirmed Audience
+  is Testing and External, with 0/100 users. Publish app is disabled until
+  Branding is completed. A subsequent Branding screenshot showed empty
+  homepage/privacy/terms URLs. This replaces earlier unverified reports of
+  In production; Google scope approval has still not been demonstrated.
 
 ## Scope justification draft
 

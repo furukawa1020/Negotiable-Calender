@@ -1,3 +1,5 @@
+import { PolicyLinks } from './PolicyLinks'
+
 export function CalendarConnectionHelp() {
   return (
     <details className="calendar-consent-help">
@@ -17,6 +19,7 @@ export function CalendarConsent({ connectURL, reconnect = false }: { connectURL:
       <p>今回要求する権限は「自分が所有するカレンダーの予定の読み取り」です。他人が所有する共有カレンダーやカレンダー設定の読み取り権限は要求しません。以前に許可したGoogle側の権限が、この更新だけで取り消されるわけではありません。</p>
       <p>予定名・説明・場所・参加者などの詳細は本人向けに取得・表示し、同期用データベースには保存しません。予定の識別子・開始終了時刻・busy状態・同期情報を保存し、継続同期のための認証情報は暗号化して保管します。組織には予定詳細ではなく共有ルールから作った公開状態を表示します。</p>
       <p>接続後はメニューの「Calendar接続を解除」から連携情報と同期用予定データを削除し、公開状態の共有を停止できます。カレンダー接続は任意です。</p>
+      <PolicyLinks />
       <a href={connectURL}>{reconnect ? 'Google Calendarを再接続' : 'Google Calendarを接続'}</a>
       <CalendarConnectionHelp />
     </section>

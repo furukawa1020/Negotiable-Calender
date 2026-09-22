@@ -59,6 +59,16 @@ h2 { margin: 0; font-size: 18px; line-height: 1.6; }
 .site-footer p { margin: 0; }
 .error-page { padding-top: 64px; }
 .error-page p { color: var(--muted); font-size: 14px; }
+.legal { max-width: 860px; padding-top: 40px; padding-bottom: 40px; overflow-wrap: anywhere; }
+.legal h1 { font-size: clamp(24px, 4vw, 32px); }
+.legal p, .legal li { font-size: 15px; }
+.legal-date { color: var(--muted); }
+.legal-toc { display: flex; flex-wrap: wrap; gap: 10px 24px; padding: 20px 0; border-block: 1px solid var(--line); }
+.legal section { margin-top: 32px; padding-top: 24px; border-top: 1px solid var(--line); }
+.legal h2 { font-size: 20px; }
+.legal h3 { margin: 24px 0 8px; font-size: 16px; }
+.legal li + li { margin-top: 12px; }
+.legal code { font-size: .9em; }
 @media (max-width: 800px) {
   .hero { grid-template-columns: 1fr; gap: 32px; padding: 40px 0; }
   .lead { max-width: none; }

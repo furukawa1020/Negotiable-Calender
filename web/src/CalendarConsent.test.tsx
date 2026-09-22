@@ -12,6 +12,7 @@ describe('Calendar consent', () => {
     expect(screen.getByText(/認証情報は暗号化して保管/)).toBeInTheDocument()
     expect(screen.getByText(/カレンダー接続は任意/)).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Google Calendarを接続' })).toHaveAttribute('href', '/api/v1/calendar/google/connect')
+    expect(screen.getByRole('link', { name: 'プライバシーポリシー（別タブ）' })).toHaveAttribute('href', 'https://negotiable-calendar-480760.web.app/privacy.html')
   })
 
   it('keeps reconnect explicit', () => {

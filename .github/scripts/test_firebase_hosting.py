@@ -40,9 +40,9 @@ class FirebaseHostingTest(unittest.TestCase):
         self.assertTrue(all(not path.is_symlink() for path in paths))
         self.assertEqual(
             {p.relative_to(self.public).as_posix() for p in paths if p.is_file()},
-            {"index.html", "styles.css", "404.html"},
+            {"index.html", "styles.css", "404.html", "privacy.html", "terms.html"},
         )
-        self.assertLess(sum(p.stat().st_size for p in paths if p.is_file()), 30000)
+        self.assertLess(sum(p.stat().st_size for p in paths if p.is_file()), 60000)
 
     def test_security_headers(self):
         rules = self.hosting["headers"]
@@ -75,15 +75,39 @@ class FirebaseHostingTest(unittest.TestCase):
                 elif href.startswith("#"):
                     self.assertIn(href[1:], ids)
                 elif urlparse(href).scheme:
-                    self.assertIn(href, {APP, "mailto:f.kotaro.0530@gmail.com"})
+                    self.assertIn(href, {APP, "mailto:f.kotaro.0530@gmail.com",
+                        "https://developers.google.com/terms/api-services-user-data-policy"})
                 else:
-                    self.assertEqual(href, "/")
+                    target = urlparse(href)
+                    self.assertIn(target.path, {"/", "/privacy.html", "/terms.html"})
+                    destination = self.public / (target.path.lstrip("/") or "index.html")
+                    self.assertTrue(destination.is_file())
+                    if target.fragment:
+                        destination_page = Page(destination.read_text(encoding="utf-8"))
+                        self.assertIn(target.fragment, {a.get("id") for _, a in destination_page.tags})
 
     def test_honest_launch_status_and_app_destination(self):
         content = (self.public / "index.html").read_text(encoding="utf-8")
         self.assertIn(f'href="{APP}"', content)
-        for disclosure in ("公開設定・審査が未完了", "現在拒否される場合", "表示イメージ", "正式なポリシーの代わりにはしません"):
+        for disclosure in ("公開設定・審査が未完了", "現在拒否される場合", "表示イメージ", '/privacy.html', '/terms.html'):
             self.assertIn(disclosure, content)
+
+    def test_policy_pages_are_readable_and_disclose_current_limits(self):
+        for name in ("privacy.html", "terms.html"):
+            content = (self.public / name).read_text(encoding="utf-8")
+            page = Page(content)
+            self.assertEqual(sum(tag == "h1" for tag, _ in page.tags), 1)
+            self.assertIn(("main", {"id": "main", "class": "legal wrap"}), page.tags)
+            for required in ("2026年9月23日", "はたけ/Furukawa", "f.kotaro.0530@gmail.com", "変更履歴"):
+                self.assertIn(required, content)
+        privacy = (self.public / "privacy.html").read_text(encoding="utf-8")
+        for required in ("calendar.events.owned.readonly", "calendar.readonly", "Limited Use",
+                         "端末内モデル", "新たな同意", "30日", "400日", "旧ユーザーID",
+                         "自動削除期限は設定していません", "全データの即時完全消去は保証しません"):
+            self.assertIn(required, privacy)
+        terms = (self.public / "terms.html").read_text(encoding="utf-8")
+        for required in ("自動課金は行いません", "申し込みなしに課金しません", "責任を排除するものではありません"):
+            self.assertIn(required, terms)
 
     def test_shared_product_tokens_and_no_decorative_card_effects(self):
         app_css = (ROOT / "web/src/styles.css").read_text(encoding="utf-8")

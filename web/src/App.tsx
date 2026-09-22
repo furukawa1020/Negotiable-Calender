@@ -3,6 +3,7 @@ import SharingPolicyEditor from './SharingPolicyEditor'
 import { ConfirmedMeeting } from './ConfirmedMeeting'
 import { CalendarSyncStatus } from './CalendarSyncStatus'
 import { CalendarConsent, CalendarConnectionHelp } from './CalendarConsent'
+import { PolicyLinks } from './PolicyLinks'
 import { calendarConsentNotice } from './calendarConsentNotice'
 import { AccountAvatar } from './AccountAvatar'
 import { RequestComposer } from './RequestComposer'
@@ -999,6 +1000,7 @@ function App() {
           <p className="signin-help">Google ログインとカレンダーの接続は別の操作です。予定の読み取りには、ログイン後に接続の許可が必要です。</p>
           {notice ? <p role="status">{notice}</p> : null}
           <a className="primary-button" href={`${apiURL}/api/v1/auth/google/login`}>Googleでログイン</a>
+          <PolicyLinks />
           <CalendarConnectionHelp />
         </main>
       </div>
@@ -1079,6 +1081,7 @@ function App() {
                   <a href={`${apiURL}/api/v1/auth/google/login`}>Googleでログイン</a>
                 )}
                 <button type="button" onClick={exportUserData} disabled={exporting}>{exporting ? '準備中…' : '本人データをエクスポート'}</button>
+                {(!authUser || (calendarConnection && !calendarConnection.reconnectRequired)) ? <PolicyLinks /> : null}
               </div>
             ) : null}
           </div>

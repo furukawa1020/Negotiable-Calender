@@ -49,8 +49,10 @@ Do not delete the site: site deletion is permanent and does not provide a safe r
 ## Remaining public-launch gates
 
 The user approved publishing `f.kotaro.0530@gmail.com` as the contact address.
-The user approved the operator name `はたけ/Furukawa`. Retention details and final
-policy/terms still require confirmation.
+The user approved the operator name `はたけ/Furukawa` and requested policy/terms
+publication on 2026-09-23. Verified retention settings and the current on-device
+AI boundary are recorded in #150 and `public-policy-release.md`. Publication
+is not an assertion of legal review or readiness of a future cloud AI provider.
 Google Branding, domain verification, audience and sensitive-scope review remain
 separate work under #121; the free Firebase subdomain is not evidence of approval.
 The page explicitly explains these limits. Do not remove that notice before real

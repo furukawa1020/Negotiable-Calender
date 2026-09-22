@@ -79,6 +79,8 @@ main { grid-column: 2; min-width: 0; width: min(1400px, calc(100% - 64px)); marg
 .secondary-button:hover { background: #f2f5f6; }
 .danger-button { background: #a53535; border-color: #842626; box-shadow: 0 2px 0 #6c2525; }
 .full-button { width: 100%; }
+.policy-links { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 14px 0; font-size: 12px; }
+.policy-link-hint { font-size: 11px; }
 .privacy-note {
   display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 12px; padding: 12px 0;
   border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); color: var(--green); font-size: 12px;

@@ -48,11 +48,65 @@ Firestore project, an operator can run:
 go run ./cmd/account-cleanup -project PROJECT_ID -user PENDING_USER_ID
 ```
 
-The command only resumes an existing deleting marker (or confirms complete). It
-cannot authorize or initiate a new deletion. It has a five-minute default timeout,
-does not enumerate accounts, and never accepts a collection/path as its target.
+The single-user command only resumes an existing deleting marker (or confirms
+complete). It cannot authorize or initiate a new deletion. It has a five-minute
+default timeout and never accepts a collection/path as its target.
 Do not run it against real accounts without checking the exact authorized target.
 The implementation/tests do not execute production account cleanup.
+
+### Bounded pending sweep (#101)
+
+An explicitly requested `-pending` mode can retry one page of existing `deleting`
+markers. It is mutually exclusive with `-user`. First inspect a bounded dry run:
+
+```text
+go run ./cmd/account-cleanup -project PROJECT_ID -pending -dry-run -limit 25
+go run ./cmd/account-cleanup -project PROJECT_ID -pending -limit 25 -timeout 5m -account-timeout 30s -cursor-out NEW_PRIVATE_CURSOR_FILE
+go run ./cmd/account-cleanup -project PROJECT_ID -pending -limit 25 -cursor-in PREVIOUS_PRIVATE_CURSOR_FILE -cursor-out ANOTHER_NEW_PRIVATE_CURSOR_FILE
+```
+
+These are operator examples, not a production execution instruction. Verify the
+project, pending deletion authority, cost and protected output location before
+running. No scheduler, IAM role, production batch or new deletion is enabled by
+this change. Ordinary API operation does not invoke this CLI.
+
+- Selection is `Phase == deleting`, ordered by document ID, limited to 1–100
+  markers plus one lookahead (default 25). It does not enumerate active users or
+  completed markers. Selection failure does not fall back to an unbounded scan.
+- Each target rechecks its existing marker via `ResumeAccountDeletion`; complete
+  is idempotent, missing/invalid states cannot start deletion. Corrupt markers
+  count as failures without preventing later selected accounts from running.
+- Total context deadline includes client initialization, page read and cleanup:
+  default 5m, maximum 15m. Per-account default/maximum is 5m and can be shortened;
+  the remaining total deadline always wins. Pending requests are cancelled when
+  the context expires. This is not a guarantee of instantaneous rollback of an
+  in-flight server commit. Existing deletion fences and retries remain necessary.
+- Stdout is a count-only JSON summary; stderr has fixed errors, no IDs, paths,
+  credentials or provider responses. Any failure/interruption exits nonzero.
+  Dry run only reads the pending page; it does not certify cleanup will succeed.
+- Cursors encode a pseudonymous user ID: encoding is NOT encryption/anonymization.
+  They are written only to an explicitly named new file (`O_EXCL`, mode 0600),
+  never stdout/stderr, never overwrite files. Windows operators must protect the
+  parent directory with suitable ACLs; Unix mode bits alone do not secure Windows
+  files. Keep cursor files out of logs, Git and public artifacts. Use only within
+  the same project. Cursor state is not an authorization credential.
+- Check the exit status before using a cursor. Initialization/output failure can
+  leave an empty/partial file; restart from the beginning instead of trusting it.
+  Empty cursor means start a new sweep. When `hasMore` is true the cursor advances
+  past attempted accounts, including failures, so other accounts can make progress.
+  At sweep end start again without a cursor to revisit failures and newly added
+  IDs behind the cursor. The page is not a database-wide snapshot or lock.
+- On a total timeout, `remaining` counts selected but unattempted accounts, and
+  the cursor points after the last attempted account (or the incoming cursor).
+  Without `-cursor-out`, restart from the beginning; completed markers are excluded.
+- Per-account cleanup still scans related request/organization data and may use
+  multiple batches. This limits targets and time, NOT a strict total read/write
+  quota or cost. It does not fix historical orphan data, revoke a lost Google
+  token, remove deletion tombstones, or establish a new retention deadline.
+
+Unit tests cover deadlines, failure continuation, mode validation, cursor files
+and redaction. Firestore emulator tests cover 105 markers, stable pagination after
+completion, corrupt markers, no active-account changes and actual retry cleanup.
 
 ## Request, notification and audit cleanup
 

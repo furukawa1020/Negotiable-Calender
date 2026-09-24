@@ -260,7 +260,7 @@ func (worker *Worker) RunDue(ctx context.Context) (BatchResult, error) {
 	}
 	connections, err := worker.store.ClaimDueConnections(ctx, time.Now().UTC(), worker.config.ClaimLimit, worker.config.ClaimLease)
 	if err != nil {
-		worker.logger.Error("claim calendar sync work", "failure_code", "claim_failed")
+		worker.logger.Error("claim calendar sync work", "failure_code", "claim_failed", "cause_code", claimCauseCode(err))
 		return result, err
 	}
 	if len(connections) > worker.config.ClaimLimit {

@@ -117,6 +117,9 @@ Users see last success, last attempt, safe failure code, retry eligibility and a
 The display is a snapshot from connection status; refresh/reload to observe new
 background results. Staff can inspect aggregate workflow summaries and structured
 `calendar sync batch` logs without provider tokens, event details or user IDs.
+Claim failures additionally record a fixed `cause_code` (for example
+`failed_precondition` or `permission_denied`) without the raw error text. See
+[the index incident and recovery checks](sync-index-recovery.md).
 
 CI tests cover synthetic cold HTTP startup, real JWT verification, ordinary-user
 rejection, overlapping invocation, budgets, timeout-state recording, bounded

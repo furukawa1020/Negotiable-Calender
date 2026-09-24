@@ -282,29 +282,11 @@ func (store *Auth) DeleteAccount(ctx context.Context, userID string) error {
 	requestIter.Stop()
 	for _, workspace := range workspaces {
 		audits := store.Client.Collection("organizations").Doc(workspace.ID).Collection("auditLogs")
-		iter := audits.Documents(ctx)
-		for {
-			doc, nextErr := iter.Next()
-			if errors.Is(nextErr, iterator.Done) {
-				break
-			}
-			if nextErr != nil {
-				iter.Stop()
-				return nextErr
-			}
-			var event audit.Event
-			if err := doc.DataTo(&event); err != nil {
-				iter.Stop()
-				return err
-			}
-			if event.ActorUserID == userID {
-				if _, err := doc.Ref.Delete(ctx); err != nil {
-					iter.Stop()
-					return err
-				}
-			}
+		// Select matching document references on the server. Unrelated malformed
+		// events must not block this account's deletion or have their bodies read.
+		if err := deleteQuery(ctx, audits.Where("ActorUserID", "==", userID).Select()); err != nil {
+			return err
 		}
-		iter.Stop()
 	}
 	for _, collection := range []string{"manualOverrides", "scheduleProjections", "notifications", "privateEvents", "workspaces", "projectionControls"} {
 		if err := deleteCollection(ctx, store.Client, userRef.Collection(collection), 200); err != nil {

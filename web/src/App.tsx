@@ -285,6 +285,8 @@ function App() {
   const [calendarSyncMode, setCalendarSyncMode] = useState('off')
   const [calendarBusy, setCalendarBusy] = useState(false)
   const calendarLifecycle = useRef(0)
+  const accountLifecycle = useRef(0)
+  const accountActive = useRef(false)
   const [workspaces, setWorkspaces] = useState<Workspace[]>([])
   const [invitationToken, setInvitationToken] = useState('')
   const [invitationPreview, setInvitationPreview] = useState<InvitationPreview | null>(null)
@@ -301,6 +303,16 @@ function App() {
   const resolution = useRequestResolution(apiURL, activeOrganizationID, `${activeUserID}:${requesterUserID}`)
   const accountName = authUser ? authUser.displayName.trim() || authUser.email.trim() || 'アカウント' : '山田 太郎'
   const policyDraftError = sharingPolicyError(sharingPolicy)
+
+  useEffect(() => () => {
+    accountActive.current = false
+    accountLifecycle.current++
+  }, [])
+
+  const captureAccountLifetime = () => {
+    const lifecycle = accountLifecycle.current
+    return () => accountActive.current && lifecycle === accountLifecycle.current
+  }
 
   useEffect(() => {
     const initialSearch = window.location.search
@@ -322,6 +334,7 @@ function App() {
         if (!isCurrent()) return
         setDemoMode(payload.demoMode === true)
         if (payload.authenticated && payload.user) {
+          accountActive.current = true
           setAuthUser(payload.user)
           setProjections([])
           setMemberProjections([])
@@ -800,6 +813,10 @@ function App() {
       if (!response.ok) throw new Error('account deletion failed')
       // Fence pending bootstrap/private reads/manual sync before React cleanup.
       calendarLifecycle.current++
+      accountActive.current = false
+      accountLifecycle.current++
+      setWorkspaceBusy(false)
+      setInviteURL('')
       setAuthUser(null)
       setCalendarConnection(null)
       setCalendarBusy(false)
@@ -888,6 +905,10 @@ function App() {
       })
       if (!response.ok) throw new Error('logout failed')
       calendarLifecycle.current++
+      accountActive.current = false
+      accountLifecycle.current++
+      setWorkspaceBusy(false)
+      setInviteURL('')
       setPrivateCalendarEvents([])
       setPrivateEventsLoading(false)
       setPrivateEventsError('')
@@ -972,56 +993,69 @@ function App() {
   }
 
   const createInvitation = async () => {
+    if (!authUser || !accountActive.current) return
+    const isCurrent = captureAccountLifetime()
     setWorkspaceBusy(true)
     try {
       const response = await apiFetch(`${apiURL}/api/v1/workspaces/${activeOrganizationID}/invitations`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ role: inviteRole }),
       })
       if (!response.ok) throw new Error('invite failed')
+      if (!isCurrent()) return
       const payload = await response.json() as { inviteUrl: string }
+      if (!isCurrent()) return
       setInviteURL(payload.inviteUrl)
       try { await navigator.clipboard?.writeText(payload.inviteUrl) } catch { /* link remains visible for manual copy */ }
-      setNotice('一回限りの招待リンクを作成しました。')
-    } catch { setNotice('招待リンクを作成できませんでした。権限を確認してください。') }
-    finally { setWorkspaceBusy(false) }
+      if (isCurrent()) setNotice('一回限りの招待リンクを作成しました。')
+    } catch { if (isCurrent()) setNotice('招待リンクを作成できませんでした。権限を確認してください。') }
+    finally { if (isCurrent()) setWorkspaceBusy(false) }
   }
 
   const switchWorkspace = async (organizationId: string) => {
-    if (organizationId === activeOrganizationID) return
+    if (!authUser || !accountActive.current || organizationId === activeOrganizationID) return
+    const isCurrent = captureAccountLifetime()
     setWorkspaceBusy(true)
     try {
       const response = await apiFetch(`${apiURL}/api/v1/workspaces/switch`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ organizationId }),
       })
       if (!response.ok) throw new Error('switch failed')
+      if (!isCurrent()) return
       const payload = await response.json() as { activeWorkspace: Workspace }
+      if (!isCurrent()) return
       setAuthUser((current) => current ? { ...current, organizationId: payload.activeWorkspace.id, role: payload.activeWorkspace.role } : current)
+      setInviteURL('')
       setNotice(`${payload.activeWorkspace.name} に切り替えました。`)
-    } catch { setNotice('Workspaceを切り替えられませんでした。') }
-    finally { setWorkspaceBusy(false) }
+    } catch { if (isCurrent()) setNotice('Workspaceを切り替えられませんでした。') }
+    finally { if (isCurrent()) setWorkspaceBusy(false) }
   }
 
   const acceptInvitation = async () => {
-    if (!invitationPreview || !invitationToken) return
+    if (!authUser || !accountActive.current || !invitationPreview || !invitationToken) return
+    const isCurrent = captureAccountLifetime()
     setWorkspaceBusy(true)
     try {
       const accepted = await apiFetch(`${apiURL}/api/v1/invitations/accept`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: invitationToken }),
       })
       if (!accepted.ok) throw new Error('accept failed')
+      if (!isCurrent()) return
       const switched = await apiFetch(`${apiURL}/api/v1/workspaces/switch`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ organizationId: invitationPreview.organizationId }),
       })
       if (!switched.ok) throw new Error('switch failed')
+      if (!isCurrent()) return
       const payload = await switched.json() as { activeWorkspace: Workspace }
+      if (!isCurrent()) return
       setAuthUser((current) => current ? { ...current, organizationId: payload.activeWorkspace.id, role: payload.activeWorkspace.role } : current)
       setWorkspaces((current) => [...current.filter((item) => item.id !== payload.activeWorkspace.id), payload.activeWorkspace])
       setInvitationPreview(null)
       setInvitationToken('')
+      setInviteURL('')
       setNotice(`${payload.activeWorkspace.name} に参加しました。`)
-    } catch { setNotice('招待を受諾できませんでした。') }
-    finally { setWorkspaceBusy(false) }
+    } catch { if (isCurrent()) setNotice('招待を受諾できませんでした。') }
+    finally { if (isCurrent()) setWorkspaceBusy(false) }
   }
 
   if (!authUser && !demoMode) {

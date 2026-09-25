@@ -48,12 +48,5 @@ jobs:
             --header 'Content-Length: 0' \
             --header "Authorization: Bearer ${SYNC_ID_TOKEN}" \
             --output "${RUNNER_TEMP}/calendar-sync-result.json" "${SYNC_URL}"
-          jq '{status, configured, result}' "${RUNNER_TEMP}/calendar-sync-result.json" >> "$GITHUB_STEP_SUMMARY"
-          if jq -e '.status == "not_configured" and .configured == false' "${RUNNER_TEMP}/calendar-sync-result.json" >/dev/null; then
-            echo '::warning::Trigger authenticated, but Google Calendar is not configured; no connections were processed.'
-            exit 0
-          fi
-          jq -e '.configured == true and .status == "completed" and .result.failed == 0 and .result.unprocessed == 0' "${RUNNER_TEMP}/calendar-sync-result.json" >/dev/null
-          if jq -e '.result.capacityReached == true' "${RUNNER_TEMP}/calendar-sync-result.json" >/dev/null; then
-            echo '::warning::Batch capacity reached; more work may wait until the next invocation.'
-          fi
+          python3 .github/scripts/check-sync-result.py \
+            < "${RUNNER_TEMP}/calendar-sync-result.json" >> "$GITHUB_STEP_SUMMARY"

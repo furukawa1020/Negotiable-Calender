@@ -22,11 +22,11 @@ external mode. The authenticated manual trigger passed, and anonymous/forged-tok
 requests returned 401. This verifies the trigger, not actual calendar synchronization.
 Real Google OAuth/consent is separately tracked in #76; do not claim it was tested.
 
-Activation evidence (no newly provisioned identity identifiers are recorded here):
+Historical activation evidence from 2026-09-18 (not the current auth mode):
 - [Production deployment](https://github.com/furukawa1020/Negotiable-Calender/actions/runs/35313119913) passed.
 - [Authenticated trigger](https://github.com/furukawa1020/Negotiable-Calender/actions/runs/35313371655) returned
   `not_configured`, with a visible warning and no connections processed. Demo mode
-  remains enabled. Google OAuth setup and real-account acceptance remain #76.
+  was enabled at that time. Real-account acceptance remains #76.
 - Timer-initiated run evidence is tracked in #89; manual dispatch alone does not
   establish that the periodic schedule has executed.
 
@@ -66,8 +66,8 @@ not a live credential or an unverified JWT decoder.
   total event processing reads/writes or an absolute bill cap.
 - A full batch reports capacityReached (possible backlog). Failure/budget exhaustion
   fails the workflow; reconnect-required connections stop being selected. An
-  unconfigured provider returns not_configured without claiming work and creates a
-  visible workflow warning, not a fabricated successful calendar sync.
+  unconfigured provider returns not_configured without claiming work. Since #159,
+  this fails the enabled workflow: missing configuration must not appear healthy.
 
 Firestore needs the composite index declared in `firestore.indexes.json`:
 calendarConnections(ReconnectRequired ASC, NextAttemptAt ASC). Explicit-null legacy
@@ -124,3 +124,20 @@ Claim failures additionally record a fixed `cause_code` (for example
 CI tests cover synthetic cold HTTP startup, real JWT verification, ordinary-user
 rejection, overlapping invocation, budgets, timeout-state recording, bounded
 Firestore claims/deletion fences and existing PostgreSQL/Firestore sync fencing.
+
+## Strict batch receipt validation (#159)
+
+The workflow reads at most 16 KiB plus one overflow byte of its saved HTTP receipt.
+Malformed/oversized JSON, duplicate keys, unknown status, missing fields, non-boolean
+flags and invalid counters fail with a fixed error, without printing raw bodies.
+Counts must be integers (not booleans), nonnegative and at most the worker's maximum
+20 claims; attempted = succeeded + failed and claimed = attempted + unprocessed.
+The live external worker remains configured for five claims; this checker cannot
+increase that limit. Only explicit status/configuration and counter fields enter
+the summary; unknown fields are omitted even on successful responses.
+
+Success requires configured=true, completed, failed=0 and unprocessed=0. Empty
+batches are healthy scheduler receipts, not real-account sync acceptance. Missing
+configuration, provider failures, partial batches and budget exhaustion fail the
+workflow. Capacity reached remains a warning after otherwise successful validation.
+No HTTP retry, additional sync invocation, new IAM or Google permission is added.

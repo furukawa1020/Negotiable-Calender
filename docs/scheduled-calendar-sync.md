@@ -101,8 +101,9 @@ No account or stored calendar data must be deleted to stop automation.
 GitHub runs the workflow at UTC minutes 7,22,37,52. This is best effort: runs can be
 delayed/dropped, and public-repository schedules disable after 60 days without
 activity ([GitHub schedule limitations](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows)).
-There is no 15-minute SLA. Monitor workflow failures and inactivity; an external
-heartbeat alert with an independent scheduler is future operational work.
+There is no 15-minute SLA. The [read-only watchdog](sync-watchdog.md) checks recent
+timer-triggered successes hourly. It shares GitHub's failure/inactivity domains;
+an external heartbeat with an independent scheduler remains future work.
 
 This public repository uses a standard Ubuntu hosted runner, which is free under
 [GitHub's public-runner policy](https://docs.github.com/en/billing/concepts/product-billing/github-actions).

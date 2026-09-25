@@ -47,3 +47,19 @@ client generation check. No clipboard clearing or server invitation revocation i
 implied. Tests use synthetic responses and a mocked clipboard; no live invitation
 or account deletion is performed. This does not assert that every other UI action
 or same-account concurrent workspace mutation has been audited.
+
+## Personal-data downloads (#167)
+
+Self-service export checks the account generation after receiving the response
+and after decoding its Blob, before creating an object URL or clicking a download.
+Obsolete errors/completions do not change notices or busy state. Successful
+teardown clears export busy state; unmount invalidates the captured generation.
+A resolved session also advances the generation so a pre-login/demo export cannot
+complete in a newly restored identity's UI. The explicit demo export and rejected
+account deletion remain supported.
+
+Temporary anchors and object URLs are released in a finally block, including a
+failed download click. This prevents starting an obsolete browser download; it
+cannot recall a download already started or cancel a completed server export.
+Synthetic tests defer both response and Blob decoding and mock browser download
+APIs. No production personal export or account deletion is used for verification.

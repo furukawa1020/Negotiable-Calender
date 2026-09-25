@@ -332,9 +332,12 @@ function App() {
         if (!response.ok) throw new Error('session failed')
         const payload = await response.json() as { authenticated: boolean; demoMode?: boolean; user?: AuthUser }
         if (!isCurrent()) return
+        // A resolved session replaces any pre-login demo/identity scope.
+        accountLifecycle.current++
+        accountActive.current = payload.authenticated === true && Boolean(payload.user)
+        setExporting(false)
         setDemoMode(payload.demoMode === true)
         if (payload.authenticated && payload.user) {
-          accountActive.current = true
           setAuthUser(payload.user)
           setProjections([])
           setMemberProjections([])
@@ -772,27 +775,39 @@ function App() {
 
 
   const exportUserData = async () => {
+    const demoExport = !authUser && demoMode
+    if (!demoExport && (!authUser || !accountActive.current)) return
+    const lifecycle = accountLifecycle.current
+    const isCurrent = () => lifecycle === accountLifecycle.current && (demoExport ? !accountActive.current : accountActive.current)
     setExporting(true)
     try {
       const response = await apiFetch(`${apiURL}/api/v1/users/${activeUserID}/export`, {
         headers: { 'X-Demo-User-ID': activeUserID },
       })
       if (!response.ok) throw new Error('export failed')
+      if (!isCurrent()) return
       const blob = await response.blob()
+      if (!isCurrent()) return
       const url = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = `negotiable-calendar-${activeUserID}-${new Date().toISOString().slice(0, 10)}.json`
-      document.body.append(link)
-      link.click()
-      link.remove()
-      URL.revokeObjectURL(url)
-      setAccountOpen(false)
-      setNotice('本人データを安全にエクスポートしました。')
+      let link: HTMLAnchorElement | undefined
+      try {
+        link = document.createElement('a')
+        link.href = url
+        link.download = `negotiable-calendar-${activeUserID}-${new Date().toISOString().slice(0, 10)}.json`
+        document.body.append(link)
+        link.click()
+      } finally {
+        link?.remove()
+        URL.revokeObjectURL(url)
+      }
+      if (isCurrent()) {
+        setAccountOpen(false)
+        setNotice('本人データを安全にエクスポートしました。')
+      }
     } catch {
-      setNotice('データをエクスポートできませんでした。')
+      if (isCurrent()) setNotice('データをエクスポートできませんでした。')
     } finally {
-      setExporting(false)
+      if (isCurrent()) setExporting(false)
     }
   }
 
@@ -816,6 +831,7 @@ function App() {
       accountActive.current = false
       accountLifecycle.current++
       setWorkspaceBusy(false)
+      setExporting(false)
       setInviteURL('')
       setAuthUser(null)
       setCalendarConnection(null)
@@ -908,6 +924,7 @@ function App() {
       accountActive.current = false
       accountLifecycle.current++
       setWorkspaceBusy(false)
+      setExporting(false)
       setInviteURL('')
       setPrivateCalendarEvents([])
       setPrivateEventsLoading(false)

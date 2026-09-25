@@ -39,7 +39,11 @@ async function deleteAccount() {
 }
 
 describe('Personal export lifetime', () => {
-  afterEach(() => { vi.restoreAllMocks(); window.history.replaceState({}, '', '/') })
+  afterEach(() => {
+    vi.restoreAllMocks()
+    document.querySelectorAll('a[download]').forEach(link => link.remove())
+    window.history.replaceState({}, '', '/')
+  })
 
   it.each([
     ['logout', 'response'], ['logout', 'blob'], ['delete', 'response'],
@@ -98,5 +102,50 @@ describe('Personal export lifetime', () => {
     expect(h.click).toHaveBeenCalledTimes(1)
     expect(h.revoke).toHaveBeenCalledWith('blob:private-export')
     expect(screen.getByText('本人データを安全にエクスポートしました。')).toBeInTheDocument()
+  })
+
+  it.each([true, false])('discards a pre-session demo export after session resolution (authenticated=%s)', async authenticated => {
+    window.history.replaceState({}, '', '/?auth=success')
+    const pendingSession = deferred<Response>()
+    const pendingExport = deferred<Response>()
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async input => {
+      const url = String(input)
+      if (url.endsWith('/auth/session')) return pendingSession.promise
+      if (url.endsWith('/export')) return pendingExport.promise
+      if (url.endsWith('/calendar/connection')) return Response.json({ connected: false })
+      if (url.endsWith('/workspaces')) return Response.json({ workspaces: [] })
+      return new Response('{}', { status: 404 })
+    })
+    const create = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:obsolete-demo')
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined)
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: '山田 太郎のアカウントメニュー' }))
+    fireEvent.click(screen.getByRole('button', { name: '本人データをエクスポート' }))
+    await act(async () => { pendingSession.resolve(Response.json({ authenticated, demoMode: false, user: { userId: 'owner', organizationId: 'org', displayName: 'Owner', email: 'owner@example.com', role: 'OWNER' } })) })
+    await act(async () => { pendingExport.resolve(Response.json({ privateData: 'obsolete demo' })) })
+    expect(create).not.toHaveBeenCalled()
+    expect(click).not.toHaveBeenCalled()
+    if (authenticated) {
+      expect(screen.getByRole('button', { name: 'Ownerのアカウントメニュー' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: '本人データをエクスポート' })).toBeEnabled()
+    }
+    else expect(screen.getByRole('heading', { name: 'カレンダーにログイン' })).toBeInTheDocument()
+  })
+
+  it('does not download a pending demo export after unmount', async () => {
+    window.history.replaceState({}, '', '/')
+    const pending = deferred<Response>()
+    vi.spyOn(globalThis, 'fetch').mockImplementation(() => pending.promise)
+    const create = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:obsolete-demo')
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined)
+    const view = render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: '山田 太郎のアカウントメニュー' }))
+    fireEvent.click(screen.getByRole('button', { name: '本人データをエクスポート' }))
+    view.unmount()
+    await act(async () => { pending.resolve(Response.json({ privateData: 'obsolete demo' })) })
+    expect(create).not.toHaveBeenCalled()
+    expect(click).not.toHaveBeenCalled()
   })
 })

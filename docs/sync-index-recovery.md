@@ -34,3 +34,29 @@ No periodic cleanup, index-deletion operation, or cloud IAM grant is introduced
 by this code change. Real consent and synchronization acceptance remain #76/#121.
 Emulator tests cannot detect missing production composite indexes, so do not use
 their success as a substitute for the production index check.
+
+## Startup guard (#157)
+
+Firestore startup runs a read-only due-query preflight before seeding or serving
+HTTP when sync mode is `external` or `background`. Both legacy-null and dated
+queries share their predicates/order with actual claims. Each query has an
+ID-only projection and limit 1, with one five-second total deadline (or the
+earlier startup deadline). Empty results pass; no connection bodies, tokens,
+leases, transactions or Google calls are involved. PostgreSQL and `off` mode
+are unchanged. This uses existing runtime data-read access, not index-admin IAM.
+
+Failure exits before the revision can become ready and logs a fixed message,
+never a raw provider error or index-creation URL. The deployment's startup probe
+and smoke check therefore cannot mark a newly started revision healthy while
+these required query shapes fail. Do not delete a production index to test this.
+CI verifies bounds/read-only behavior using an isolated emulator and injects
+query failures; a successful production rollout is the real-index acceptance.
+
+This is startup-only, not continuous drift monitoring. An index removed after
+startup is still detected by the scheduled worker, not by `/health` or `/ready`.
+It does not prove Google authorization, token freshness, event synchronization,
+or correctness of every stored connection. Cold starts add two bounded queries;
+Firestore minimum-query/index-read billing still applies. A result limit is not
+a strict index-entry scan cost cap, nor is this a promise of zero cost.
+
+Reference: [Firestore index model and serving state](https://docs.cloud.google.com/firestore/docs/reference/rest/Shared.Types).

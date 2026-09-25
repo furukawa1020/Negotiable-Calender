@@ -22,6 +22,8 @@ import (
 // Observe actual SDK RPCs, not the lengths of post-query application slices.
 type planningReadTrace struct {
 	limits            []int32
+	queries           []*firestorepb.StructuredQuery
+	budgets           []time.Duration
 	documents, points int
 	afterQuery        func(int) error
 }
@@ -35,6 +37,10 @@ func (s *planningTraceStream) SendMsg(m any) error {
 	switch v := m.(type) {
 	case *firestorepb.RunQueryRequest:
 		s.trace.limits = append(s.trace.limits, v.GetStructuredQuery().GetLimit().GetValue())
+		s.trace.queries = append(s.trace.queries, v.GetStructuredQuery())
+		if deadline, ok := s.Context().Deadline(); ok {
+			s.trace.budgets = append(s.trace.budgets, time.Until(deadline))
+		}
 		s.query = len(s.trace.limits)
 	case *firestorepb.BatchGetDocumentsRequest:
 		s.trace.points += len(v.Documents)

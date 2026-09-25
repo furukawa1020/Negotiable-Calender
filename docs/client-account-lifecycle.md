@@ -25,3 +25,25 @@ not promise to cancel a server-side action. This is scoped client-state isolatio
 not a replacement for server authorization/lifecycle fencing or a verification of
 every asynchronous UI action. Actual Google consent and account acceptance remain
 separate. The user-owned public-launch-draft is not a release artifact.
+
+## Workspace and invitation mutations (#165)
+
+Invitation creation, acceptance and workspace switching now capture a separate
+account generation. Only a successfully restored, still-active account may start
+these operations. Each response/body boundary, clipboard completion, error and
+finally path checks the captured generation. Successful logout/deletion and
+component unmount invalidate it synchronously; failed teardown does not.
+
+This prevents an obsolete invite response from copying/showing its bearer link,
+an obsolete acceptance response from issuing the follow-on switch, and late
+switch/error responses from replacing teardown notices with organization data.
+Generated invite links and busy state are cleared at account teardown; successful
+workspace switch/acceptance also clears the previous workspace's generated link.
+Account generation is intentionally separate from Calendar generation: disconnecting
+Calendar must not invalidate an otherwise current invitation operation.
+
+Already-dispatched server operations and clipboard writes cannot be undone by a
+client generation check. No clipboard clearing or server invitation revocation is
+implied. Tests use synthetic responses and a mocked clipboard; no live invitation
+or account deletion is performed. This does not assert that every other UI action
+or same-account concurrent workspace mutation has been audited.

@@ -303,17 +303,23 @@ function App() {
   const policyDraftError = sharingPolicyError(sharingPolicy)
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
+    const initialSearch = window.location.search
+    const initialPath = window.location.pathname
+    const params = new URLSearchParams(initialSearch)
     const authCompleted = params.get('auth') === 'success'
     const calendarCompleted = params.get('calendar') === 'connected'
     const calendarFailure = calendarConsentNotice(params.get('calendar'))
     const incomingInvitation = params.get('invite') ?? ''
     if (!authCompleted && !calendarCompleted && !calendarFailure && !incomingInvitation && import.meta.env.DEV) return
+    let cancelled = false
+    const lifecycle = calendarLifecycle.current
+    const isCurrent = () => !cancelled && lifecycle === calendarLifecycle.current
     const loadSession = async () => {
       try {
         const response = await apiFetch(`${apiURL}/api/v1/auth/session`)
         if (!response.ok) throw new Error('session failed')
         const payload = await response.json() as { authenticated: boolean; demoMode?: boolean; user?: AuthUser }
+        if (!isCurrent()) return
         setDemoMode(payload.demoMode === true)
         if (payload.authenticated && payload.user) {
           setAuthUser(payload.user)
@@ -323,14 +329,18 @@ function App() {
           if (authCompleted) setNotice('Googleアカウントでログインしました。')
           if (calendarCompleted) setNotice('Google Calendarを接続しました。同期を開始できます。')
           const calendarResponse = await apiFetch(`${apiURL}/api/v1/calendar/connection`)
+          if (!isCurrent()) return
           if (calendarResponse.ok) {
             const calendarPayload = await calendarResponse.json() as { connected: boolean; connection?: CalendarConnection; syncMode?: string }
+            if (!isCurrent()) return
             setCalendarConnection(calendarPayload.connected ? calendarPayload.connection ?? null : null)
             setCalendarSyncMode(calendarPayload.syncMode ?? 'off')
           }
           const workspaceResponse = await apiFetch(`${apiURL}/api/v1/workspaces`)
+          if (!isCurrent()) return
           if (workspaceResponse.ok) {
             const workspacePayload = await workspaceResponse.json() as { workspaces: Workspace[] }
+            if (!isCurrent()) return
             setWorkspaces(workspacePayload.workspaces)
           }
           if (incomingInvitation) {
@@ -339,17 +349,22 @@ function App() {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ token: incomingInvitation }),
             })
-            if (invitationResponse.ok) setInvitationPreview(await invitationResponse.json() as InvitationPreview)
+            if (!isCurrent()) return
+            if (invitationResponse.ok) {
+              const preview = await invitationResponse.json() as InvitationPreview
+              if (isCurrent()) setInvitationPreview(preview)
+            }
             else setNotice('招待リンクは無効、期限切れ、または使用済みです。')
           }
         }
       } catch {
-        if (authCompleted || calendarCompleted || calendarFailure) setNotice('ログイン状態を確認できませんでした。もう一度ログインして接続状態を確認してください。')
+        if (isCurrent() && (authCompleted || calendarCompleted || calendarFailure)) setNotice('ログイン状態を確認できませんでした。もう一度ログインして接続状態を確認してください。')
       } finally {
-        if (authCompleted || calendarCompleted || calendarFailure || incomingInvitation) window.history.replaceState({}, '', window.location.pathname)
+        if (isCurrent() && window.location.pathname === initialPath && window.location.search === initialSearch && (authCompleted || calendarCompleted || calendarFailure || incomingInvitation)) window.history.replaceState({}, '', initialPath)
       }
     }
     void loadSession()
+    return () => { cancelled = true }
   }, [])
 
 
@@ -783,13 +798,24 @@ function App() {
         return
       }
       if (!response.ok) throw new Error('account deletion failed')
+      // Fence pending bootstrap/private reads/manual sync before React cleanup.
+      calendarLifecycle.current++
       setAuthUser(null)
       setCalendarConnection(null)
+      setCalendarBusy(false)
+      setCalendarSyncMode('off')
       setWorkspaces([])
+      setInvitationPreview(null)
+      setInvitationToken('')
       setPrivateCalendarEvents([])
+      setPrivateEventsLoading(false)
+      setPrivateEventsError('')
+      setSelectedPrivateEventID('')
       setProjections([])
+      setMemberProjections([])
       setActiveDialog('')
       setAccountOpen(false)
+      window.history.replaceState({}, '', window.location.pathname)
       setNotice('アカウントと保存データを削除しました。')
     } catch {
       setNotice('アカウントを削除できませんでした。時間をおいて再試行してください。')
@@ -863,11 +889,20 @@ function App() {
       if (!response.ok) throw new Error('logout failed')
       calendarLifecycle.current++
       setPrivateCalendarEvents([])
+      setPrivateEventsLoading(false)
+      setPrivateEventsError('')
       setProjections([])
+      setMemberProjections([])
       setSelectedPrivateEventID('')
       setAuthUser(null)
       setCalendarConnection(null)
+      setCalendarBusy(false)
+      setCalendarSyncMode('off')
+      setWorkspaces([])
+      setInvitationPreview(null)
+      setInvitationToken('')
       setAccountOpen(false)
+      window.history.replaceState({}, '', window.location.pathname)
       setNotice('ログアウトしました。')
     } catch {
       setNotice('ログアウトできませんでした。')

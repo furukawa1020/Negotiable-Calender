@@ -268,11 +268,10 @@ func (store *Calendar) ClaimDueConnections(ctx context.Context, now time.Time, l
 		lease = 2 * time.Minute
 	}
 	limit = min(limit, 20)
-	collection := store.Client.Collection("calendarConnections")
 	// Legacy explicit-null schedules are bounded too; missing fields require reconnect.
 	queries := []firestore.Query{
-		collection.Where("ReconnectRequired", "==", false).Where("NextAttemptAt", "==", nil).Limit(limit),
-		collection.Where("ReconnectRequired", "==", false).Where("NextAttemptAt", "<=", now).OrderBy("NextAttemptAt", firestore.Asc).Limit(limit * 4),
+		store.legacyDueQuery().Limit(limit),
+		store.datedDueQuery(now).Limit(limit * 4),
 	}
 	values := []calendarintegration.Connection{}
 	for _, query := range queries {

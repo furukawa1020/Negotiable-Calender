@@ -204,6 +204,9 @@ func runFirestore(logger *slog.Logger) error {
 		return err
 	}
 	defer backend.Close()
+	if err := preflightFirestoreSync(ctx, backend.Calendar(), syncMode(os.Getenv)); err != nil {
+		return err
+	}
 
 	now := time.Now().UTC()
 	demoSeeded := false

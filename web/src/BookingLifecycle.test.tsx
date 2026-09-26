@@ -9,7 +9,7 @@ function deferred<T>() {
   return { promise, resolve, reject }
 }
 
-function setup(suggested = false) {
+function setup(suggested = false, invitation = false) {
   const start = Date.now() + 86400000
   const value = {
     id: 'booking', organizationId: 'org', requesterUserId: 'peer', targetUserId: 'owner',
@@ -33,13 +33,15 @@ function setup(suggested = false) {
     if (url.pathname.endsWith('/calendar/connection')) return Response.json({ connected: false })
     if (url.pathname.endsWith('/workspaces')) return Response.json({ workspaces: [{ id: 'org', name: 'Personal', role: 'OWNER' }, { id: 'team', name: 'Team', role: 'OWNER' }] })
     if (url.pathname.endsWith('/workspaces/switch')) return Response.json({ activeWorkspace: { id: 'team', name: 'Team', role: 'OWNER' } })
+    if (url.pathname.endsWith('/invitations/preview')) return Response.json({ invitationId: 'invite', organizationId: 'team', organizationName: 'Team', role: 'MEMBER', expiresAt: '2030-01-01T00:00:00Z' })
+    if (url.pathname.endsWith('/invitations/accept')) return Response.json({ accepted: true })
     if (url.pathname.endsWith('/requests')) return Response.json({ requests: [value] })
     return new Response('{}', { status: 404 })
   })
   const create = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:booking')
   const revoke = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined)
   const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
-  window.history.replaceState({}, '', '/?auth=success')
+  window.history.replaceState({}, '', invitation ? '/?auth=success&invite=synthetic-token' : '/?auth=success')
   return { value, routes, fetchMock, create, revoke, click, view: render(<App />) }
 }
 
@@ -73,7 +75,7 @@ describe('Booking operations respect account and workspace lifetime', () => {
     window.history.replaceState({}, '', '/')
   })
 
-  it.each(['logout', 'delete', 'switch', 'unmount'] as const)('does not download an ICS after %s during response or Blob decoding', async kind => {
+  it.each(['logout', 'delete', 'switch', 'unmount'] as const)('does not download an ICS after %s during Blob decoding', async kind => {
     const h = setup()
     const response = deferred<Response>()
     const body = deferred<Blob>()
@@ -196,5 +198,76 @@ describe('Booking operations respect account and workspace lifetime', () => {
     await screen.findByText('取得できませんでした。依頼を更新して再試行してください。')
     expect(document.querySelector('a[download]')).toBeNull()
     await waitFor(() => expect(h.revoke).toHaveBeenCalledWith('blob:booking'), { timeout: 2000 })
+  })
+
+  it.each(['依頼', '送信済み'])('discards %s JSON decoded after workspace switch', async name => {
+    const h = setup()
+    const body = deferred<object>()
+    const response = Response.json({})
+    response.json = () => body.promise
+    h.routes.set('GET /api/v1/requests' + (name === '送信済み' ? '?scope=sent' : ''), async () => response)
+    await screen.findByRole('button', { name: 'Ownerのアカウントメニュー' })
+    fireEvent.click(screen.getByRole('button', { name }))
+    await changeScope('switch')
+    await act(async () => { body.resolve({ requests: [h.value] }) })
+    expect(screen.queryByText('Private booking')).not.toBeInTheDocument()
+    expect(screen.getByText('「更新」で依頼を取得してください。')).toBeInTheDocument()
+  })
+
+  it.each(['依頼', '送信済み'])('does not let an old %s error clear the current loading state', async name => {
+    const h = setup()
+    const first = deferred<Response>()
+    const second = deferred<Response>()
+    let calls = 0
+    h.routes.set('GET /api/v1/requests' + (name === '送信済み' ? '?scope=sent' : ''), () => ++calls === 1 ? first.promise : second.promise)
+    await screen.findByRole('button', { name: 'Ownerのアカウントメニュー' })
+    fireEvent.click(screen.getByRole('button', { name }))
+    fireEvent.click(screen.getByRole('button', { name: '更新' }))
+    await act(async () => { first.reject(new Error('obsolete load')) })
+    expect(screen.getByText(name === '依頼' ? '依頼を取得しています…' : '送信済み依頼を取得しています…')).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    await act(async () => { second.resolve(Response.json({ requests: [h.value] })) })
+    expect(screen.getByText('Private booking')).toBeInTheDocument()
+  })
+
+  it('does not revive an old ICS when switching away and back to the original workspace', async () => {
+    const h = setup()
+    const pending = deferred<Response>()
+    h.routes.set('GET /api/v1/requests/booking/calendar.ics', () => pending.promise)
+    await openRequests()
+    fireEvent.click(screen.getByRole('button', { name: 'カレンダーに登録（ICS）' }))
+    await changeScope('switch')
+    h.routes.set('POST /api/v1/workspaces/switch', async () => Response.json({ activeWorkspace: { id: 'org', name: 'Personal', role: 'OWNER' } }))
+    fireEvent.change(screen.getByRole('combobox', { name: 'Workspace' }), { target: { value: 'org' } })
+    await screen.findByText('Personal に切り替えました。')
+    await act(async () => { pending.resolve(new Response('synthetic ICS')) })
+    expect(h.create).not.toHaveBeenCalled()
+  })
+
+  it('preserves a current reschedule when workspace switching fails', async () => {
+    const h = setup()
+    const pending = deferred<Response>()
+    h.routes.set('POST /api/v1/requests/booking/reschedule', () => pending.promise)
+    h.routes.set('POST /api/v1/workspaces/switch', async () => new Response(null, { status: 503 }))
+    await openRequests()
+    fireEvent.click(screen.getByRole('button', { name: 'この日時への変更を承認' }))
+    await changeScope('switch', true)
+    await act(async () => { pending.resolve(Response.json({ ...h.value, acceptedOptionId: 'proposal-new' })) })
+    expect(screen.getByRole('status')).toHaveTextContent('日時変更を確定しました。')
+    expect(screen.getByText('Private booking')).toBeInTheDocument()
+  })
+
+  it('invalidates pending ICS when an accepted invitation switches the workspace', async () => {
+    const h = setup(false, true)
+    const pending = deferred<Response>()
+    h.routes.set('GET /api/v1/requests/booking/calendar.ics', () => pending.promise)
+    await openRequests()
+    fireEvent.click(screen.getByRole('button', { name: 'カレンダーに登録（ICS）' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Ownerのアカウントメニュー' }))
+    fireEvent.click(await screen.findByRole('button', { name: '招待を受諾' }))
+    await screen.findByText('Team に参加しました。')
+    await act(async () => { pending.resolve(new Response('synthetic ICS')) })
+    expect(h.create).not.toHaveBeenCalled()
+    expect(screen.queryByText('Private booking')).not.toBeInTheDocument()
   })
 })

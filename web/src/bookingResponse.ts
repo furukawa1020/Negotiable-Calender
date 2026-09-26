@@ -43,7 +43,7 @@ export async function readAcceptance(response: Response, id: string, optionID: s
 export async function readRescheduleSnapshot(response: Response, id: string, organizationID: string, actor: string): Promise<CoordinationRequest> {
   const value: unknown = await response.json()
   const invalid = () => new Error('reschedule snapshot unconfirmed')
-  if (!record(value) || value.id !== id || value.organizationId !== organizationID
+  if (!text(id) || !text(organizationID) || !text(actor) || !record(value) || value.id !== id || value.organizationId !== organizationID
     || !text(value.requesterUserId) || !text(value.targetUserId) || value.requesterUserId === value.targetUserId
     || ![value.requesterUserId, value.targetUserId].includes(actor)
     || !text(value.title) || !text(value.type) || !text(value.priority)
@@ -71,6 +71,7 @@ export async function readRescheduleSnapshot(response: Response, id: string, org
   if (value.status === 'accepted' && !meeting(value.acceptedOptionId)) throw invalid()
   const proposal = value.rescheduleProposal
   if (proposal !== undefined && (!record(proposal) || !text(proposal.id) || !text(proposal.expectedOptionId)
+    || proposal.id === proposal.expectedOptionId
     || !text(proposal.proposerUserId) || ![value.requesterUserId, value.targetUserId].includes(proposal.proposerUserId)
     || !choice(proposal.status, ['proposed', 'accepted', 'declined', 'withdrawn'])
     || !meeting(proposal.id) || !meeting(proposal.expectedOptionId))) throw invalid()
@@ -85,4 +86,5 @@ export function matchesRescheduleOutcome(value: CoordinationRequest, command: Re
   return value.status === 'accepted' && proposal?.id === command.proposalId
     && proposal.expectedOptionId === command.expectedOptionId && proposal.status === statuses[command.action]
     && value.acceptedOptionId === (command.action === 'accept' ? command.proposalId : command.expectedOptionId)
+    && (command.action !== 'propose' || Date.parse(command.startAt ?? '') === Date.parse(value.options.find(option => option.id === command.proposalId)?.startAt ?? ''))
 }

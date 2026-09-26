@@ -36,6 +36,7 @@ const invalidSnapshots: [string, (value: ReturnType<typeof snapshot>) => unknown
   ['bad proposal status', v => ({ ...v, rescheduleProposal: { ...v.rescheduleProposal, status: 'unknown' } })],
   ['bad proposer', v => ({ ...v, rescheduleProposal: { ...v.rescheduleProposal, proposerUserId: ['alice'] } })],
   ['missing proposal option', v => ({ ...v, rescheduleProposal: { ...v.rescheduleProposal, id: 'absent' } })],
+  ['same proposal and original option', v => ({ ...v, rescheduleProposal: { ...v.rescheduleProposal, id: 'old' } })],
 ]
 
 describe('booking response contracts', () => {
@@ -54,10 +55,17 @@ describe('booking response contracts', () => {
     const statuses = { propose: 'proposed', accept: 'accepted', decline: 'declined', withdraw: 'withdrawn' }
     const v = snapshot()
     const value = await read({ ...v, acceptedOptionId: action === 'accept' ? 'new' : 'old', rescheduleProposal: { ...v.rescheduleProposal, status: statuses[action] } })
-    const command = { action, proposalId: 'new', expectedOptionId: 'old' }
+    const command = { action, proposalId: 'new', expectedOptionId: 'old', startAt: v.options[1].startAt }
     expect(matchesRescheduleOutcome(value, command)).toBe(true)
     expect(matchesRescheduleOutcome(value, { ...command, proposalId: 'other' })).toBe(false)
     expect(matchesRescheduleOutcome(value, { ...command, expectedOptionId: 'other' })).toBe(false)
+  })
+  it('does not claim a proposal with a different start time matches the submitted command', async () => {
+    const value = await read(snapshot())
+    expect(matchesRescheduleOutcome(value, { action: 'propose', proposalId: 'new', expectedOptionId: 'old', startAt: '2099-01-04T00:00:00Z' })).toBe(false)
+  })
+  it.each(['request', 'workspace', 'actor'])('rejects an empty expected %s context', async missing => {
+    await expect(readRescheduleSnapshot(Response.json(snapshot()), missing === 'request' ? '' : 'booking', missing === 'workspace' ? '' : 'org', missing === 'actor' ? '' : 'bob')).rejects.toThrow('unconfirmed')
   })
   it.each([null, {}, { id: 'other', status: 'accepted', acceptedOptionId: 'old' }, { id: 'booking', status: 'cancelled', acceptedOptionId: 'old' }, { id: 'booking', status: 'accepted', acceptedOptionId: 'other' }])('rejects invalid acceptance %j', async value => {
     await expect(readAcceptance(Response.json(value), 'booking', 'old')).rejects.toThrow('invalid')

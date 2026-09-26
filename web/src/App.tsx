@@ -716,7 +716,7 @@ function App() {
   const rescheduleMeeting = async (requestID: string, command: RescheduleCommand) => {
     const response = await apiFetch(`${apiURL}/api/v1/requests/${encodeURIComponent(requestID)}/reschedule`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Demo-User-ID': currentView === 'sent' ? requesterUserID : activeUserID },
+      headers: { 'Content-Type': 'application/json', 'X-Demo-User-ID': currentView === 'sent' ? requesterUserID : activeUserID, 'X-Organization-ID': activeOrganizationID },
       body: JSON.stringify(command),
     })
     if (!response.ok) throw new Error('reschedule failed')

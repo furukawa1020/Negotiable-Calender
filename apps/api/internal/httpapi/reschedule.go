@@ -10,7 +10,8 @@ import (
 
 func (api *API) rescheduleMeeting(response http.ResponseWriter, request *http.Request) {
 	actor := request.Header.Get("X-Demo-User-ID")
-	if actor == "" {
+	org := request.Header.Get("X-Organization-ID")
+	if actor == "" || org == "" {
 		writeJSON(response, 401, map[string]string{"error": "request identity is required"})
 		return
 	}
@@ -25,13 +26,13 @@ func (api *API) rescheduleMeeting(response http.ResponseWriter, request *http.Re
 		writeJSON(response, 400, map[string]string{"error": "invalid reschedule action"})
 		return
 	}
-	store, ok := api.requests.(coordinationrequest.RescheduleStore)
+	store, ok := api.requests.(coordinationrequest.ScopedRescheduleStore)
 	if !ok {
 		writeJSON(response, 503, map[string]string{"error": "rescheduling unavailable"})
 		return
 	}
 	id := request.PathValue("requestId")
-	err := store.Reschedule(request.Context(), id, actor, input)
+	err := store.RescheduleInOrganization(request.Context(), id, actor, org, input)
 	if err == nil || errors.Is(err, coordinationrequest.ErrRescheduleRepeated) {
 		value, err := api.requests.GetForUser(request.Context(), id, actor)
 		if err != nil {
@@ -43,6 +44,10 @@ func (api *API) rescheduleMeeting(response http.ResponseWriter, request *http.Re
 	}
 	if errors.Is(err, coordinationrequest.ErrNotFound) {
 		writeJSON(response, 404, map[string]string{"error": "coordination request not found"})
+		return
+	}
+	if errors.Is(err, coordinationrequest.ErrCreationForbidden) {
+		writeJSON(response, http.StatusForbidden, map[string]string{"error": "current membership required", "code": "membership_required"})
 		return
 	}
 	for _, conflict := range []error{coordinationrequest.ErrRescheduleInvalid, coordinationrequest.ErrCandidateExpired, coordinationrequest.ErrCandidateInvalid, coordinationrequest.ErrBookingConflict, coordinationrequest.ErrAvailabilityChanged} {

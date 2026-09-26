@@ -10,6 +10,17 @@ import (
 )
 
 func (store *Request) Reschedule(ctx context.Context, id, actor string, command coordinationrequest.RescheduleCommand) error {
+	return store.reschedule(ctx, id, actor, "", command)
+}
+
+func (store *Request) RescheduleInOrganization(ctx context.Context, id, actor, org string, command coordinationrequest.RescheduleCommand) error {
+	if actor == "" || org == "" {
+		return coordinationrequest.ErrNotFound
+	}
+	return store.reschedule(ctx, id, actor, org, command)
+}
+
+func (store *Request) reschedule(ctx context.Context, id, actor, org string, command coordinationrequest.RescheduleCommand) error {
 	ref := store.Client.Collection("coordinationRequests").Doc(id)
 	err := store.Client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
 		doc, err := tx.Get(ref)
@@ -20,11 +31,16 @@ func (store *Request) Reschedule(ctx context.Context, id, actor string, command 
 		if err := doc.DataTo(&value); err != nil {
 			return err
 		}
-		if actor != value.RequesterUserID && actor != value.TargetUserID {
+		if (actor != value.RequesterUserID && actor != value.TargetUserID) || (org != "" && org != value.OrganizationID) {
 			return coordinationrequest.ErrNotFound
 		}
 		if err := store.guardRequestAccounts(ctx, tx, value); err != nil {
 			return err
+		}
+		if org != "" {
+			if err := store.guardCreation(ctx, tx, value); err != nil {
+				return err
+			}
 		}
 		now := time.Now().UTC()
 		if err := coordinationrequest.ApplyReschedule(&value, actor, command, now); err != nil {
@@ -62,3 +78,5 @@ func (store *Request) Reschedule(ctx context.Context, id, actor string, command 
 	}
 	return err
 }
+
+var _ coordinationrequest.ScopedRescheduleStore = (*Request)(nil)

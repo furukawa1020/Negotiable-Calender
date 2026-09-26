@@ -45,19 +45,20 @@ func TestRescheduleHTTP(t *testing.T) {
 		{"action", "bob", `{"action":"overwrite","proposalId":"proposal-new","expectedOptionId":"old"}`, nil, 400, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			store := &rescheduleStore{failure: tc.failure}
+			store := &scopedRescheduleStub{rescheduleStore: rescheduleStore{failure: tc.failure}}
 			store.value = coordinationrequest.CoordinationRequest{ID: "r", Status: coordinationrequest.Accepted, AcceptedOptionID: "old"}
 			notes := &stubNotificationStore{}
 			audits := &stubAuditStore{}
 			handler := NewWithStores(nil, nil, nil, nil, store, notes, audits, "", slog.New(slog.NewTextHandler(io.Discard, nil)))
 			req := httptest.NewRequest("POST", "/api/v1/requests/r/reschedule", strings.NewReader(tc.body))
 			req.Header.Set("X-Demo-User-ID", tc.actor)
+			req.Header.Set("X-Organization-ID", "org")
 			res := httptest.NewRecorder()
 			handler.ServeHTTP(res, req)
-			if res.Code != tc.want || store.calls != tc.calls {
-				t.Fatalf("%d %s calls=%d", res.Code, res.Body.String(), store.calls)
+			if res.Code != tc.want || store.scopedCalls != tc.calls || store.calls != 0 {
+				t.Fatalf("%d %s calls=%d", res.Code, res.Body.String(), store.scopedCalls)
 			}
-			if store.calls > 0 && (store.actor != tc.actor || store.command.ExpectedOptionID != "old") {
+			if store.scopedCalls > 0 && (store.actor != tc.actor || store.command.ExpectedOptionID != "old") {
 				t.Fatal("lost precondition/actor")
 			}
 			if len(notes.values) != 0 || len(audits.values) != 0 || strings.Contains(res.Body.String(), "private detail") {

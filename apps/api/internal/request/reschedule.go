@@ -34,6 +34,12 @@ type RescheduleStore interface {
 	Reschedule(context.Context, string, string, RescheduleCommand) error
 }
 
+// ScopedRescheduleStore is required by HTTP. Legacy internal callers must not
+// provide a fallback that skips the active organization and membership checks.
+type ScopedRescheduleStore interface {
+	RescheduleInOrganization(context.Context, string, string, string, RescheduleCommand) error
+}
+
 // ApplyReschedule performs the state transition on a transaction-local copy.
 // Acceptance still requires the store's transactional conflict/availability checks.
 func ApplyReschedule(value *CoordinationRequest, actor string, command RescheduleCommand, now time.Time) error {

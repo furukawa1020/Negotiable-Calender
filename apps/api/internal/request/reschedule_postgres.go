@@ -8,7 +8,18 @@ import (
 	"time"
 )
 
-func (store *PostgresStore) Reschedule(ctx context.Context, id, actor string, command RescheduleCommand) (err error) {
+func (store *PostgresStore) Reschedule(ctx context.Context, id, actor string, command RescheduleCommand) error {
+	return store.reschedule(ctx, id, actor, "", command)
+}
+
+func (store *PostgresStore) RescheduleInOrganization(ctx context.Context, id, actor, org string, command RescheduleCommand) error {
+	if actor == "" || org == "" {
+		return ErrNotFound
+	}
+	return store.reschedule(ctx, id, actor, org, command)
+}
+
+func (store *PostgresStore) reschedule(ctx context.Context, id, actor, org string, command RescheduleCommand) (err error) {
 	defer func() {
 		var state interface{ SQLState() string }
 		if errors.As(err, &state) && (state.SQLState() == "40001" || state.SQLState() == "40P01") {
@@ -30,8 +41,13 @@ func (store *PostgresStore) Reschedule(ctx context.Context, id, actor string, co
 	if err != nil {
 		return err
 	}
-	if actor != value.RequesterUserID && actor != value.TargetUserID {
+	if (actor != value.RequesterUserID && actor != value.TargetUserID) || (org != "" && org != value.OrganizationID) {
 		return ErrNotFound
+	}
+	if org != "" {
+		if err := guardCreationMembers(ctx, tx, value); err != nil {
+			return err
+		}
 	}
 	value.AcceptedOptionID = accepted.String
 	value.DeadlineAt = value.DeadlineAt.UTC()
@@ -104,3 +120,5 @@ func (store *PostgresStore) Reschedule(ctx context.Context, id, actor string, co
 	}
 	return tx.Commit()
 }
+
+var _ ScopedRescheduleStore = (*PostgresStore)(nil)

@@ -730,7 +730,7 @@ function App() {
   const cancelConfirmedMeeting = async (requestID: string, optionID: string) => {
     const response = await apiFetch(`${apiURL}/api/v1/requests/${encodeURIComponent(requestID)}/cancel-confirmed`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Demo-User-ID': currentView === 'sent' ? requesterUserID : activeUserID },
+      headers: { 'Content-Type': 'application/json', 'X-Demo-User-ID': currentView === 'sent' ? requesterUserID : activeUserID, 'X-Organization-ID': activeOrganizationID },
       body: JSON.stringify({ optionId: optionID }),
     })
     if (!response.ok) throw new Error('confirmed cancellation failed')

@@ -76,6 +76,7 @@ func TestPostgresAtomicConfirmation(t *testing.T) {
 	testPostgresCounterproposal(t, ctx, db, store, fixture, now)
 	testPostgresReschedule(t, ctx, db, store, fixture, now)
 	testPostgresRescheduleAuthorization(t, ctx, db, store, fixture, now)
+	testPostgresCancellationAuthorization(t, ctx, db, store, fixture, now)
 	t.Run("confirmed-cancellation", func(t *testing.T) {
 		for i, actor := range []string{"alice", "bob"} {
 			value := fixture("cancel-"+actor, "alice", "bob", start.Add(time.Duration(8+i)*time.Hour))
@@ -85,16 +86,19 @@ func TestPostgresAtomicConfirmation(t *testing.T) {
 			if err := store.Respond(ctx, value.ID, "bob", coordinationrequest.Accepted, value.Options[0].ID); err != nil {
 				t.Fatal(err)
 			}
-			if err := store.CancelConfirmed(ctx, value.ID, "carol", value.Options[0].ID); !errors.Is(err, coordinationrequest.ErrNotFound) {
+			if err := store.CancelConfirmedInOrganization(ctx, value.ID, "carol", value.OrganizationID, value.Options[0].ID); !errors.Is(err, coordinationrequest.ErrNotFound) {
 				t.Fatal(err)
 			}
-			if err := store.CancelConfirmed(ctx, value.ID, actor, "old"); !errors.Is(err, coordinationrequest.ErrCancellationInvalid) {
+			if err := store.CancelConfirmedInOrganization(ctx, value.ID, actor, value.OrganizationID, "old"); !errors.Is(err, coordinationrequest.ErrCancellationInvalid) {
 				t.Fatal(err)
 			}
 			gate := make(chan struct{})
 			results := make(chan error, 2)
 			for range 2 {
-				go func() { <-gate; results <- store.CancelConfirmed(ctx, value.ID, actor, value.Options[0].ID) }()
+				go func() {
+					<-gate
+					results <- store.CancelConfirmedInOrganization(ctx, value.ID, actor, value.OrganizationID, value.Options[0].ID)
+				}()
 			}
 			close(gate)
 			success := 0
@@ -109,7 +113,7 @@ func TestPostgresAtomicConfirmation(t *testing.T) {
 			if success != 1 {
 				t.Fatalf("success=%d", success)
 			}
-			if err := store.CancelConfirmed(ctx, value.ID, actor, value.Options[0].ID); !errors.Is(err, coordinationrequest.ErrAlreadyCancelled) {
+			if err := store.CancelConfirmedInOrganization(ctx, value.ID, actor, value.OrganizationID, value.Options[0].ID); !errors.Is(err, coordinationrequest.ErrAlreadyCancelled) {
 				t.Fatal(err)
 			}
 			got, err := store.GetForUser(ctx, value.ID, actor)
@@ -148,7 +152,7 @@ func TestPostgresAtomicConfirmation(t *testing.T) {
 		if err := audit.NewPostgresStore(db).Create(ctx, event); err != nil {
 			t.Fatal(err)
 		}
-		if err := store.CancelConfirmed(ctx, value.ID, "alice", value.Options[0].ID); err == nil {
+		if err := store.CancelConfirmedInOrganization(ctx, value.ID, "alice", value.OrganizationID, value.Options[0].ID); err == nil {
 			t.Fatal("collision accepted")
 		}
 		got, err := store.GetForUser(ctx, value.ID, "alice")

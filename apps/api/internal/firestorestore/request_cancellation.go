@@ -11,6 +11,17 @@ import (
 )
 
 func (store *Request) CancelConfirmed(ctx context.Context, requestID, actor, optionID string) error {
+	return store.cancelConfirmed(ctx, requestID, actor, "", optionID)
+}
+
+func (store *Request) CancelConfirmedInOrganization(ctx context.Context, requestID, actor, org, optionID string) error {
+	if actor == "" || org == "" {
+		return coordinationrequest.ErrNotFound
+	}
+	return store.cancelConfirmed(ctx, requestID, actor, org, optionID)
+}
+
+func (store *Request) cancelConfirmed(ctx context.Context, requestID, actor, org, optionID string) error {
 	ref := store.Client.Collection("coordinationRequests").Doc(requestID)
 	err := store.Client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
 		doc, err := tx.Get(ref)
@@ -21,11 +32,20 @@ func (store *Request) CancelConfirmed(ctx context.Context, requestID, actor, opt
 		if err := doc.DataTo(&value); err != nil {
 			return err
 		}
-		if actor == "" || (actor != value.RequesterUserID && actor != value.TargetUserID) {
+		if actor == "" || (actor != value.RequesterUserID && actor != value.TargetUserID) || (org != "" && org != value.OrganizationID) {
 			return coordinationrequest.ErrNotFound
 		}
 		if err := store.guardRequestAccounts(ctx, tx, value); err != nil {
 			return err
+		}
+		if org != "" {
+			// Cancelling releases a reservation. The remaining member may cancel
+			// even if the counterpart has left; the actor's membership is required.
+			if _, err := tx.Get(store.Client.Collection("organizations").Doc(org).Collection("members").Doc(actor)); firestoreNotFound(err) {
+				return coordinationrequest.ErrCreationForbidden
+			} else if err != nil {
+				return err
+			}
 		}
 		if err := coordinationrequest.ValidateConfirmedCancellation(value, actor, optionID, time.Now().UTC()); err != nil {
 			return err
@@ -66,3 +86,5 @@ func (store *Request) CancelConfirmed(ctx context.Context, requestID, actor, opt
 	}
 	return err
 }
+
+var _ coordinationrequest.ScopedConfirmedLifecycleStore = (*Request)(nil)

@@ -20,22 +20,26 @@ func TestConfirmedCancellationAtomicLifecycle(t *testing.T) {
 			p.EndAt = start.Add(time.Hour)
 			putDocument(t, ctx, b.Client.Collection("users").Doc("bob").Collection("scheduleProjections").Doc(p.ID), p)
 			store := b.Request()
+			putDocument(t, ctx, b.Client.Collection("organizations").Doc(value.OrganizationID).Collection("members").Doc(actor), map[string]any{"UserID": actor})
 			if err := store.Create(ctx, value); err != nil {
 				t.Fatal(err)
 			}
 			if err := store.Respond(ctx, value.ID, "bob", coordinationrequest.Accepted, value.Options[0].ID); err != nil {
 				t.Fatal(err)
 			}
-			if err := store.CancelConfirmed(ctx, value.ID, "mallory", value.Options[0].ID); !errors.Is(err, coordinationrequest.ErrNotFound) {
+			if err := store.CancelConfirmedInOrganization(ctx, value.ID, "mallory", value.OrganizationID, value.Options[0].ID); !errors.Is(err, coordinationrequest.ErrNotFound) {
 				t.Fatal(err)
 			}
-			if err := store.CancelConfirmed(ctx, value.ID, actor, "old-option"); !errors.Is(err, coordinationrequest.ErrCancellationInvalid) {
+			if err := store.CancelConfirmedInOrganization(ctx, value.ID, actor, value.OrganizationID, "old-option"); !errors.Is(err, coordinationrequest.ErrCancellationInvalid) {
 				t.Fatal(err)
 			}
 			gate := make(chan struct{})
 			results := make(chan error, 2)
 			for range 2 {
-				go func() { <-gate; results <- store.CancelConfirmed(ctx, value.ID, actor, value.Options[0].ID) }()
+				go func() {
+					<-gate
+					results <- store.CancelConfirmedInOrganization(ctx, value.ID, actor, value.OrganizationID, value.Options[0].ID)
+				}()
 			}
 			close(gate)
 			success, replay := 0, 0
@@ -90,6 +94,7 @@ func TestConfirmedCancellationRollsBackEffects(t *testing.T) {
 			value.AcceptedOptionID = value.Options[0].ID
 			ref := b.Client.Collection("coordinationRequests").Doc(value.ID)
 			putDocument(t, ctx, ref, value)
+			putDocument(t, ctx, b.Client.Collection("organizations").Doc(value.OrganizationID).Collection("members").Doc("alice"), map[string]any{"UserID": "alice"})
 			note, event := coordinationrequest.ConfirmedCancellationEffects(value, "alice", now)
 			noteRef := b.Client.Collection("users").Doc(note.UserID).Collection("notifications").Doc(note.ID)
 			auditRef := b.Client.Collection("organizations").Doc(event.OrganizationID).Collection("auditLogs").Doc(event.ID)
@@ -98,7 +103,7 @@ func TestConfirmedCancellationRollsBackEffects(t *testing.T) {
 			} else {
 				putDocument(t, ctx, auditRef, event)
 			}
-			if err := b.Request().CancelConfirmed(ctx, value.ID, "alice", value.AcceptedOptionID); err == nil {
+			if err := b.Request().CancelConfirmedInOrganization(ctx, value.ID, "alice", value.OrganizationID, value.AcceptedOptionID); err == nil {
 				t.Fatal("effect failure accepted")
 			}
 			got, err := b.Request().GetForUser(ctx, value.ID, "alice")

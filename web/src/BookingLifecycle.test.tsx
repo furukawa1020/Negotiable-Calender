@@ -82,11 +82,68 @@ describe('Booking operations respect account and workspace lifetime', () => {
     ['依頼', 'accept'], ['依頼', 'decline'], ['依頼', 'async'], ['送信済み', 'cancel'],
   ] as const
 
+  it.each([null, {}, { id: 'other', status: 'accepted', acceptedOptionId: 'old' }, { id: 'booking', status: 'accepted', acceptedOptionId: 'other' }, { id: 'booking', status: 'cancelled', acceptedOptionId: 'old' }])('keeps acceptance unconfirmed for invalid body %j and allows retry', async value => {
+    const h = setup(true)
+    h.routes.set('POST /api/v1/requests/booking/accept', async () => Response.json(value))
+    await openRequests()
+    fireEvent.click(screen.getAllByRole('button', { name: 'この候補を承認' })[0])
+    await screen.findByText('依頼を更新できませんでした。最新状態を確認してください。')
+    expect(screen.queryByRole('button', { name: 'カレンダーに登録（ICS）' })).not.toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: 'この候補を承認' })[0]).toBeEnabled()
+    h.routes.set('POST /api/v1/requests/booking/accept', async () => Response.json({ id: 'booking', status: 'accepted', acceptedOptionId: 'old' }))
+    fireEvent.click(screen.getAllByRole('button', { name: 'この候補を承認' })[0])
+    await screen.findByRole('button', { name: 'カレンダーに登録（ICS）' })
+    expect(screen.getByRole('status')).toHaveTextContent('候補を承認しました。')
+  })
+
+  it.each(['logout', 'switch'] as const)('does not apply acceptance JSON decoded after %s', async kind => {
+    const h = setup(true)
+    const body = deferred<object>()
+    const response = Response.json({})
+    response.json = () => body.promise
+    h.routes.set('POST /api/v1/requests/booking/accept', async () => response)
+    await openRequests()
+    fireEvent.click(screen.getAllByRole('button', { name: 'この候補を承認' })[0])
+    await changeScope(kind)
+    await act(async () => { body.resolve({ id: 'booking', status: 'accepted', acceptedOptionId: 'old' }) })
+    expect(screen.getByRole('status')).toHaveTextContent(notices[kind])
+    expect(screen.queryByRole('button', { name: 'カレンダーに登録（ICS）' })).not.toBeInTheDocument()
+  })
+
+  it.each(['null', 'request', 'workspace', 'options', 'deadline', 'selected'] as const)('preserves the booking for invalid reschedule %s and accepts a valid retry', async kind => {
+    const h = setup()
+    const invalid = {
+      null: null, request: { ...h.value, id: 'other' }, workspace: { ...h.value, organizationId: 'other' },
+      options: { ...h.value, options: null }, deadline: { ...h.value, deadlineAt: 'invalid' }, selected: { ...h.value, acceptedOptionId: 'absent' },
+    }[kind]
+    h.routes.set('POST /api/v1/requests/booking/reschedule', async () => Response.json(invalid))
+    await openRequests()
+    fireEvent.click(screen.getByRole('button', { name: 'この日時への変更を承認' }))
+    await screen.findByText('日時変更の結果を確認できませんでした。依頼を更新して確定日時・競合・期限・相手の応答を確認し、再試行してください。')
+    expect(screen.getByText('Private booking')).toBeInTheDocument()
+    expect(screen.getByLabelText('確定した会議').querySelector('time')).toHaveAttribute('datetime', h.value.options[0].startAt)
+    h.routes.set('POST /api/v1/requests/booking/reschedule', async () => Response.json({ ...h.value, acceptedOptionId: 'proposal-new', rescheduleProposal: { ...h.value.rescheduleProposal, status: 'accepted' } }))
+    fireEvent.click(screen.getByRole('button', { name: 'この日時への変更を承認' }))
+    await screen.findByText('日時変更を確定しました。外部カレンダーの予定は手動で更新してください。')
+    expect(screen.getByLabelText('確定した会議').querySelector('time')).toHaveAttribute('datetime', h.value.options[1].startAt)
+  })
+
+  it.each(['依頼', '送信済み'])('shows a later cancellation from %s without announcing reschedule success', async view => {
+    const h = setup()
+    h.routes.set('POST /api/v1/requests/booking/reschedule', async () => Response.json({ ...h.value, status: 'cancelled' }))
+    await openRequests(view)
+    fireEvent.click(screen.getByRole('button', { name: 'この日時への変更を承認' }))
+    await screen.findByText('依頼の最新状態を取得しました。別の操作が反映されている可能性があります。確定日時と変更提案を確認してください。')
+    expect(screen.queryByText('日時変更を確定しました。外部カレンダーの予定は手動で更新してください。')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'カレンダーに登録（ICS）' })).not.toBeInTheDocument()
+    expect(screen.getByText('キャンセル済み')).toBeInTheDocument()
+  })
+
   describe.each(['response', 'body', 'error'] as const)('superseded list %s', phase => {
     it.each(mutationCases)('preserves %s after successful %s and permits a fresh read', async (view, action) => {
       const h = setup(!['reschedule', 'cancel-confirmed'].includes(action))
       const status = action === 'decline' ? 'declined' : action === 'async' ? 'async' : action.includes('cancel') ? 'cancelled' : 'accepted'
-      const changed = { ...h.value, title: 'Acknowledged booking', status, acceptedOptionId: action === 'reschedule' ? 'proposal-new' : 'old', asyncMessage: action === 'async' ? 'Reply text' : undefined }
+      const changed = { ...h.value, title: 'Acknowledged booking', status, acceptedOptionId: action === 'reschedule' ? 'proposal-new' : 'old', asyncMessage: action === 'async' ? 'Reply text' : undefined, rescheduleProposal: { ...h.value.rescheduleProposal, status: action === 'reschedule' ? 'accepted' : h.value.rescheduleProposal.status } }
       h.routes.set(`POST /api/v1/requests/booking/${action}`, async () => Response.json(changed))
       await openRequests(view)
       const route = `GET /api/v1/requests${view === '送信済み' ? '?scope=sent' : ''}`
@@ -397,7 +454,7 @@ describe('Booking operations respect account and workspace lifetime', () => {
     await openRequests()
     fireEvent.click(screen.getByRole('button', { name: 'この日時への変更を承認' }))
     await changeScope('switch', true)
-    await act(async () => { pending.resolve(Response.json({ ...h.value, acceptedOptionId: 'proposal-new' })) })
+    await act(async () => { pending.resolve(Response.json({ ...h.value, acceptedOptionId: 'proposal-new', rescheduleProposal: { ...h.value.rescheduleProposal, status: 'accepted' } })) })
     expect(screen.getByRole('status')).toHaveTextContent('日時変更を確定しました。')
     expect(screen.getByText('Private booking')).toBeInTheDocument()
   })

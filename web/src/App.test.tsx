@@ -447,7 +447,7 @@ describe('App', () => {
   it.each(['送信済み', '依頼'])('accepts a reschedule from %s and updates the confirmed selection', async (view) => {
     const future = new Date(Date.now() + 86400000).toISOString()
     const later = new Date(Date.now() + 90000000).toISOString()
-    const value = { id: 'reschedule-1', requesterUserId: 'demo-member', targetUserId: 'demo-manager', title: '日時変更テスト', type: 'meeting', durationMinutes: 30, deadlineAt: later, priority: 'normal', status: 'accepted', acceptedOptionId: 'old', createdAt: future,
+    const value = { id: 'reschedule-1', organizationId: 'demo-org', requesterUserId: 'demo-member', targetUserId: 'demo-manager', title: '日時変更テスト', type: 'meeting', durationMinutes: 30, deadlineAt: later, priority: 'normal', status: 'accepted', acceptedOptionId: 'old', createdAt: future,
       rescheduleProposal: { id: 'proposal-new', proposerUserId: view === '送信済み' ? 'demo-manager' : 'demo-member', expectedOptionId: 'old', status: 'proposed' },
       options: [{ id: 'old', type: 'meeting', startAt: future, endAt: later }, { id: 'proposal-new', type: 'meeting', startAt: later, endAt: new Date(Date.parse(later) + 1800000).toISOString() }] }
     vi.spyOn(globalThis, 'fetch')

@@ -75,6 +75,7 @@ func TestPostgresAtomicConfirmation(t *testing.T) {
 	testPostgresHandoff(t, ctx, db, store, fixture, now)
 	testPostgresCounterproposal(t, ctx, db, store, fixture, now)
 	testPostgresReschedule(t, ctx, db, store, fixture, now)
+	testPostgresRescheduleAuthorization(t, ctx, db, store, fixture, now)
 	t.Run("confirmed-cancellation", func(t *testing.T) {
 		for i, actor := range []string{"alice", "bob"} {
 			value := fixture("cancel-"+actor, "alice", "bob", start.Add(time.Duration(8+i)*time.Hour))

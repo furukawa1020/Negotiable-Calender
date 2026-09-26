@@ -460,7 +460,7 @@ describe('App', () => {
     expect(container.querySelector('.confirmed-meeting time')?.getAttribute('datetime')).toBe(later)
     expect(globalThis.fetch).toHaveBeenLastCalledWith(expect.stringContaining('/requests/reschedule-1/reschedule'), expect.objectContaining({
       method: 'POST', credentials: 'include', body: JSON.stringify({ action: 'accept', proposalId: 'proposal-new', expectedOptionId: 'old' }),
-      headers: { 'Content-Type': 'application/json', 'X-Demo-User-ID': view === '送信済み' ? 'demo-member' : 'demo-manager' },
+      headers: { 'Content-Type': 'application/json', 'X-Demo-User-ID': view === '送信済み' ? 'demo-member' : 'demo-manager', 'X-Organization-ID': 'demo-org' },
     }))
   })
 

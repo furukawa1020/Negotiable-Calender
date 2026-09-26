@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
+import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import SharingPolicyEditor from './SharingPolicyEditor'
 import { ConfirmedMeeting } from './ConfirmedMeeting'
 import { CalendarSyncStatus } from './CalendarSyncStatus'
@@ -265,9 +265,11 @@ function App() {
   const [peopleError, setPeopleError] = useState('')
   const [inboxRequests, setInboxRequests] = useState<CoordinationRequest[]>([])
   const [inboxLoading, setInboxLoading] = useState(false)
+  const [inboxLoaded, setInboxLoaded] = useState(false)
   const [inboxError, setInboxError] = useState('')
   const [sentRequests, setSentRequests] = useState<CoordinationRequest[]>([])
   const [sentLoading, setSentLoading] = useState(false)
+  const [sentLoaded, setSentLoaded] = useState(false)
   const [sentError, setSentError] = useState('')
   const [respondingRequestID, setRespondingRequestID] = useState('')
   const [auditLogs, setAuditLogs] = useState<AuditEvent[]>([])
@@ -287,6 +289,9 @@ function App() {
   const calendarLifecycle = useRef(0)
   const accountLifecycle = useRef(0)
   const accountActive = useRef(false)
+  const requestLifecycle = useRef(0)
+  const inboxLoad = useRef(0)
+  const sentLoad = useRef(0)
   const [workspaces, setWorkspaces] = useState<Workspace[]>([])
   const [invitationToken, setInvitationToken] = useState('')
   const [invitationPreview, setInvitationPreview] = useState<InvitationPreview | null>(null)
@@ -314,6 +319,28 @@ function App() {
     return () => accountActive.current && lifecycle === accountLifecycle.current
   }
 
+  const resetRequestScope = useCallback(() => {
+    // Invalidate synchronously, before React cleans up the old request rows.
+    requestLifecycle.current++
+    setInboxRequests([])
+    setSentRequests([])
+    setInboxLoading(false)
+    setSentLoading(false)
+    setInboxLoaded(false)
+    setSentLoaded(false)
+    setInboxError('')
+    setSentError('')
+    setRespondingRequestID('')
+  }, [])
+
+  const captureRequestLifetime = () => {
+    const account = accountLifecycle.current
+    const workspace = requestLifecycle.current
+    const demo = !authUser && demoMode
+    return () => account === accountLifecycle.current && workspace === requestLifecycle.current
+      && (demo ? !accountActive.current : accountActive.current)
+  }
+
   useEffect(() => {
     const initialSearch = window.location.search
     const initialPath = window.location.pathname
@@ -335,6 +362,7 @@ function App() {
         // A resolved session replaces any pre-login demo/identity scope.
         accountLifecycle.current++
         accountActive.current = payload.authenticated === true && Boolean(payload.user)
+        resetRequestScope()
         setExporting(false)
         setDemoMode(payload.demoMode === true)
         if (payload.authenticated && payload.user) {
@@ -381,7 +409,7 @@ function App() {
     }
     void loadSession()
     return () => { cancelled = true }
-  }, [])
+  }, [resetRequestScope])
 
 
   useEffect(() => {
@@ -558,6 +586,10 @@ function App() {
   }
 
   const openInbox = async () => {
+    const scopeCurrent = captureRequestLifetime()
+    if (!scopeCurrent()) return
+    const load = ++inboxLoad.current
+    const isCurrent = () => scopeCurrent() && load === inboxLoad.current
     setCurrentView('inbox')
     setInboxLoading(true)
     setInboxError('')
@@ -565,19 +597,26 @@ function App() {
       const response = await apiFetch(`${apiURL}/api/v1/requests`, {
         headers: { 'X-Demo-User-ID': activeUserID },
       })
+      if (!isCurrent()) return
       if (!response.ok) {
         throw new Error('inbox failed')
       }
       const payload = await response.json() as { requests: CoordinationRequest[] }
+      if (!isCurrent()) return
       setInboxRequests(payload.requests)
+      setInboxLoaded(true)
     } catch {
-      setInboxError('依頼を取得できませんでした。')
+      if (isCurrent()) setInboxError('依頼を取得できませんでした。')
     } finally {
-      setInboxLoading(false)
+      if (isCurrent()) setInboxLoading(false)
     }
   }
 
   const openSentRequests = async () => {
+    const scopeCurrent = captureRequestLifetime()
+    if (!scopeCurrent()) return
+    const load = ++sentLoad.current
+    const isCurrent = () => scopeCurrent() && load === sentLoad.current
     setCurrentView('sent')
     setSentLoading(true)
     setSentError('')
@@ -585,26 +624,31 @@ function App() {
       const response = await apiFetch(`${apiURL}/api/v1/requests?scope=sent`, {
         headers: { 'X-Demo-User-ID': requesterUserID },
       })
+      if (!isCurrent()) return
       if (!response.ok) throw new Error('sent requests failed')
       const payload = await response.json() as { requests: CoordinationRequest[] }
+      if (!isCurrent()) return
       setSentRequests(payload.requests)
+      setSentLoaded(true)
     } catch {
-      setSentError('送信済み依頼を取得できませんでした。')
+      if (isCurrent()) setSentError('送信済み依頼を取得できませんでした。')
     } finally {
-      setSentLoading(false)
+      if (isCurrent()) setSentLoading(false)
     }
   }
 
   const cancelSentRequest = async (requestID: string) => {
+    const isCurrent = captureRequestLifetime()
+    if (!isCurrent()) return
     try {
       const result = await resolution.resolve(requestID, requesterUserID, 'cancel')
-      if (!result) return
+      if (!result || !isCurrent()) return
       setSentRequests((current) => current.map((item) => item.id === requestID
         ? { ...item, status: 'cancelled' }
         : item))
       setNotice('依頼をキャンセルしました。相手にも通知しました。')
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : '一覧を更新して状態を確認してください。')
+      if (isCurrent()) setNotice(error instanceof Error ? error.message : '一覧を更新して状態を確認してください。')
     }
   }
 
@@ -668,13 +712,15 @@ function App() {
   }
 
   const respondToRequest = async (requestID: string, action: 'accept' | 'decline', optionID?: string) => {
+    const isCurrent = captureRequestLifetime()
+    if (!isCurrent()) return
     if (action === 'decline') {
       try {
         const result = await resolution.resolve(requestID, activeUserID, 'decline')
-        if (!result) return
+        if (!result || !isCurrent()) return
         setInboxRequests(current => current.map(item => item.id === requestID ? { ...item, status: result.status } : item))
         setNotice('依頼を辞退しました。')
-      } catch (error) { setNotice(error instanceof Error ? error.message : '一覧を更新して状態を確認してください。') }
+      } catch (error) { if (isCurrent()) setNotice(error instanceof Error ? error.message : '一覧を更新して状態を確認してください。') }
       return
     }
     setRespondingRequestID(requestID)
@@ -688,9 +734,11 @@ function App() {
         },
         body: JSON.stringify({ optionId: optionID }),
       })
+      if (!isCurrent()) return
       if (!response.ok) {
         if (response.status === 409) {
           const conflict = await response.json() as { code?: string }
+          if (!isCurrent()) return
           const messages: Record<string, string> = {
             candidate_expired: 'この候補は開始済み、または依頼の期限外です。新しい日時で依頼・提案してください。',
             candidate_invalid: 'この候補は会議として確定できません。別の時間を提案してください。',
@@ -707,68 +755,92 @@ function App() {
         : item))
       setNotice('候補を承認しました。')
     } catch {
-      setNotice('依頼を更新できませんでした。最新状態を確認してください。')
+      if (isCurrent()) setNotice('依頼を更新できませんでした。最新状態を確認してください。')
     } finally {
-      setRespondingRequestID('')
+      if (isCurrent()) setRespondingRequestID('')
     }
   }
 
   const rescheduleMeeting = async (requestID: string, command: RescheduleCommand) => {
-    const response = await apiFetch(`${apiURL}/api/v1/requests/${encodeURIComponent(requestID)}/reschedule`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Demo-User-ID': currentView === 'sent' ? requesterUserID : activeUserID, 'X-Organization-ID': activeOrganizationID },
-      body: JSON.stringify(command),
-    })
-    if (!response.ok) throw new Error('reschedule failed')
-    const value = await response.json() as CoordinationRequest
-    const update = (current: CoordinationRequest[]) => current.map((item) => item.id === requestID ? value : item)
-    setInboxRequests(update)
-    setSentRequests(update)
-    setNotice(command.action === 'accept' ? '日時変更を確定しました。外部カレンダーの予定は手動で更新してください。' : '日時変更の交渉を更新しました。元の予約は維持されています。')
+    const isCurrent = captureRequestLifetime()
+    if (!isCurrent()) return
+    try {
+      const response = await apiFetch(`${apiURL}/api/v1/requests/${encodeURIComponent(requestID)}/reschedule`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Demo-User-ID': currentView === 'sent' ? requesterUserID : activeUserID, 'X-Organization-ID': activeOrganizationID },
+        body: JSON.stringify(command),
+      })
+      if (!isCurrent()) return
+      if (!response.ok) throw new Error('reschedule failed')
+      const value = await response.json() as CoordinationRequest
+      if (!isCurrent()) return
+      const update = (current: CoordinationRequest[]) => current.map((item) => item.id === requestID ? value : item)
+      setInboxRequests(update)
+      setSentRequests(update)
+      setNotice(command.action === 'accept' ? '日時変更を確定しました。外部カレンダーの予定は手動で更新してください。' : '日時変更の交渉を更新しました。元の予約は維持されています。')
+    } catch (error) { if (isCurrent()) throw error }
   }
 
   const cancelConfirmedMeeting = async (requestID: string, optionID: string) => {
-    const response = await apiFetch(`${apiURL}/api/v1/requests/${encodeURIComponent(requestID)}/cancel-confirmed`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Demo-User-ID': currentView === 'sent' ? requesterUserID : activeUserID, 'X-Organization-ID': activeOrganizationID },
-      body: JSON.stringify({ optionId: optionID }),
-    })
-    if (!response.ok) throw new Error('confirmed cancellation failed')
-    const update = (current: CoordinationRequest[]) => current.map((item) => item.id === requestID ? { ...item, status: 'cancelled' } : item)
-    setInboxRequests(update)
-    setSentRequests(update)
-    setNotice('確定会議を取り消し、相手に通知しました。外部カレンダーの予定は手動で削除してください。')
+    const isCurrent = captureRequestLifetime()
+    if (!isCurrent()) return
+    try {
+      const response = await apiFetch(`${apiURL}/api/v1/requests/${encodeURIComponent(requestID)}/cancel-confirmed`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Demo-User-ID': currentView === 'sent' ? requesterUserID : activeUserID, 'X-Organization-ID': activeOrganizationID },
+        body: JSON.stringify({ optionId: optionID }),
+      })
+      if (!isCurrent()) return
+      if (!response.ok) throw new Error('confirmed cancellation failed')
+      const update = (current: CoordinationRequest[]) => current.map((item) => item.id === requestID ? { ...item, status: 'cancelled' } : item)
+      setInboxRequests(update)
+      setSentRequests(update)
+      setNotice('確定会議を取り消し、相手に通知しました。外部カレンダーの予定は手動で削除してください。')
+    } catch (error) { if (isCurrent()) throw error }
   }
 
   const downloadConfirmedMeeting = async (requestID: string) => {
-    const response = await apiFetch(`${apiURL}/api/v1/requests/${encodeURIComponent(requestID)}/calendar.ics`, {
-      headers: { 'X-Demo-User-ID': currentView === 'sent' ? requesterUserID : activeUserID },
-    })
-    if (!response.ok) throw new Error('calendar export failed')
-    const url = URL.createObjectURL(await response.blob())
-    const link = document.createElement('a')
-    link.href = url
-    link.download = 'negotiable-meeting.ics'
-    document.body.appendChild(link)
-    link.click()
-    link.remove()
-    window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+    const isCurrent = captureRequestLifetime()
+    if (!isCurrent()) return
+    try {
+      const response = await apiFetch(`${apiURL}/api/v1/requests/${encodeURIComponent(requestID)}/calendar.ics`, {
+        headers: { 'X-Demo-User-ID': currentView === 'sent' ? requesterUserID : activeUserID },
+      })
+      if (!isCurrent()) return
+      if (!response.ok) throw new Error('calendar export failed')
+      const blob = await response.blob()
+      if (!isCurrent()) return
+      const url = URL.createObjectURL(blob)
+      let link: HTMLAnchorElement | undefined
+      try {
+        link = document.createElement('a')
+        link.href = url
+        link.download = 'negotiable-meeting.ics'
+        document.body.appendChild(link)
+        link.click()
+      } finally {
+        link?.remove()
+        window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+      }
+    } catch (error) { if (isCurrent()) throw error }
   }
 
   const respondAsync = async (event: FormEvent<HTMLFormElement>, requestID: string) => {
     event.preventDefault()
+    const isCurrent = captureRequestLifetime()
+    if (!isCurrent()) return
     const formElement = event.currentTarget
     const message = String(new FormData(formElement).get('asyncMessage')).trim()
     try {
       const payload = await resolution.resolve(requestID, activeUserID, 'async', message)
-      if (!payload) return
+      if (!payload || !isCurrent()) return
       setInboxRequests((current) => current.map((item) => item.id === requestID
         ? { ...item, status: payload.status, asyncMessage: payload.asyncMessage }
         : item))
       setNotice('非同期で回答しました。依頼者に通知しました。')
       formElement.reset()
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : '一覧を更新して状態を確認してください。')
+      if (isCurrent()) setNotice(error instanceof Error ? error.message : '一覧を更新して状態を確認してください。')
     }
   }
 
@@ -830,6 +902,7 @@ function App() {
       calendarLifecycle.current++
       accountActive.current = false
       accountLifecycle.current++
+      resetRequestScope()
       setWorkspaceBusy(false)
       setExporting(false)
       setInviteURL('')
@@ -923,6 +996,7 @@ function App() {
       calendarLifecycle.current++
       accountActive.current = false
       accountLifecycle.current++
+      resetRequestScope()
       setWorkspaceBusy(false)
       setExporting(false)
       setInviteURL('')
@@ -1040,6 +1114,7 @@ function App() {
       if (!isCurrent()) return
       const payload = await response.json() as { activeWorkspace: Workspace }
       if (!isCurrent()) return
+      resetRequestScope()
       setAuthUser((current) => current ? { ...current, organizationId: payload.activeWorkspace.id, role: payload.activeWorkspace.role } : current)
       setInviteURL('')
       setNotice(`${payload.activeWorkspace.name} に切り替えました。`)
@@ -1065,6 +1140,7 @@ function App() {
       if (!isCurrent()) return
       const payload = await switched.json() as { activeWorkspace: Workspace }
       if (!isCurrent()) return
+      resetRequestScope()
       setAuthUser((current) => current ? { ...current, organizationId: payload.activeWorkspace.id, role: payload.activeWorkspace.role } : current)
       setWorkspaces((current) => [...current.filter((item) => item.id !== payload.activeWorkspace.id), payload.activeWorkspace])
       setInvitationPreview(null)
@@ -1345,7 +1421,7 @@ function App() {
             {inboxLoading ? <p className="people-status" role="status">依頼を取得しています…</p> : null}
             {inboxError ? <p className="people-status error" role="alert">{inboxError}</p> : null}
             {!inboxLoading && !inboxError && inboxRequests.length === 0 ? (
-              <p className="people-status">新しい依頼はありません。</p>
+              <p className="people-status">{inboxLoaded ? '新しい依頼はありません。' : '「更新」で依頼を取得してください。'}</p>
             ) : null}
             <div className="request-list">
               {inboxRequests.map((item) => (
@@ -1418,7 +1494,7 @@ function App() {
             </div>
             {sentLoading ? <p className="people-status" role="status">送信済み依頼を取得しています…</p> : null}
             {sentError ? <p className="people-status error" role="alert">{sentError}</p> : null}
-            {!sentLoading && !sentError && sentRequests.length === 0 ? <p className="people-status">送信済み依頼はありません。</p> : null}
+            {!sentLoading && !sentError && sentRequests.length === 0 ? <p className="people-status">{sentLoaded ? '送信済み依頼はありません。' : '「更新」で依頼を取得してください。'}</p> : null}
             <div className="request-list">
               {sentRequests.map((item) => {
                 const cancellable = ['pending', 'suggested', 'delegated'].includes(item.status)

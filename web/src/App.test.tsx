@@ -429,7 +429,7 @@ describe('App', () => {
         priority: 'normal', status: 'accepted', acceptedOptionId: 'chosen', createdAt: future,
         options: [{ id: 'chosen', type: 'meeting', startAt: future, endAt: later }],
       }] }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ status: 'cancelled' }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: 'confirmed-cancel', status: 'cancelled' }), { status: 200 }))
     render(<App />)
     fireEvent.click(screen.getByRole('button', { name: view }))
     fireEvent.click(await screen.findByRole('button', { name: '確定会議を取り消す' }))

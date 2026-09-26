@@ -7,7 +7,18 @@ import (
 	"time"
 )
 
-func (store *PostgresStore) CancelConfirmed(ctx context.Context, requestID, actor, optionID string) (err error) {
+func (store *PostgresStore) CancelConfirmed(ctx context.Context, requestID, actor, optionID string) error {
+	return store.cancelConfirmed(ctx, requestID, actor, "", optionID)
+}
+
+func (store *PostgresStore) CancelConfirmedInOrganization(ctx context.Context, requestID, actor, org, optionID string) error {
+	if actor == "" || org == "" {
+		return ErrNotFound
+	}
+	return store.cancelConfirmed(ctx, requestID, actor, org, optionID)
+}
+
+func (store *PostgresStore) cancelConfirmed(ctx context.Context, requestID, actor, org, optionID string) (err error) {
 	defer func() {
 		var state interface{ SQLState() string }
 		if errors.As(err, &state) && (state.SQLState() == "40001" || state.SQLState() == "40P01") {
@@ -30,8 +41,19 @@ func (store *PostgresStore) CancelConfirmed(ctx context.Context, requestID, acto
 	}
 	value.AcceptedOptionID = accepted.String
 	// Authorize before looking up the selection; outsiders see no lifecycle detail.
-	if actor == "" || (actor != value.RequesterUserID && actor != value.TargetUserID) {
+	if actor == "" || (actor != value.RequesterUserID && actor != value.TargetUserID) || (org != "" && org != value.OrganizationID) {
 		return ErrNotFound
+	}
+	if org != "" {
+		// Do not require the counterpart's membership to release a reservation.
+		var member string
+		err := tx.QueryRowContext(ctx, `SELECT user_id FROM memberships WHERE organization_id=$1 AND user_id=$2 FOR SHARE`, org, actor).Scan(&member)
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrCreationForbidden
+		}
+		if err != nil {
+			return err
+		}
 	}
 	var option Option
 	err = tx.QueryRowContext(ctx, `SELECT id,request_id,type,start_at,end_at,created_at FROM coordination_request_options WHERE request_id=$1 AND id=$2`, requestID, optionID).Scan(&option.ID, &option.RequestID, &option.Type, &option.StartAt, &option.EndAt, &option.CreatedAt)
@@ -67,3 +89,5 @@ func (store *PostgresStore) CancelConfirmed(ctx context.Context, requestID, acto
 	}
 	return tx.Commit()
 }
+
+var _ ScopedConfirmedLifecycleStore = (*PostgresStore)(nil)

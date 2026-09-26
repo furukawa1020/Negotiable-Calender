@@ -440,7 +440,7 @@ describe('App', () => {
     expect(globalThis.fetch).toHaveBeenLastCalledWith(
       expect.stringContaining('/api/v1/requests/confirmed-cancel/cancel-confirmed'),
       expect.objectContaining({ method: 'POST', body: JSON.stringify({ optionId: 'chosen' }), credentials: 'include',
-        headers: { 'Content-Type': 'application/json', 'X-Demo-User-ID': view === '送信済み' ? 'demo-member' : 'demo-manager' } }),
+        headers: { 'Content-Type': 'application/json', 'X-Demo-User-ID': view === '送信済み' ? 'demo-member' : 'demo-manager', 'X-Organization-ID': 'demo-org' } }),
     )
   })
 

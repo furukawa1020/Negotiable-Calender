@@ -11,7 +11,8 @@ import (
 
 func (api *API) cancelConfirmedMeeting(response http.ResponseWriter, request *http.Request) {
 	actor := request.Header.Get("X-Demo-User-ID")
-	if actor == "" {
+	org := request.Header.Get("X-Organization-ID")
+	if actor == "" || org == "" {
 		writeJSON(response, http.StatusUnauthorized, map[string]string{"error": "request identity is required"})
 		return
 	}
@@ -24,19 +25,21 @@ func (api *API) cancelConfirmedMeeting(response http.ResponseWriter, request *ht
 		writeJSON(response, http.StatusBadRequest, map[string]string{"error": "confirmed optionId is required"})
 		return
 	}
-	store, ok := api.requests.(coordinationrequest.ConfirmedLifecycleStore)
+	store, ok := api.requests.(coordinationrequest.ScopedConfirmedLifecycleStore)
 	if !ok {
 		writeJSON(response, http.StatusServiceUnavailable, map[string]string{"error": "confirmed cancellation unavailable"})
 		return
 	}
 	id := request.PathValue("requestId")
-	err := store.CancelConfirmed(request.Context(), id, actor, input.OptionID)
+	err := store.CancelConfirmedInOrganization(request.Context(), id, actor, org, input.OptionID)
 	switch {
 	case err == nil, errors.Is(err, coordinationrequest.ErrAlreadyCancelled):
 		// Effects are persisted by the store, never replayed by HTTP retries.
 		writeJSON(response, http.StatusOK, map[string]string{"id": id, "status": string(coordinationrequest.Cancelled)})
 	case errors.Is(err, coordinationrequest.ErrNotFound):
 		writeJSON(response, http.StatusNotFound, map[string]string{"error": "coordination request not found"})
+	case errors.Is(err, coordinationrequest.ErrCreationForbidden):
+		writeJSON(response, http.StatusForbidden, map[string]string{"error": "current membership required", "code": "membership_required"})
 	case errors.Is(err, coordinationrequest.ErrCancellationInvalid), errors.Is(err, coordinationrequest.ErrBookingConflict):
 		writeJSON(response, http.StatusConflict, map[string]string{"error": "meeting cannot be cancelled; refresh and retry", "code": err.Error()})
 	default:

@@ -19,6 +19,12 @@ type ConfirmedLifecycleStore interface {
 	CancelConfirmed(context.Context, string, string, string) error
 }
 
+// ScopedConfirmedLifecycleStore is the HTTP cancellation entry point.
+// The actor must still belong to the request's active organization, even on replay.
+type ScopedConfirmedLifecycleStore interface {
+	CancelConfirmedInOrganization(context.Context, string, string, string, string) error
+}
+
 func ValidateConfirmedCancellation(value CoordinationRequest, actor, optionID string, now time.Time) error {
 	if actor == "" || (actor != value.RequesterUserID && actor != value.TargetUserID) {
 		return ErrNotFound

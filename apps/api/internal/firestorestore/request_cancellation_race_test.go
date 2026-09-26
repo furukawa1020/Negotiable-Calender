@@ -15,6 +15,7 @@ func TestCancellationRacesReplacementAcceptance(t *testing.T) {
 	old := confirmationRequest("old", "alice", "bob", now, start)
 	old.Status = coordinationrequest.Accepted
 	old.AcceptedOptionID = old.Options[0].ID
+	putDocument(t, ctx, b.Client.Collection("organizations").Doc(old.OrganizationID).Collection("members").Doc("alice"), map[string]any{"UserID": "alice"})
 	next := confirmationRequest("next", "carol", "bob", now, start)
 	for _, value := range []coordinationrequest.CoordinationRequest{old, next} {
 		putDocument(t, ctx, b.Client.Collection("coordinationRequests").Doc(value.ID), value)
@@ -28,7 +29,7 @@ func TestCancellationRacesReplacementAcceptance(t *testing.T) {
 	acceptances := make(chan error, 1)
 	go func() {
 		<-gate
-		cancellations <- b.Request().CancelConfirmed(ctx, old.ID, "alice", old.AcceptedOptionID)
+		cancellations <- b.Request().CancelConfirmedInOrganization(ctx, old.ID, "alice", old.OrganizationID, old.AcceptedOptionID)
 	}()
 	go func() {
 		<-gate
@@ -61,7 +62,7 @@ func TestConfirmedCancellationRespectsDeletionFences(t *testing.T) {
 			value.Options = append(value.Options, coordinationrequest.Option{ID: "delegate-option", RequestID: value.ID, Type: coordinationrequest.OptionDelegate, DelegateUserID: "delegate", CreatedAt: now})
 			putDocument(t, ctx, b.Client.Collection("coordinationRequests").Doc(value.ID), value)
 			putDocument(t, ctx, b.accountDeletionRef(person), accountDeletion{Phase: "deleting", StartedAt: now})
-			if err := b.Request().CancelConfirmed(ctx, value.ID, "alice", value.AcceptedOptionID); !errors.Is(err, errAccountDeleting) {
+			if err := b.Request().CancelConfirmedInOrganization(ctx, value.ID, "alice", value.OrganizationID, value.AcceptedOptionID); !errors.Is(err, errAccountDeleting) {
 				t.Fatalf("unfenced: %v", err)
 			}
 			doc, err := b.Client.Collection("coordinationRequests").Doc(value.ID).Get(ctx)

@@ -10,6 +10,7 @@ import { RequestComposer } from './RequestComposer'
 import { RequestHandoff } from './RequestHandoff'
 import { CounterproposalForm, CounterproposalAgreement } from './Counterproposal'
 import { useRequestResolution } from './useRequestResolution'
+import { fetchBookingResult, readCancellation } from './bookingTransport'
 import { RescheduleMeeting } from './RescheduleMeeting'
 import { LocalPlanning } from './LocalPlanningPanel'
 import { PlanningRateLimitError } from './localPlanning'
@@ -765,15 +766,12 @@ function App() {
     const isCurrent = captureRequestLifetime()
     if (!isCurrent()) return
     try {
-      const response = await apiFetch(`${apiURL}/api/v1/requests/${encodeURIComponent(requestID)}/reschedule`, {
+      const value = await fetchBookingResult(`${apiURL}/api/v1/requests/${encodeURIComponent(requestID)}/reschedule`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Demo-User-ID': currentView === 'sent' ? requesterUserID : activeUserID, 'X-Organization-ID': activeOrganizationID },
         body: JSON.stringify(command),
-      })
-      if (!isCurrent()) return
-      if (!response.ok) throw new Error('reschedule failed')
-      const value = await response.json() as CoordinationRequest
-      if (!isCurrent()) return
+      }, response => response.json() as Promise<CoordinationRequest>, isCurrent)
+      if (!value || !isCurrent()) return
       const update = (current: CoordinationRequest[]) => current.map((item) => item.id === requestID ? value : item)
       setInboxRequests(update)
       setSentRequests(update)
@@ -785,13 +783,12 @@ function App() {
     const isCurrent = captureRequestLifetime()
     if (!isCurrent()) return
     try {
-      const response = await apiFetch(`${apiURL}/api/v1/requests/${encodeURIComponent(requestID)}/cancel-confirmed`, {
+      const acknowledged = await fetchBookingResult(`${apiURL}/api/v1/requests/${encodeURIComponent(requestID)}/cancel-confirmed`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Demo-User-ID': currentView === 'sent' ? requesterUserID : activeUserID, 'X-Organization-ID': activeOrganizationID },
         body: JSON.stringify({ optionId: optionID }),
-      })
-      if (!isCurrent()) return
-      if (!response.ok) throw new Error('confirmed cancellation failed')
+      }, response => readCancellation(response, requestID), isCurrent)
+      if (!acknowledged || !isCurrent()) return
       const update = (current: CoordinationRequest[]) => current.map((item) => item.id === requestID ? { ...item, status: 'cancelled' } : item)
       setInboxRequests(update)
       setSentRequests(update)
@@ -803,13 +800,10 @@ function App() {
     const isCurrent = captureRequestLifetime()
     if (!isCurrent()) return
     try {
-      const response = await apiFetch(`${apiURL}/api/v1/requests/${encodeURIComponent(requestID)}/calendar.ics`, {
+      const blob = await fetchBookingResult(`${apiURL}/api/v1/requests/${encodeURIComponent(requestID)}/calendar.ics`, {
         headers: { 'X-Demo-User-ID': currentView === 'sent' ? requesterUserID : activeUserID },
-      })
-      if (!isCurrent()) return
-      if (!response.ok) throw new Error('calendar export failed')
-      const blob = await response.blob()
-      if (!isCurrent()) return
+      }, response => response.blob(), isCurrent)
+      if (!blob || !isCurrent()) return
       const url = URL.createObjectURL(blob)
       let link: HTMLAnchorElement | undefined
       try {

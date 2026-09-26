@@ -344,7 +344,9 @@ describe('App', () => {
     }), { status: 200 })).mockResolvedValueOnce(new Response(JSON.stringify({
       id: 'option-2', requestId: 'request-1', type: 'meeting', proposedByUserId: 'demo-manager',
       startAt: new Date('2026-08-28T10:00').toISOString(), endAt: new Date('2026-08-28T10:15').toISOString(),
-    }), { status: 201 })).mockResolvedValue(new Response('{}', { status: 200 }))
+    }), { status: 201 }))
+      .mockResolvedValueOnce(Response.json({ id: 'request-1', status: 'accepted', acceptedOptionId: 'option-1' }))
+      .mockResolvedValue(new Response('{}', { status: 200 }))
     render(<App />)
     fireEvent.click(screen.getByRole('button', { name: '依頼' }))
     expect(await screen.findByRole('heading', { name: '受信した依頼' })).toBeInTheDocument()
@@ -447,7 +449,7 @@ describe('App', () => {
   it.each(['送信済み', '依頼'])('accepts a reschedule from %s and updates the confirmed selection', async (view) => {
     const future = new Date(Date.now() + 86400000).toISOString()
     const later = new Date(Date.now() + 90000000).toISOString()
-    const value = { id: 'reschedule-1', requesterUserId: 'demo-member', targetUserId: 'demo-manager', title: '日時変更テスト', type: 'meeting', durationMinutes: 30, deadlineAt: later, priority: 'normal', status: 'accepted', acceptedOptionId: 'old', createdAt: future,
+    const value = { id: 'reschedule-1', organizationId: 'demo-org', requesterUserId: 'demo-member', targetUserId: 'demo-manager', title: '日時変更テスト', type: 'meeting', durationMinutes: 30, deadlineAt: later, priority: 'normal', status: 'accepted', acceptedOptionId: 'old', createdAt: future,
       rescheduleProposal: { id: 'proposal-new', proposerUserId: view === '送信済み' ? 'demo-manager' : 'demo-member', expectedOptionId: 'old', status: 'proposed' },
       options: [{ id: 'old', type: 'meeting', startAt: future, endAt: later }, { id: 'proposal-new', type: 'meeting', startAt: later, endAt: new Date(Date.parse(later) + 1800000).toISOString() }] }
     vi.spyOn(globalThis, 'fetch')

@@ -11,10 +11,12 @@ import { RequestHandoff } from './RequestHandoff'
 import { CounterproposalForm, CounterproposalAgreement } from './Counterproposal'
 import { useRequestResolution } from './useRequestResolution'
 import { fetchBookingResult, readCancellation } from './bookingTransport'
+import { readAcceptance, readRescheduleSnapshot, matchesRescheduleOutcome } from './bookingResponse'
+import type { CoordinationRequest } from './bookingResponse'
 import { RescheduleMeeting } from './RescheduleMeeting'
 import { LocalPlanning } from './LocalPlanningPanel'
 import { PlanningRateLimitError } from './localPlanning'
-import type { RescheduleCommand, RescheduleProposal } from './RescheduleMeeting'
+import type { RescheduleCommand } from './RescheduleMeeting'
 import { sharingPolicyError, type SharingPolicyDraft } from './sharingPolicy'
 
 const defaultSharingPolicy: SharingPolicyDraft = {
@@ -96,33 +98,6 @@ type PersonCard = {
   timezone: string
   role: string
   segments: ProjectionRow[]
-}
-
-type CoordinationOption = {
-  id: string
-  type: 'meeting' | 'async' | 'delegate' | 'decline'
-  startAt?: string
-  endAt?: string
-  responseBy?: string
-  proposedByUserId?: string
-}
-
-type CoordinationRequest = {
-  id: string
-  requesterUserId: string
-  targetUserId: string
-  title: string
-  type: string
-  durationMinutes: number
-  deadlineAt: string
-  priority: string
-  status: string
-  asyncMessage?: string
-  delegatedFromUserId?: string
-  acceptedOptionId?: string
-  rescheduleProposal?: RescheduleProposal
-  options: CoordinationOption[]
-  createdAt: string
 }
 
 type AppNotification = {
@@ -764,6 +739,8 @@ function App() {
         }
         throw new Error('response failed')
       }
+      await readAcceptance(response, requestID, optionID ?? '')
+      if (!isCurrent()) return
       supersedeRequestReads()
       setInboxRequests((current) => current.map((item) => item.id === requestID
         ? { ...item, status: 'accepted', acceptedOptionId: optionID }
@@ -784,13 +761,15 @@ function App() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Demo-User-ID': currentView === 'sent' ? requesterUserID : activeUserID, 'X-Organization-ID': activeOrganizationID },
         body: JSON.stringify(command),
-      }, response => response.json() as Promise<CoordinationRequest>, isCurrent)
+      }, response => readRescheduleSnapshot(response, requestID, activeOrganizationID, currentView === 'sent' ? requesterUserID : activeUserID), isCurrent)
       if (!value || !isCurrent()) return
       supersedeRequestReads()
       const update = (current: CoordinationRequest[]) => current.map((item) => item.id === requestID ? value : item)
       setInboxRequests(update)
       setSentRequests(update)
-      setNotice(command.action === 'accept' ? '日時変更を確定しました。外部カレンダーの予定は手動で更新してください。' : '日時変更の交渉を更新しました。元の予約は維持されています。')
+      setNotice(!matchesRescheduleOutcome(value, command)
+        ? '依頼の最新状態を取得しました。別の操作が反映されている可能性があります。確定日時と変更提案を確認してください。'
+        : command.action === 'accept' ? '日時変更を確定しました。外部カレンダーの予定は手動で更新してください。' : '日時変更の交渉を更新しました。元の予約は維持されています。')
     } catch (error) { if (isCurrent()) throw error }
   }
 

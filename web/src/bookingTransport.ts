@@ -5,27 +5,36 @@ export async function fetchBookingResult<T>(
   init: Omit<RequestInit, 'signal'>,
   read: (response: Response) => Promise<T>,
   isCurrent: () => boolean,
+  options: { signal?: AbortSignal; readError?: (response: Response) => Promise<never> } = {},
 ): Promise<T | undefined> {
   if (!isCurrent()) return
   const controller = new AbortController()
   let timer: ReturnType<typeof setTimeout> | undefined
+  let interrupt = () => {}
   const current = () => !controller.signal.aborted && isCurrent()
   const deadline = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => {
+    interrupt = () => {
       // Settle independently of fetch/stream implementations honoring abort.
       reject(new Error('booking outcome unknown: deadline exceeded'))
       controller.abort()
-    }, 20_000)
+    }
+    timer = setTimeout(interrupt, 20_000)
+    options.signal?.addEventListener('abort', interrupt, { once: true })
+    if (options.signal?.aborted) interrupt()
   })
   const operation = async () => {
+    if (!current()) return
     const response = await fetch(input, { ...init, credentials: 'include', signal: controller.signal })
     if (!current()) return
-    if (!response.ok) throw new Error('booking outcome unconfirmed')
+    if (!response.ok) {
+      if (options.readError) return options.readError(response)
+      throw new Error('booking outcome unconfirmed')
+    }
     const value = await read(response)
     if (current()) return value
   }
   try { return await Promise.race([operation(), deadline]) }
-  finally { clearTimeout(timer) }
+  finally { clearTimeout(timer); options.signal?.removeEventListener('abort', interrupt) }
 }
 
 export async function readCancellation(response: Response, requestID: string): Promise<true> {

@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 
@@ -81,6 +81,60 @@ describe('Booking operations respect account and workspace lifetime', () => {
     ['依頼', 'cancel-confirmed'], ['送信済み', 'cancel-confirmed'],
     ['依頼', 'accept'], ['依頼', 'decline'], ['依頼', 'async'], ['送信済み', 'cancel'],
   ] as const
+
+  it.each(['response', 'success body', 'error body'])('recovers the acceptance UI after a stalled %s and ignores late completion', async phase => {
+    const h = setup(true)
+    const first = deferred<Response>(), body = deferred<object>(), retry = deferred<Response>()
+    const value = { id: 'booking', status: 'accepted', acceptedOptionId: 'old' }
+    const response = Response.json(value, { status: phase === 'error body' ? 409 : 200 })
+    response.json = () => body.promise
+    h.routes.set('POST /api/v1/requests/booking/accept', () => phase === 'response' ? first.promise : Promise.resolve(response))
+    await openRequests()
+    vi.useFakeTimers()
+    await act(async () => { fireEvent.click(screen.getAllByRole('button', { name: 'この候補を承認' })[0]) })
+    const signal = h.fetchMock.mock.calls.at(-1)?.[1]?.signal
+    expect(screen.getAllByRole('button', { name: 'この候補を承認' })[0]).toBeDisabled()
+    expect(screen.getByRole('button', { name: '今回は辞退' })).toBeDisabled()
+    await act(async () => { await vi.advanceTimersByTimeAsync(20_000) })
+    expect(signal?.aborted).toBe(true)
+    expect(screen.getByRole('status')).toHaveTextContent('依頼を更新できませんでした。最新状態を確認してください。')
+    expect(screen.getAllByRole('button', { name: 'この候補を承認' })[0]).toBeEnabled()
+    expect(h.fetchMock.mock.calls.filter(([input]) => String(input).endsWith('/accept'))).toHaveLength(1)
+    h.routes.set('POST /api/v1/requests/booking/accept', () => retry.promise)
+    await act(async () => { fireEvent.click(screen.getAllByRole('button', { name: 'この候補を承認' })[0]) })
+    await act(async () => {
+      if (phase === 'response') first.resolve(Response.json(value))
+      else body.resolve(phase === 'error body' ? { code: 'booking_conflict' } : value)
+    })
+    expect(screen.getAllByRole('button', { name: 'この候補を承認' })[0]).toBeDisabled()
+    expect(screen.queryByRole('button', { name: 'カレンダーに登録（ICS）' })).not.toBeInTheDocument()
+    await act(async () => { retry.resolve(Response.json(value)) })
+    expect(screen.getByRole('status')).toHaveTextContent('候補を承認しました。')
+    expect(screen.getByRole('button', { name: 'カレンダーに登録（ICS）' })).toBeEnabled()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('keeps the other row locked after one of two concurrent acceptances fails', async () => {
+    const h = setup(true)
+    const first = deferred<Response>(), second = deferred<Response>()
+    h.routes.set('GET /api/v1/requests', async () => Response.json({ requests: [h.value, { ...h.value, id: 'second', title: 'Second booking' }] }))
+    h.routes.set('POST /api/v1/requests/booking/accept', () => first.promise)
+    h.routes.set('POST /api/v1/requests/second/accept', () => second.promise)
+    await openRequests()
+    const firstRow = within(screen.getByText('Private booking').closest('article')!)
+    const secondRow = within(screen.getByText('Second booking').closest('article')!)
+    fireEvent.click(firstRow.getAllByRole('button', { name: 'この候補を承認' })[0])
+    fireEvent.click(secondRow.getAllByRole('button', { name: 'この候補を承認' })[0])
+    expect(firstRow.getAllByRole('button', { name: 'この候補を承認' })[0]).toBeDisabled()
+    expect(secondRow.getAllByRole('button', { name: 'この候補を承認' })[0]).toBeDisabled()
+    await act(async () => { first.resolve(new Response(null, { status: 503 })) })
+    expect(firstRow.getAllByRole('button', { name: 'この候補を承認' })[0]).toBeEnabled()
+    expect(secondRow.getAllByRole('button', { name: 'この候補を承認' })[0]).toBeDisabled()
+    expect(secondRow.getByRole('button', { name: '今回は辞退' })).toBeDisabled()
+    await act(async () => { second.resolve(Response.json({ id: 'second', status: 'accepted', acceptedOptionId: 'old' })) })
+    expect(secondRow.getByRole('button', { name: 'カレンダーに登録（ICS）' })).toBeEnabled()
+    expect(firstRow.queryByRole('button', { name: 'カレンダーに登録（ICS）' })).not.toBeInTheDocument()
+  })
 
   it.each([null, {}, { id: 'other', status: 'accepted', acceptedOptionId: 'old' }, { id: 'booking', status: 'accepted', acceptedOptionId: 'other' }, { id: 'booking', status: 'cancelled', acceptedOptionId: 'old' }])('keeps acceptance unconfirmed for invalid body %j and allows retry', async value => {
     const h = setup(true)

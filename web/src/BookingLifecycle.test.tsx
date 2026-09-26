@@ -70,9 +70,79 @@ async function changeScope(kind: Boundary, rejected = false) {
 
 describe('Booking operations respect account and workspace lifetime', () => {
   afterEach(() => {
+    vi.useRealTimers()
     vi.restoreAllMocks()
     document.querySelectorAll('a[download]').forEach(link => link.remove())
     window.history.replaceState({}, '', '/')
+  })
+
+  it.each(['reschedule', 'cancel-confirmed', 'calendar.ics'] as const)('recovers from a stalled %s response and ignores it during a newer retry', async action => {
+    await checkDeadline(action, false)
+  })
+
+  it.each(['reschedule', 'cancel-confirmed', 'calendar.ics'] as const)('bounds stalled %s body decoding and ignores it during a newer retry', async action => {
+    await checkDeadline(action, true)
+  })
+
+  async function checkDeadline(action: 'reschedule' | 'cancel-confirmed' | 'calendar.ics', stalledBody: boolean) {
+    const h = setup()
+    const pending = deferred<Response>()
+    const body = deferred<object | Blob>()
+    const route = `${action === 'calendar.ics' ? 'GET' : 'POST'} /api/v1/requests/booking/${action}`
+    const result = action === 'cancel-confirmed' ? { id: 'booking', status: 'cancelled' } : { ...h.value, title: 'Updated booking', acceptedOptionId: 'proposal-new', rescheduleProposal: { ...h.value.rescheduleProposal, status: 'accepted' } }
+    const payload = action === 'calendar.ics' ? new Response('synthetic ICS') : Response.json(result)
+    if (stalledBody) {
+      if (action === 'calendar.ics') payload.blob = () => body.promise as Promise<Blob>
+      else payload.json = () => body.promise
+    }
+    h.routes.set(route, () => stalledBody ? Promise.resolve(payload) : pending.promise)
+    await openRequests()
+    const label = action === 'reschedule' ? 'この日時への変更を承認' : action === 'cancel-confirmed' ? '会議の取消を確定する' : 'カレンダーに登録（ICS）'
+    if (action === 'cancel-confirmed') fireEvent.click(screen.getByRole('button', { name: '確定会議を取り消す' }))
+    vi.useFakeTimers()
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: label })) })
+    const signal = h.fetchMock.mock.calls.at(-1)?.[1]?.signal
+    expect(signal?.aborted).toBe(false)
+    await act(async () => { await vi.advanceTimersByTimeAsync(20_000) })
+    expect(signal?.aborted).toBe(true)
+    expect(screen.getByRole('alert')).toHaveTextContent(action === 'reschedule' ? '日時変更の結果を確認できませんでした' : action === 'cancel-confirmed' ? '取消を確認できませんでした' : '取得できませんでした')
+    expect(screen.getByRole('button', { name: label })).toBeEnabled()
+    expect(h.fetchMock.mock.calls.filter(([input]) => String(input).endsWith(`/${action}`))).toHaveLength(1)
+    expect(h.create).not.toHaveBeenCalled()
+
+    const retry = deferred<Response>()
+    h.routes.set(route, () => retry.promise)
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: label })) })
+    await act(async () => {
+      if (stalledBody) body.resolve(action === 'calendar.ics' ? new Blob(['synthetic ICS']) : result)
+      else pending.resolve(payload)
+    })
+    expect(screen.getByRole('button', { name: action === 'calendar.ics' ? '取得中…' : label })).toBeDisabled()
+    expect(h.create).not.toHaveBeenCalled()
+    expect(screen.queryByText('Updated booking')).not.toBeInTheDocument()
+    expect(screen.queryByText('キャンセル済み')).not.toBeInTheDocument()
+    await act(async () => { retry.resolve(action === 'calendar.ics' ? new Response('retry ICS') : Response.json(result)) })
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    if (action === 'calendar.ics') expect(h.click).toHaveBeenCalledTimes(1)
+    else if (action === 'reschedule') expect(screen.getByText('Updated booking')).toBeInTheDocument()
+    else expect(screen.queryByRole('button', { name: 'カレンダーに登録（ICS）' })).not.toBeInTheDocument()
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
+    expect(vi.getTimerCount()).toBe(0)
+  }
+
+  it.each([null, {}, { id: 'another', status: 'cancelled' }, { id: 'booking', status: 'accepted' }])('does not mark cancellation successful for invalid acknowledgement %j', async value => {
+    const h = setup()
+    h.routes.set('POST /api/v1/requests/booking/cancel-confirmed', async () => Response.json(value))
+    await openRequests()
+    fireEvent.click(screen.getByRole('button', { name: '確定会議を取り消す' }))
+    fireEvent.click(screen.getByRole('button', { name: '会議の取消を確定する' }))
+    await screen.findByText('取消を確認できませんでした。依頼を更新し、最新状態を確認して再試行してください。')
+    expect(screen.getByRole('button', { name: 'カレンダーに登録（ICS）' })).toBeEnabled()
+    expect(screen.queryByText('キャンセル済み')).not.toBeInTheDocument()
+    h.routes.set('POST /api/v1/requests/booking/cancel-confirmed', async () => Response.json({ id: 'booking', status: 'cancelled' }))
+    fireEvent.click(screen.getByRole('button', { name: '会議の取消を確定する' }))
+    await screen.findByText('確定会議を取り消し、相手に通知しました。外部カレンダーの予定は手動で削除してください。')
+    expect(screen.queryByRole('button', { name: 'カレンダーに登録（ICS）' })).not.toBeInTheDocument()
   })
 
   it.each(['logout', 'delete', 'switch', 'unmount'] as const)('does not download an ICS after %s during Blob decoding', async kind => {

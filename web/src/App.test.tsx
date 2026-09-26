@@ -344,7 +344,9 @@ describe('App', () => {
     }), { status: 200 })).mockResolvedValueOnce(new Response(JSON.stringify({
       id: 'option-2', requestId: 'request-1', type: 'meeting', proposedByUserId: 'demo-manager',
       startAt: new Date('2026-08-28T10:00').toISOString(), endAt: new Date('2026-08-28T10:15').toISOString(),
-    }), { status: 201 })).mockResolvedValue(new Response('{}', { status: 200 }))
+    }), { status: 201 }))
+      .mockResolvedValueOnce(Response.json({ id: 'request-1', status: 'accepted', acceptedOptionId: 'option-1' }))
+      .mockResolvedValue(new Response('{}', { status: 200 }))
     render(<App />)
     fireEvent.click(screen.getByRole('button', { name: '依頼' }))
     expect(await screen.findByRole('heading', { name: '受信した依頼' })).toBeInTheDocument()

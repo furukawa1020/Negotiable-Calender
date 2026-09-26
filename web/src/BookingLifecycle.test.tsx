@@ -76,6 +76,81 @@ describe('Booking operations respect account and workspace lifetime', () => {
     window.history.replaceState({}, '', '/')
   })
 
+  const mutationCases = [
+    ['依頼', 'reschedule'], ['送信済み', 'reschedule'],
+    ['依頼', 'cancel-confirmed'], ['送信済み', 'cancel-confirmed'],
+    ['依頼', 'accept'], ['依頼', 'decline'], ['依頼', 'async'], ['送信済み', 'cancel'],
+  ] as const
+
+  describe.each(['response', 'body', 'error'] as const)('superseded list %s', phase => {
+    it.each(mutationCases)('preserves %s after successful %s and permits a fresh read', async (view, action) => {
+      const h = setup(!['reschedule', 'cancel-confirmed'].includes(action))
+      const status = action === 'decline' ? 'declined' : action === 'async' ? 'async' : action.includes('cancel') ? 'cancelled' : 'accepted'
+      const changed = { ...h.value, title: 'Acknowledged booking', status, acceptedOptionId: action === 'reschedule' ? 'proposal-new' : 'old', asyncMessage: action === 'async' ? 'Reply text' : undefined }
+      h.routes.set(`POST /api/v1/requests/booking/${action}`, async () => Response.json(changed))
+      await openRequests(view)
+      const route = `GET /api/v1/requests${view === '送信済み' ? '?scope=sent' : ''}`
+      const pending = deferred<Response>()
+      const body = deferred<object>()
+      const stale = { requests: [{ ...h.value, title: 'Stale snapshot' }] }
+      const response = Response.json(stale)
+      if (phase === 'body') response.json = () => body.promise
+      h.routes.set(route, () => phase === 'body' ? Promise.resolve(response) : pending.promise)
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: '更新' })) })
+      expect(screen.getByText(/依頼を取得しています/)).toBeInTheDocument()
+      if (action === 'reschedule') fireEvent.click(screen.getByRole('button', { name: 'この日時への変更を承認' }))
+      else if (action === 'cancel-confirmed') {
+        fireEvent.click(screen.getByRole('button', { name: '確定会議を取り消す' }))
+        fireEvent.click(screen.getByRole('button', { name: '会議の取消を確定する' }))
+      } else if (action === 'accept') fireEvent.click(screen.getAllByRole('button', { name: 'この候補を承認' })[0])
+      else if (action === 'decline') fireEvent.click(screen.getByRole('button', { name: '今回は辞退' }))
+      else if (action === 'cancel') fireEvent.click(screen.getByRole('button', { name: '依頼をキャンセル' }))
+      else {
+        fireEvent.change(screen.getByLabelText('非同期メッセージ'), { target: { value: 'Reply text' } })
+        fireEvent.click(screen.getByRole('button', { name: '非同期で回答' }))
+      }
+      const notices = {
+        reschedule: '日時変更を確定しました。外部カレンダーの予定は手動で更新してください。',
+        'cancel-confirmed': '確定会議を取り消し、相手に通知しました。外部カレンダーの予定は手動で削除してください。',
+        accept: '候補を承認しました。', decline: '依頼を辞退しました。',
+        async: '非同期で回答しました。依頼者に通知しました。', cancel: '依頼をキャンセルしました。相手にも通知しました。',
+      }
+      await screen.findByText(notices[action])
+      expect(screen.queryByText(/依頼を取得しています/)).not.toBeInTheDocument()
+      await act(async () => {
+        if (phase === 'body') body.resolve(stale)
+        else if (phase === 'error') pending.reject(new Error('obsolete read failure'))
+        else pending.resolve(response)
+      })
+      expect(screen.queryByText('Stale snapshot')).not.toBeInTheDocument()
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+      expect(screen.getByRole('status')).toHaveTextContent(notices[action])
+      if (action === 'reschedule') expect(screen.getByText('Acknowledged booking')).toBeInTheDocument()
+      if (action.includes('cancel')) expect(screen.queryByRole('button', { name: 'カレンダーに登録（ICS）' })).not.toBeInTheDocument()
+      if (action === 'accept') expect(screen.getByRole('button', { name: 'カレンダーに登録（ICS）' })).toBeInTheDocument()
+      if (action === 'async') expect(screen.getByText('Reply text')).toBeInTheDocument()
+      h.routes.set(route, async () => Response.json({ requests: [{ ...changed, title: 'Persisted latest' }] }))
+      fireEvent.click(screen.getByRole('button', { name: '更新' }))
+      await screen.findByText('Persisted latest')
+      expect(screen.queryByText(/依頼を取得しています/)).not.toBeInTheDocument()
+    })
+  })
+
+  it.each(['依頼', '送信済み'])('keeps a pending %s refresh valid after a failed mutation', async view => {
+    const h = setup()
+    await openRequests(view)
+    const pending = deferred<Response>()
+    h.routes.set(`GET /api/v1/requests${view === '送信済み' ? '?scope=sent' : ''}`, () => pending.promise)
+    h.routes.set('POST /api/v1/requests/booking/reschedule', async () => new Response(null, { status: 503 }))
+    fireEvent.click(screen.getByRole('button', { name: '更新' }))
+    fireEvent.click(screen.getByRole('button', { name: 'この日時への変更を承認' }))
+    await screen.findByRole('alert')
+    expect(screen.getByText(/依頼を取得しています/)).toBeInTheDocument()
+    await act(async () => { pending.resolve(Response.json({ requests: [{ ...h.value, title: 'Fresh read after failure' }] })) })
+    expect(screen.getByText('Fresh read after failure')).toBeInTheDocument()
+    expect(screen.queryByText(/依頼を取得しています/)).not.toBeInTheDocument()
+  })
+
   it.each(['reschedule', 'cancel-confirmed', 'calendar.ics'] as const)('recovers from a stalled %s response and ignores it during a newer retry', async action => {
     await checkDeadline(action, false)
   })

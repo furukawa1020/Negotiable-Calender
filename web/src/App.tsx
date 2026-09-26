@@ -342,6 +342,17 @@ function App() {
       && (demo ? !accountActive.current : accountActive.current)
   }
 
+  const supersedeRequestReads = () => {
+    // A list snapshot started before this acknowledged mutation may be stale,
+    // even if it is the latest list request. Do not invalidate mutation scopes.
+    inboxLoad.current++
+    sentLoad.current++
+    setInboxLoading(false)
+    setSentLoading(false)
+    setInboxError('')
+    setSentError('')
+  }
+
   useEffect(() => {
     const initialSearch = window.location.search
     const initialPath = window.location.pathname
@@ -644,6 +655,7 @@ function App() {
     try {
       const result = await resolution.resolve(requestID, requesterUserID, 'cancel')
       if (!result || !isCurrent()) return
+      supersedeRequestReads()
       setSentRequests((current) => current.map((item) => item.id === requestID
         ? { ...item, status: 'cancelled' }
         : item))
@@ -719,6 +731,7 @@ function App() {
       try {
         const result = await resolution.resolve(requestID, activeUserID, 'decline')
         if (!result || !isCurrent()) return
+        supersedeRequestReads()
         setInboxRequests(current => current.map(item => item.id === requestID ? { ...item, status: result.status } : item))
         setNotice('依頼を辞退しました。')
       } catch (error) { if (isCurrent()) setNotice(error instanceof Error ? error.message : '一覧を更新して状態を確認してください。') }
@@ -751,6 +764,7 @@ function App() {
         }
         throw new Error('response failed')
       }
+      supersedeRequestReads()
       setInboxRequests((current) => current.map((item) => item.id === requestID
         ? { ...item, status: 'accepted', acceptedOptionId: optionID }
         : item))
@@ -772,6 +786,7 @@ function App() {
         body: JSON.stringify(command),
       }, response => response.json() as Promise<CoordinationRequest>, isCurrent)
       if (!value || !isCurrent()) return
+      supersedeRequestReads()
       const update = (current: CoordinationRequest[]) => current.map((item) => item.id === requestID ? value : item)
       setInboxRequests(update)
       setSentRequests(update)
@@ -789,6 +804,7 @@ function App() {
         body: JSON.stringify({ optionId: optionID }),
       }, response => readCancellation(response, requestID), isCurrent)
       if (!acknowledged || !isCurrent()) return
+      supersedeRequestReads()
       const update = (current: CoordinationRequest[]) => current.map((item) => item.id === requestID ? { ...item, status: 'cancelled' } : item)
       setInboxRequests(update)
       setSentRequests(update)
@@ -828,6 +844,7 @@ function App() {
     try {
       const payload = await resolution.resolve(requestID, activeUserID, 'async', message)
       if (!payload || !isCurrent()) return
+      supersedeRequestReads()
       setInboxRequests((current) => current.map((item) => item.id === requestID
         ? { ...item, status: payload.status, asyncMessage: payload.asyncMessage }
         : item))
@@ -1458,7 +1475,7 @@ function App() {
                         <CounterproposalForm key={`proposal:${activeOrganizationID}:${activeUserID}:${item.id}`}
                           apiURL={apiURL} organizationID={activeOrganizationID} actor={activeUserID} requestID={item.id}
                           durationMinutes={item.durationMinutes} disabled={respondingRequestID === item.id || resolution.pending(item.id)}
-                          onProposed={option => { setInboxRequests(current => current.map(row => row.id === item.id ? { ...row, options: [...row.options.filter(old => old.id !== option.id), option] } : row)); setNotice('別の時間を提案しました。依頼者の承認を待っています。') }} />
+                          onProposed={option => { supersedeRequestReads(); setInboxRequests(current => current.map(row => row.id === item.id ? { ...row, options: [...row.options.filter(old => old.id !== option.id), option] } : row)); setNotice('別の時間を提案しました。依頼者の承認を待っています。') }} />
                         <form className="async-form" onSubmit={(event) => respondAsync(event, item.id)}>
                           <label>非同期メッセージ<textarea name="asyncMessage" maxLength={500} rows={2} placeholder="回答方法や次のアクションを500文字以内で入力" disabled={resolution.pending(item.id)} required /></label>
                           <button type="submit" disabled={respondingRequestID === item.id || resolution.pending(item.id)}>非同期で回答</button>
@@ -1467,7 +1484,7 @@ function App() {
                           key={`${activeOrganizationID}:${activeUserID}:${item.id}`}
                           apiURL={apiURL} organizationID={activeOrganizationID} actor={activeUserID} requestID={item.id} requesterID={item.requesterUserId}
                           disabled={respondingRequestID === item.id || resolution.pending(item.id)}
-                          onDone={name => { setInboxRequests(current => current.filter(request => request.id !== item.id)); setNotice(`${name} に担当を引き継ぎました。依頼者にも通知しました。`) }}
+                          onDone={name => { supersedeRequestReads(); setInboxRequests(current => current.filter(request => request.id !== item.id)); setNotice(`${name} に担当を引き継ぎました。依頼者にも通知しました。`) }}
                         /> : <p className="field-help">引き継いだ依頼です。再委譲はできません。</p>}
                         <button className="decline-button" type="button" disabled={respondingRequestID === item.id || resolution.pending(item.id)} onClick={() => respondToRequest(item.id, 'decline')}>今回は辞退</button>
                       </>
@@ -1510,7 +1527,7 @@ function App() {
                         apiURL={apiURL} organizationID={activeOrganizationID} actor={requesterUserID} requestID={item.id}
                         targetID={item.targetUserId} status={item.status} options={item.options}
                         disabled={respondingRequestID === item.id || resolution.pending(item.id)}
-                        onConfirmed={optionID => { setSentRequests(current => current.map(row => row.id === item.id ? { ...row, status: 'accepted', acceptedOptionId: optionID } : row)); setNotice('提案を承認し、会議を確定しました。相手に通知しました。') }} />
+                        onConfirmed={optionID => { supersedeRequestReads(); setSentRequests(current => current.map(row => row.id === item.id ? { ...row, status: 'accepted', acceptedOptionId: optionID } : row)); setNotice('提案を承認し、会議を確定しました。相手に通知しました。') }} />
                       {item.delegatedFromUserId ? <p className="field-help">担当変更済み · 現在の担当: {item.targetUserId}</p> : null}
                       {cancellable ? (
                         <button className="decline-button" type="button" disabled={respondingRequestID === item.id || resolution.pending(item.id)} onClick={() => cancelSentRequest(item.id)}>

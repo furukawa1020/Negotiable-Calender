@@ -727,9 +727,10 @@ func TestCoordinationRequestInboxUsesAuthenticatedTargetAndSafeFields(t *testing
 			StartAt: &startAt, EndAt: &endAt, CreatedAt: now,
 		}}, CreatedAt: now, UpdatedAt: now,
 	}}}
-	handler := New(stubDatabase{}, &stubPolicyStore{}, &stubProjectionStore{}, &stubOrganizationStore{}, requests, "", testLogger())
+	handler := New(stubDatabase{}, &stubPolicyStore{}, &stubProjectionStore{}, &stubOrganizationStore{}, &scopedListStub{stubRequestStore: requests}, "", testLogger())
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/requests", nil)
 	request.Header.Set("X-Demo-User-ID", "manager-1")
+	request.Header.Set("X-Organization-ID", "org-1")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
@@ -896,10 +897,11 @@ func TestUserDataExportRejectsIDOR(t *testing.T) {
 
 func TestRequestListSupportsRequesterSentScope(t *testing.T) {
 	t.Parallel()
-	store := &stubRequestStore{values: []coordinationrequest.CoordinationRequest{{ID: "request-1", RequesterUserID: "member-1"}}}
-	handler := New(stubDatabase{}, &stubPolicyStore{}, &stubProjectionStore{}, &stubOrganizationStore{}, store, "", testLogger())
+	store := &stubRequestStore{values: []coordinationrequest.CoordinationRequest{{ID: "request-1", OrganizationID: "org-1", RequesterUserID: "member-1"}}}
+	handler := New(stubDatabase{}, &stubPolicyStore{}, &stubProjectionStore{}, &stubOrganizationStore{}, &scopedListStub{stubRequestStore: store}, "", testLogger())
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/requests?scope=sent", nil)
 	request.Header.Set("X-Demo-User-ID", "member-1")
+	request.Header.Set("X-Organization-ID", "org-1")
 	response := httptest.NewRecorder()
 
 	handler.ServeHTTP(response, request)

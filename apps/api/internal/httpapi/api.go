@@ -490,19 +490,28 @@ func (api *API) respondToCoordinationRequest(response http.ResponseWriter, reque
 
 func (api *API) listCoordinationRequests(response http.ResponseWriter, request *http.Request) {
 	userID := request.Header.Get("X-Demo-User-ID")
-	if userID == "" {
+	org := request.Header.Get("X-Organization-ID")
+	if userID == "" || org == "" {
 		writeJSON(response, http.StatusUnauthorized, map[string]string{"error": "request identity is required"})
 		return
 	}
-	var values []coordinationrequest.CoordinationRequest
-	var err error
+	sent := false
 	switch request.URL.Query().Get("scope") {
 	case "", "inbox":
-		values, err = api.requests.ListForTarget(request.Context(), userID)
 	case "sent":
-		values, err = api.requests.ListForRequester(request.Context(), userID)
+		sent = true
 	default:
 		writeJSON(response, http.StatusBadRequest, map[string]string{"error": "invalid request scope"})
+		return
+	}
+	store, ok := api.requests.(coordinationrequest.ScopedListStore)
+	if !ok {
+		writeJSON(response, http.StatusServiceUnavailable, map[string]string{"error": "workspace request listing unavailable"})
+		return
+	}
+	values, err := store.ListInOrganization(request.Context(), userID, org, sent)
+	if errors.Is(err, coordinationrequest.ErrCreationForbidden) {
+		writeJSON(response, http.StatusForbidden, map[string]string{"error": "current workspace membership required"})
 		return
 	}
 	if err != nil {
@@ -512,6 +521,12 @@ func (api *API) listCoordinationRequests(response http.ResponseWriter, request *
 	}
 	if values == nil {
 		values = []coordinationrequest.CoordinationRequest{}
+	}
+	for _, value := range values {
+		if value.OrganizationID != org || (sent && value.RequesterUserID != userID) || (!sent && value.TargetUserID != userID) {
+			writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "invalid workspace request result"})
+			return
+		}
 	}
 	writeJSON(response, http.StatusOK, map[string]any{"requests": values})
 }

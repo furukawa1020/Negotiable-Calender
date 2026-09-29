@@ -126,18 +126,18 @@ INSERT INTO coordination_request_options (
 }
 
 func (store *PostgresStore) ListForTarget(ctx context.Context, targetUserID string) ([]CoordinationRequest, error) {
-	return store.listForUser(ctx, targetUserID, true, false)
+	return store.listForUser(ctx, targetUserID, true, false, "")
 }
 
 func (store *PostgresStore) ListForRequester(ctx context.Context, requesterUserID string) ([]CoordinationRequest, error) {
-	return store.listForUser(ctx, requesterUserID, false, true)
+	return store.listForUser(ctx, requesterUserID, false, true, "")
 }
 
 func (store *PostgresStore) ListForUser(ctx context.Context, userID string) ([]CoordinationRequest, error) {
-	return store.listForUser(ctx, userID, true, true)
+	return store.listForUser(ctx, userID, true, true, "")
 }
 
-func (store *PostgresStore) listForUser(ctx context.Context, userID string, includeTarget, includeRequested bool) ([]CoordinationRequest, error) {
+func (store *PostgresStore) listForUser(ctx context.Context, userID string, includeTarget, includeRequested bool, org string) ([]CoordinationRequest, error) {
 	// Read authorization, envelope and options from one snapshot. A concurrent
 	// handoff must never combine the former owner's envelope with new options.
 	tx, err := store.database.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
@@ -145,14 +145,24 @@ func (store *PostgresStore) listForUser(ctx context.Context, userID string, incl
 		return nil, err
 	}
 	defer tx.Rollback()
+	if org != "" {
+		// Membership and request/options are read from the same snapshot.
+		var member bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM memberships WHERE organization_id=$1 AND user_id=$2)`, org, userID).Scan(&member); err != nil {
+			return nil, err
+		}
+		if !member {
+			return nil, ErrCreationForbidden
+		}
+	}
 	rows, err := tx.QueryContext(ctx, `
 SELECT id, organization_id, requester_user_id, target_user_id, type, title,
        duration_minutes, deadline_at, sync_preference, priority, status,
        created_at, updated_at, accepted_option_id, delegated_user_id, async_message, reschedule_proposal, delegated_from_user_id
 FROM coordination_requests
-WHERE ($2 AND target_user_id = $1) OR ($3 AND requester_user_id = $1)
+WHERE ($4 = '' OR organization_id = $4) AND (($2 AND target_user_id = $1) OR ($3 AND requester_user_id = $1))
 ORDER BY created_at DESC, id DESC
-`, userID, includeTarget, includeRequested)
+`, userID, includeTarget, includeRequested, org)
 	if err != nil {
 		return nil, fmt.Errorf("list coordination requests: %w", err)
 	}

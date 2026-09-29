@@ -82,6 +82,34 @@ describe('Booking operations respect account and workspace lifetime', () => {
     ['依頼', 'accept'], ['依頼', 'decline'], ['依頼', 'async'], ['送信済み', 'cancel'],
   ] as const
 
+  it.each(['依頼', '送信済み'])('scopes %s reads to the selected workspace and clears the former list', async view => {
+    const h = setup()
+    const endpoint = `/api/v1/requests${view === '送信済み' ? '?scope=sent' : ''}`
+    await openRequests(view)
+    expect(h.fetchMock).toHaveBeenCalledWith(expect.stringContaining(endpoint), expect.objectContaining({
+      headers: { 'X-Demo-User-ID': 'owner', 'X-Organization-ID': 'org' },
+    }))
+    await changeScope('switch')
+    expect(screen.queryByText('Private booking')).not.toBeInTheDocument()
+    h.routes.set(`GET ${endpoint}`, async () => Response.json({ requests: [] }))
+    fireEvent.click(screen.getByRole('button', { name: view }))
+    await screen.findByText(view === '送信済み' ? '送信済み依頼はありません。' : '新しい依頼はありません。')
+    expect(h.fetchMock).toHaveBeenCalledWith(expect.stringContaining(endpoint), expect.objectContaining({
+      headers: { 'X-Demo-User-ID': 'owner', 'X-Organization-ID': 'team' },
+    }))
+    expect(screen.queryByText('Private booking')).not.toBeInTheDocument()
+  })
+
+  it.each(['依頼', '送信済み'])('does not show former workspace requests when %s membership is rejected', async view => {
+    const h = setup()
+    await openRequests(view)
+    await changeScope('switch')
+    h.routes.set(`GET /api/v1/requests${view === '送信済み' ? '?scope=sent' : ''}`, async () => new Response(null, { status: 403 }))
+    fireEvent.click(screen.getByRole('button', { name: view }))
+    await screen.findByRole('alert')
+    expect(screen.queryByText('Private booking')).not.toBeInTheDocument()
+  })
+
   it.each(['response', 'success body', 'error body'])('recovers the acceptance UI after a stalled %s and ignores late completion', async phase => {
     const h = setup(true)
     const first = deferred<Response>(), body = deferred<object>(), retry = deferred<Response>()

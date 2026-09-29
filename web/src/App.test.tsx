@@ -364,7 +364,7 @@ describe('App', () => {
     expect(screen.queryByText('Product Review')).not.toBeInTheDocument()
     expect(globalThis.fetch).toHaveBeenCalledWith(
       expect.stringContaining('/api/v1/requests'),
-      expect.objectContaining({ headers: { 'X-Demo-User-ID': 'demo-manager' } }),
+      expect.objectContaining({ headers: { 'X-Demo-User-ID': 'demo-manager', 'X-Organization-ID': 'demo-org' } }),
     )
     expect(globalThis.fetch).toHaveBeenCalledWith(
       expect.stringContaining('/api/v1/requests/request-1/suggest'),
@@ -487,7 +487,7 @@ describe('App', () => {
     expect(screen.getByText('更新済み · キャンセル済み')).toBeInTheDocument()
     expect(globalThis.fetch).toHaveBeenNthCalledWith(1,
       expect.stringContaining('/api/v1/requests?scope=sent'),
-      expect.objectContaining({ headers: { 'X-Demo-User-ID': 'demo-member' }, credentials: 'include' }),
+      expect.objectContaining({ headers: { 'X-Demo-User-ID': 'demo-member', 'X-Organization-ID': 'demo-org' }, credentials: 'include' }),
     )
     expect(globalThis.fetch).toHaveBeenNthCalledWith(2,
       expect.stringContaining('/api/v1/requests/request-1/cancel'),

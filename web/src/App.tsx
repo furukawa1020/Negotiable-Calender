@@ -580,7 +580,7 @@ function App() {
     setInboxError('')
     try {
       const response = await apiFetch(`${apiURL}/api/v1/requests`, {
-        headers: { 'X-Demo-User-ID': activeUserID },
+        headers: { 'X-Demo-User-ID': activeUserID, 'X-Organization-ID': activeOrganizationID },
       })
       if (!isCurrent()) return
       if (!response.ok) {
@@ -607,7 +607,7 @@ function App() {
     setSentError('')
     try {
       const response = await apiFetch(`${apiURL}/api/v1/requests?scope=sent`, {
-        headers: { 'X-Demo-User-ID': requesterUserID },
+        headers: { 'X-Demo-User-ID': requesterUserID, 'X-Organization-ID': activeOrganizationID },
       })
       if (!isCurrent()) return
       if (!response.ok) throw new Error('sent requests failed')
@@ -1374,7 +1374,7 @@ function App() {
             <div className="people-heading">
               <div>
                 <h1 id="inbox-title">受信した依頼</h1>
-                <p className="hero-copy">日時の承認・別時間の提案・非同期での回答・委譲を行えます。</p>
+                <p className="hero-copy">選択中のWorkspaceで受信した依頼です。日時の承認・別時間の提案・非同期での回答・委譲を行えます。</p>
               </div>
               <button className="secondary-button" type="button" onClick={openInbox}>更新</button>
             </div>
@@ -1448,7 +1448,7 @@ function App() {
             <div className="people-heading">
               <div>
                 <h1 id="sent-title">送信した依頼</h1>
-                <p className="hero-copy">相手からの時間提案を承認し、確定日時を確認できます。回答前の依頼は取り消せます。</p>
+                <p className="hero-copy">選択中のWorkspaceで送信した依頼です。相手からの時間提案を承認し、確定日時を確認できます。回答前の依頼は取り消せます。</p>
               </div>
               <button className="secondary-button" type="button" onClick={openSentRequests}>更新</button>
             </div>

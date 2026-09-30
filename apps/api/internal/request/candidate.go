@@ -2,6 +2,7 @@ package request
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"time"
 
@@ -38,57 +39,69 @@ func GenerateCandidates(input CandidateInput) ([]Option, error) {
 	if input.Request.SyncPreference == AsyncPreferred {
 		return []Option{asyncCandidate(input.Request, input.Now)}, nil
 	}
+	if int64(input.Request.DurationMinutes) > math.MaxInt64/int64(time.Minute) {
+		return nil, fmt.Errorf("request duration exceeds supported range")
+	}
 	duration := time.Duration(input.Request.DurationMinutes) * time.Minute
-	var candidates []scoredOption
-	for _, segment := range input.Projections {
-		if err := segment.Validate(); err != nil {
-			return nil, fmt.Errorf("invalid projection: %w", err)
+	spans, err := candidateSpans(input)
+	if err != nil {
+		return nil, err
+	}
+	// Retain only the best three, not every possible start in a long calendar.
+	candidates := make([]scoredOption, 0, 4)
+	for first := 0; first < len(spans); {
+		last := first
+		for last+1 < len(spans) && spans[last].end.Equal(spans[last+1].start) {
+			last++
 		}
-		if segment.UserID != input.Request.TargetUserID {
-			return nil, fmt.Errorf("projection target mismatch")
+		runStart, runEnd := spans[first].start, spans[last].end
+		start := ceilCandidateStep(runStart)
+		if !start.After(input.Now) {
+			start = ceilCandidateStep(input.Now)
+			if !start.After(input.Now) {
+				start = start.Add(candidateStep)
+			}
 		}
-		if segment.State.Requestability != policy.RequestOpen {
-			continue
-		}
-		if !segment.ExpiresAt.After(input.Now) || segment.GeneratedAt.After(input.Now) || (segment.State.Availability != policy.Available && segment.State.Availability != policy.Limited) {
-			continue
-		}
-		start := segment.StartAt
-		if input.Now.After(start) {
-			start = input.Now
-		}
-		start = ceilCandidateStep(start)
-		endLimit := segment.EndAt
+		endLimit := runEnd
 		if input.Request.DeadlineAt.Before(endLimit) {
 			endLimit = input.Request.DeadlineAt
 		}
+		part := first
 		for cursor := start; !cursor.Add(duration).After(endLimit); cursor = cursor.Add(candidateStep) {
 			end := cursor.Add(duration)
 			if overlapsReserved(cursor, end, input.Reserved) {
 				continue
 			}
+			for part <= last && !spans[part].end.After(cursor) {
+				part++
+			}
+			// The least favorable covered span determines quality, not the first bucket.
+			score := spans[part].score
+			for i := part + 1; i <= last && spans[i].start.Before(end); i++ {
+				score = min(score, spans[i].score)
+			}
+			score += candidateFragmentPenalty(runStart, runEnd, cursor, end)
 			option := Option{
 				ID:        fmt.Sprintf("%s:candidate:%d", input.Request.ID, cursor.Unix()),
 				RequestID: input.Request.ID, Type: OptionMeeting,
 				StartAt: timePointer(cursor), EndAt: timePointer(end),
-				Score: candidateScore(segment, cursor, end), CreatedAt: input.Now,
+				CreatedAt: input.Now,
 			}
-			candidates = append(candidates, scoredOption{option: option, score: option.Score})
+			candidates = append(candidates, scoredOption{option: option, score: score})
+			sort.Slice(candidates, func(left, right int) bool {
+				if candidates[left].score == candidates[right].score {
+					return candidates[left].option.StartAt.Before(*candidates[right].option.StartAt)
+				}
+				return candidates[left].score > candidates[right].score
+			})
+			if len(candidates) > 3 {
+				candidates = candidates[:3]
+			}
 		}
+		first = last + 1
 	}
-	sort.SliceStable(candidates, func(left, right int) bool {
-		if candidates[left].score == candidates[right].score {
-			return candidates[left].option.StartAt.Before(*candidates[right].option.StartAt)
-		}
-		return candidates[left].score > candidates[right].score
-	})
-	limit := len(candidates)
-	if limit > 3 {
-		limit = 3
-	}
-	options := make([]Option, 0, limit)
-	for _, candidate := range candidates[:limit] {
-		candidate.option.Score = 0
+	options := make([]Option, 0, len(candidates))
+	for _, candidate := range candidates {
 		options = append(options, candidate.option)
 	}
 	if len(options) == 0 {
@@ -97,7 +110,7 @@ func GenerateCandidates(input CandidateInput) ([]Option, error) {
 	return options, nil
 }
 
-func candidateScore(segment projection.ScheduleProjection, startAt, endAt time.Time) int {
+func candidateQuality(segment projection.ScheduleProjection) int {
 	score := map[policy.Availability]int{
 		policy.Available: 100, policy.Limited: 40, policy.Unknown: -100,
 	}[segment.State.Availability]
@@ -105,9 +118,13 @@ func candidateScore(segment projection.ScheduleProjection, startAt, endAt time.T
 		policy.RescheduleHigh: 30, policy.RescheduleMedium: 10,
 		policy.RescheduleLow: -20, policy.RescheduleFixed: -100,
 	}[segment.State.Reschedulability]
-	score += 20
-	before := startAt.Sub(segment.StartAt)
-	after := segment.EndAt.Sub(endAt)
+	return score + 20
+}
+
+func candidateFragmentPenalty(runStart, runEnd, startAt, endAt time.Time) int {
+	score := 0
+	before := startAt.Sub(runStart)
+	after := runEnd.Sub(endAt)
 	if before > 0 && before < candidateStep {
 		score -= 20
 	}

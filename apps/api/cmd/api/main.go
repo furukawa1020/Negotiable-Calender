@@ -208,7 +208,8 @@ func runFirestore(logger *slog.Logger) error {
 		return err
 	}
 	if err := backend.Request().CheckAvailabilityQueries(ctx); err != nil {
-		return fmt.Errorf("firestore availability query preflight: %w", err)
+		// Startup failures are logged; do not expose provider URLs or identifiers.
+		return errors.New("availability query preflight failed; check required indexes and runtime access")
 	}
 
 	now := time.Now().UTC()

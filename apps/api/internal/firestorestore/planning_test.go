@@ -109,7 +109,7 @@ func TestPlanningBoundedQueriesIgnoreLargeClosedHistory(t *testing.T) {
 		value.Status = request.Completed
 		batch.Set(b.Client.Collection("coordinationRequests").Doc(value.ID), value)
 	}
-	// The new single range index skips historical projections server-side.
+	// The overlap index skips historical projections server-side.
 	for i := 0; i < 300; i++ {
 		value := publicationFixtures(from.Add(-48*time.Hour), fmt.Sprintf("old-%d", i), 1)[0]
 		batch.Set(b.Client.Collection("users").Doc("alice").Collection("scheduleProjections").Doc(value.ID), value)

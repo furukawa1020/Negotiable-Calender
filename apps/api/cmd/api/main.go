@@ -207,6 +207,9 @@ func runFirestore(logger *slog.Logger) error {
 	if err := preflightFirestoreSync(ctx, backend.Calendar(), syncMode(os.Getenv)); err != nil {
 		return err
 	}
+	if err := backend.Request().CheckAvailabilityQueries(ctx); err != nil {
+		return fmt.Errorf("firestore availability query preflight: %w", err)
+	}
 
 	now := time.Now().UTC()
 	demoSeeded := false

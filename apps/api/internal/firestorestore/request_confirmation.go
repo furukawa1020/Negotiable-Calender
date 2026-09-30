@@ -105,7 +105,7 @@ func (store *Request) checkMeetingSlot(ctx context.Context, tx *firestore.Transa
 			}
 		}
 	}
-	values, err := store.confirmationProjections(ctx, tx, value.TargetUserID)
+	values, err := store.confirmationProjections(ctx, tx, value.TargetUserID, *selected.StartAt, *selected.EndAt)
 	if err != nil {
 		return err
 	}
@@ -125,7 +125,10 @@ func (store *Request) checkMeetingSlot(ctx context.Context, tx *firestore.Transa
 	return nil
 }
 
-func (store *Request) confirmationProjections(ctx context.Context, tx *firestore.Transaction, userID string) ([]projection.ScheduleProjection, error) {
+func (store *Request) confirmationProjections(ctx context.Context, tx *firestore.Transaction, userID string, from, to time.Time) ([]projection.ScheduleProjection, error) {
+	if !from.Before(to) {
+		return nil, coordinationrequest.ErrCandidateInvalid
+	}
 	if _, err := tx.Get(store.projectionBlock(userID)); err == nil {
 		return nil, coordinationrequest.ErrAvailabilityChanged
 	} else if !firestoreNotFound(err) {
@@ -166,7 +169,8 @@ func (store *Request) confirmationProjections(ctx context.Context, tx *firestore
 	if !source.Readable(time.Now().UTC()) {
 		return nil, coordinationrequest.ErrAvailabilityChanged
 	}
-	docs, err := tx.Documents(store.Client.Collection("users").Doc(userID).Collection("scheduleProjections").Limit(10001)).GetAll()
+	// The cap applies to overlapping evidence, not the whole 120-day sync window.
+	docs, err := tx.Documents(store.availabilityOverlapQuery(userID, from, to).Limit(10001)).GetAll()
 	if err != nil {
 		return nil, err
 	}

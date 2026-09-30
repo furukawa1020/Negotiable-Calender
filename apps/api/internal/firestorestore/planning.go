@@ -46,10 +46,8 @@ func (store *Request) LoadPlanningSources(ctx context.Context, target, requester
 	if !ready {
 		return nil, nil, calendarintegration.ErrSourceUnavailable
 	}
-	// One range field uses the automatic EndAt index. Do not filter on expiry:
-	// stale/contradictory rows must remain visible to the availability validator.
-	// Future rows outside the upper bound may conservatively exhaust the budget.
-	q := store.Client.Collection("users").Doc(target).Collection("scheduleProjections").Where("EndAt", ">", from).Limit(planningProjectionLimit + 1)
+	// Bound reads to the requested interval, preserving stale/contradictory evidence.
+	q := store.availabilityOverlapQuery(target, from, to).Limit(planningProjectionLimit + 1)
 	documents, err := q.Documents(ctx).GetAll()
 	if err != nil {
 		return nil, nil, err

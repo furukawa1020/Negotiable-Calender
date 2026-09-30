@@ -28,10 +28,12 @@ func TestAvailabilityAfterFullSyncSizedPublication(t *testing.T) {
 	}
 	start := now.Add(time.Hour).Truncate(projection.BucketSize)
 	end := start.Add(30 * time.Minute)
+	trace := &planningReadTrace{}
+	reader := planningReader(t, ctx, trace)
 	t.Run("planning", func(t *testing.T) {
 		// Use the same project/client as the parent fixture.
-		segments, bookings, err := b.Request().LoadPlanningSources(ctx, "bob", "alice", start, end)
-		if err != nil || len(segments) != 2 || len(bookings) != 0 {
+		segments, bookings, err := reader.LoadPlanningSources(ctx, "bob", "alice", start, end)
+		if err != nil || len(segments) != 2 || len(bookings) != 0 || trace.documents != 2 {
 			t.Fatalf("full-sync planning: segments=%d bookings=%d err=%v", len(segments), len(bookings), err)
 		}
 	})
@@ -41,8 +43,13 @@ func TestAvailabilityAfterFullSyncSizedPublication(t *testing.T) {
 		if err := b.Request().Create(ctx, value); err != nil {
 			t.Fatal(err)
 		}
-		if err := b.Request().Respond(ctx, value.ID, "bob", coord.Accepted, value.Options[0].ID); err != nil {
+		*trace = planningReadTrace{}
+		if err := reader.Respond(ctx, value.ID, "bob", coord.Accepted, value.Options[0].ID); err != nil {
 			t.Fatalf("full-sync confirmation: %v", err)
+		}
+		// Two role-query appearances of this request plus two overlapping buckets.
+		if trace.documents != 4 {
+			t.Fatalf("confirmation fetched unrelated projections: %d documents", trace.documents)
 		}
 		command := coord.RescheduleCommand{Action: "propose", ProposalID: "move", ExpectedOptionID: value.Options[0].ID, StartAt: start.Add(time.Hour)}
 		if err := b.Request().Reschedule(ctx, value.ID, "alice", command); err != nil {

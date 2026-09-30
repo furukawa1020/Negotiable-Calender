@@ -117,6 +117,9 @@ func (backend *Backend) projectionBlock(userID string) *firestore.DocumentRef {
 }
 
 func (store *Projection) list(ctx context.Context, userID string, from, to time.Time, all bool) ([]projection.ScheduleProjection, error) {
+	if !all && !from.Before(to) {
+		return nil, fmt.Errorf("invalid projection read range")
+	}
 	var source calendarintegration.SourceState
 	revision, ready, err := store.projectionReadRevision(ctx, userID, &source)
 	if err != nil {
@@ -125,7 +128,11 @@ func (store *Projection) list(ctx context.Context, userID string, from, to time.
 	if !ready {
 		return []projection.ScheduleProjection{}, nil
 	}
-	iter := store.Client.Collection("users").Doc(userID).Collection("scheduleProjections").Documents(ctx)
+	query := store.Client.Collection("users").Doc(userID).Collection("scheduleProjections").Query
+	if !all {
+		query = store.availabilityOverlapQuery(userID, from, to)
+	}
+	iter := query.Documents(ctx)
 	defer iter.Stop()
 	now := time.Now().UTC()
 	values := []projection.ScheduleProjection{}

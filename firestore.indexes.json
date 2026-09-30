@@ -7,6 +7,14 @@
         { "fieldPath": "ReconnectRequired", "order": "ASCENDING" },
         { "fieldPath": "NextAttemptAt", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "scheduleProjections",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "StartAt", "order": "ASCENDING" },
+        { "fieldPath": "EndAt", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

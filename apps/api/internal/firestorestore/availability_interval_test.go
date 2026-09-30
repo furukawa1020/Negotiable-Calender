@@ -117,3 +117,32 @@ func TestAvailabilityIntervalPreservesOverlapsAndExcludesAdjacentRows(t *testing
 		})
 	}
 }
+
+func TestConfirmationOverlapOverflowStillFailsClosed(t *testing.T) {
+	b, ctx := emulatorBackend(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	start, end := now.Add(time.Hour), now.Add(90*time.Minute)
+	rows := publicationFixtures(now, "overflow", 10001)
+	for i := range rows {
+		rows[i].UserID = "bob"
+		rows[i].StartAt, rows[i].EndAt = start, end
+	}
+	if err := b.Projection().Replace(ctx, "bob", start, end, rows); err != nil {
+		t.Fatal(err)
+	}
+	value := confirmationRequest("overflow", "alice", "bob", now, start)
+	if err := b.Request().Create(ctx, value); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Request().Respond(ctx, value.ID, "bob", coord.Accepted, value.Options[0].ID); !errors.Is(err, coord.ErrAvailabilityChanged) {
+		t.Fatalf("overflow must not become partial availability: %v", err)
+	}
+	got, err := b.Request().GetForUser(ctx, value.ID, "bob")
+	if err != nil || got.Status != coord.Suggested || got.AcceptedOptionID != "" {
+		t.Fatal("overflow changed the request", err)
+	}
+	notes, err := b.Client.Collection("users").Doc("alice").Collection("notifications").Documents(ctx).GetAll()
+	if err != nil || len(notes) != 0 {
+		t.Fatal("overflow created confirmation effects", err)
+	}
+}

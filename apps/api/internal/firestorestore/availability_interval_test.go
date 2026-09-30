@@ -51,7 +51,7 @@ func TestAvailabilityAfterFullSyncSizedPublication(t *testing.T) {
 		if trace.documents != 4 {
 			t.Fatalf("confirmation fetched unrelated projections: %d documents", trace.documents)
 		}
-		command := coord.RescheduleCommand{Action: "propose", ProposalID: "move", ExpectedOptionID: value.Options[0].ID, StartAt: start.Add(time.Hour)}
+		command := coord.RescheduleCommand{Action: "propose", ProposalID: "full-sync-move", ExpectedOptionID: value.Options[0].ID, StartAt: start.Add(time.Hour)}
 		if err := b.Request().Reschedule(ctx, value.ID, "alice", command); err != nil {
 			t.Fatal(err)
 		}

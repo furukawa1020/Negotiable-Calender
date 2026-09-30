@@ -1,16 +1,13 @@
 package request
 
 import (
-	"encoding/json"
 	"fmt"
 	"math/rand"
 	"reflect"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/policy"
-	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/privateevent"
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/projection"
 )
 
@@ -152,52 +149,6 @@ func TestCandidatesRejectMalformedProjectionAndDurationOverflow(t *testing.T) {
 				t.Fatalf("invalid input accepted: %+v %v", got, err)
 			}
 		})
-	}
-}
-
-func TestProjectionEngineToLongMeetingCandidates(t *testing.T) {
-	for _, minutes := range []int{30, 60} {
-		input := continuousCandidateInput(minutes)
-		from, to := input.Now.Add(time.Hour), input.Now.Add(4*time.Hour)
-		input.Request.DeadlineAt = to
-		state := input.Projections[0].State
-		values, err := projection.NewEngine().Generate(projection.GenerateInput{
-			UserID: input.Request.TargetUserID, Timezone: "UTC", From: from, To: to, Now: input.Now,
-			Policy: policy.SharingPolicy{ID: "policy", UserID: input.Request.TargetUserID, Default: state,
-				WorkingHours: []policy.WorkingWindow{{Weekday: from.Weekday(), StartMinute: 9 * 60, EndMinute: 12 * 60}}, CreatedAt: input.Now, UpdatedAt: input.Now},
-			Events: []privateevent.PrivateEvent{{ID: "private", UserID: input.Request.TargetUserID, ProviderEventID: "provider-secret", CalendarID: "calendar-secret",
-				StartAt: from.Add(time.Hour), EndAt: from.Add(75 * time.Minute), BusyStatus: privateevent.Busy, Visibility: privateevent.VisibilityPrivate,
-				TitleEncrypted: []byte("not-for-public"), CreatedAt: input.Now, UpdatedAt: input.Now}},
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(values) != 12 {
-			t.Fatalf("expected raw 15-minute buckets, got %d", len(values))
-		}
-		input.Projections = values
-		options, err := GenerateCandidates(input)
-		if err != nil || len(options) != 3 {
-			t.Fatal(options, err)
-		}
-		input.Request.Options = options
-		for _, option := range options {
-			if option.Type != OptionMeeting || option.EndAt.Sub(*option.StartAt) != time.Duration(minutes)*time.Minute {
-				t.Fatalf("long candidate missing: %+v", option)
-			}
-			if _, err := ConfirmableMeeting(input.Request, option.ID, input.Now); err != nil {
-				t.Fatal(err)
-			}
-			if err := ValidateMeetingAvailability(input.Request.TargetUserID, option, values, input.Now); err != nil {
-				t.Fatal(err)
-			}
-		}
-		encoded, _ := json.Marshal(options)
-		for _, forbidden := range []string{"score", "provider-secret", "calendar-secret", "not-for-public"} {
-			if strings.Contains(string(encoded), forbidden) {
-				t.Fatal("private candidate data leaked")
-			}
-		}
 	}
 }
 

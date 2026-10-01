@@ -99,20 +99,38 @@ func TestAcceptedReservationsStillBlockAcrossWorkspacesAndRoles(t *testing.T) {
 	}
 }
 
-func TestAcceptedReservationOverflowStillFailsClosed(t *testing.T) {
-	b, ctx := emulatorBackend(t)
-	now := time.Now().UTC().Truncate(time.Second)
-	// These accepted meetings do not overlap; the read budget must still apply.
-	seedReservationHistory(t, b, ctx, 5001, true, now, now.Add(24*time.Hour))
-	value := confirmationRequest("overflow", "alice", "bob", now, now.Add(time.Hour))
-	if err := b.Request().Create(ctx, value); err != nil {
-		t.Fatal(err)
-	}
-	if err := b.Request().Respond(ctx, value.ID, "bob", coord.Accepted, value.Options[0].ID); !errors.Is(err, coord.ErrAvailabilityChanged) {
-		t.Fatalf("accepted overflow became partial success: %v", err)
-	}
-	got, err := b.Request().GetForUser(ctx, value.ID, "bob")
-	if err != nil || got.Status != coord.Suggested || got.AcceptedOptionID != "" {
-		t.Fatal("overflow changed request", err)
+func TestAcceptedReservationBudgetBoundary(t *testing.T) {
+	for _, count := range []int{5000, 5001} {
+		t.Run(fmt.Sprint(count), func(t *testing.T) {
+			b, ctx := emulatorBackend(t)
+			now := time.Now().UTC().Truncate(time.Second)
+			// These accepted meetings do not overlap; the budget must still apply.
+			seedReservationHistory(t, b, ctx, count, true, now, now.Add(24*time.Hour))
+			value := confirmationRequest("boundary", "alice", "bob", now, now.Add(time.Hour))
+			p := publicationFixtures(now, "available", 1)[0]
+			p.UserID, p.EndAt = "bob", now.Add(3*time.Hour)
+			putDocument(t, ctx, b.Client.Collection("users").Doc("bob").Collection("scheduleProjections").Doc(p.ID), p)
+			if err := b.Request().Create(ctx, value); err != nil {
+				t.Fatal(err)
+			}
+			err := b.Request().Respond(ctx, value.ID, "bob", coord.Accepted, value.Options[0].ID)
+			if count == 5000 {
+				if err != nil {
+					t.Fatalf("exact reservation limit rejected: %v", err)
+				}
+				return
+			}
+			if !errors.Is(err, coord.ErrAvailabilityChanged) {
+				t.Fatalf("accepted overflow became partial success: %v", err)
+			}
+			got, err := b.Request().GetForUser(ctx, value.ID, "bob")
+			if err != nil || got.Status != coord.Suggested || got.AcceptedOptionID != "" {
+				t.Fatal("overflow changed request", err)
+			}
+			notes, err := b.Client.Collection("users").Doc("alice").Collection("notifications").Documents(ctx).GetAll()
+			if err != nil || len(notes) != 0 {
+				t.Fatal("overflow emitted confirmation effects", err)
+			}
+		})
 	}
 }

@@ -47,8 +47,8 @@ func TestAvailabilityAfterFullSyncSizedPublication(t *testing.T) {
 		if err := reader.Respond(ctx, value.ID, "bob", coord.Accepted, value.Options[0].ID); err != nil {
 			t.Fatalf("full-sync confirmation: %v", err)
 		}
-		// Two role-query appearances of this request plus two overlapping buckets.
-		if trace.documents != 4 {
+		// The suggested request reserves no time: only two overlapping buckets.
+		if trace.documents != 2 {
 			t.Fatalf("confirmation fetched unrelated projections: %d documents", trace.documents)
 		}
 		command := coord.RescheduleCommand{Action: "propose", ProposalID: "full-sync-move", ExpectedOptionID: value.Options[0].ID, StartAt: start.Add(time.Hour)}

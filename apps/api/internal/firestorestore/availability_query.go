@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/firestore"
+	coord "github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/request"
 )
 
 // Include every overlap, including long/spanning, stale and contradictory rows.
@@ -16,14 +17,31 @@ func (b *Backend) availabilityOverlapQuery(userID string, from, to time.Time) fi
 		OrderBy("StartAt", firestore.Asc).OrderBy("EndAt", firestore.Asc)
 }
 
-// CheckAvailabilityQueries verifies the actual production index before serving
-// traffic. It reads at most one document reference in a synthetic user namespace;
+// Share the exact reservation predicates between planning, transactional booking,
+// and preflight. Do not add an organization/date filter: malformed accepted
+// bookings and cross-workspace conflicts must remain visible to validation.
+func (b *Backend) acceptedReservationQuery(participant, role string) firestore.Query {
+	return b.Client.Collection("coordinationRequests").
+		Where(role, "==", participant).Where("Status", "==", coord.Accepted)
+}
+
+// CheckAvailabilityQueries verifies the actual production queries before serving
+// traffic. It reads at most three document references for a synthetic participant;
 // it never decodes data, writes records, or touches calendar tokens.
 func (store *Request) CheckAvailabilityQueries(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	from := time.Unix(0, 0).UTC()
-	_, err := store.availabilityOverlapQuery("_availability-index-probe", from, from.Add(time.Hour)).
-		Select().Limit(1).Documents(ctx).GetAll()
-	return err
+	const participant = "_availability-index-probe"
+	queries := []firestore.Query{
+		store.availabilityOverlapQuery(participant, from, from.Add(time.Hour)),
+		store.acceptedReservationQuery(participant, "RequesterUserID"),
+		store.acceptedReservationQuery(participant, "TargetUserID"),
+	}
+	for _, query := range queries {
+		if _, err := query.Select().Limit(1).Documents(ctx).GetAll(); err != nil {
+			return err
+		}
+	}
+	return nil
 }

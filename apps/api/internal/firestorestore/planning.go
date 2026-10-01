@@ -73,7 +73,7 @@ func (store *Request) LoadPlanningSources(ctx context.Context, target, requester
 	// accepted records also participate in the existing fail-closed validator.
 	for _, user := range []string{target, requester} {
 		for _, role := range []string{"TargetUserID", "RequesterUserID"} {
-			q := store.Client.Collection("coordinationRequests").Where(role, "==", user).Where("Status", "==", request.Accepted).Limit(planningBookingRoleLimit + 1)
+			q := store.acceptedReservationQuery(user, role).Limit(planningBookingRoleLimit + 1)
 			documents, err := q.Documents(ctx).GetAll()
 			if err != nil {
 				return nil, nil, err

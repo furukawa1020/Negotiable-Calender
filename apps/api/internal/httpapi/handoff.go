@@ -35,19 +35,10 @@ func (api *API) handoffRequest(response http.ResponseWriter, request *http.Reque
 			writeHandoffError(response, err)
 			return true
 		}
-		var reserved []coord.ReservedRange
-		for _, user := range []string{value.RequesterUserID, recipient} {
-			requests, err := api.requests.ListForUser(request.Context(), user)
-			if err != nil {
-				writeHandoffError(response, err)
-				return true
-			}
-			ranges, err := coord.ConfirmedRanges(requests)
-			if err != nil {
-				writeHandoffError(response, err)
-				return true
-			}
-			reserved = append(reserved, ranges...)
+		reserved, err := api.candidateReservations(request.Context(), value.RequesterUserID, recipient)
+		if err != nil {
+			writeHandoffError(response, err)
+			return true
 		}
 		options, err := coord.GenerateCandidates(coord.CandidateInput{Request: value, Projections: public, Reserved: reserved, Now: now})
 		if err != nil {

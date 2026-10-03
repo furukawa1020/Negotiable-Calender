@@ -667,19 +667,14 @@ func (api *API) createCoordinationRequest(response http.ResponseWriter, request 
 		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to generate request options"})
 		return
 	}
-	var reserved []coordinationrequest.ReservedRange
-	for _, participant := range []string{value.RequesterUserID, value.TargetUserID} {
-		confirmed, err := api.requests.ListForUser(request.Context(), participant)
-		if err != nil {
-			writeJSON(response, http.StatusServiceUnavailable, map[string]string{"error": "unable to verify confirmed meetings"})
-			return
+	reserved, err := api.candidateReservations(request.Context(), value.RequesterUserID, value.TargetUserID)
+	if err != nil {
+		status := http.StatusServiceUnavailable
+		if errors.Is(err, coordinationrequest.ErrAvailabilityChanged) {
+			status = http.StatusConflict
 		}
-		ranges, err := coordinationrequest.ConfirmedRanges(confirmed)
-		if err != nil {
-			writeJSON(response, http.StatusConflict, map[string]string{"error": "unable to verify confirmed meetings"})
-			return
-		}
-		reserved = append(reserved, ranges...)
+		writeJSON(response, status, map[string]string{"error": "unable to verify confirmed meetings"})
+		return
 	}
 	options, err := coordinationrequest.GenerateCandidates(coordinationrequest.CandidateInput{
 		Request: value, Projections: publicProjections, Reserved: reserved, Now: now,

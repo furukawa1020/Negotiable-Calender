@@ -174,6 +174,14 @@ func (store *stubRequestStore) ListForUser(_ context.Context, userID string) ([]
 	return store.values, store.err
 }
 
+func (store *stubRequestStore) LoadConfirmedRanges(_ context.Context, requester, target string) ([]coordinationrequest.ReservedRange, error) {
+	store.target = target
+	if store.err != nil {
+		return nil, store.err
+	}
+	return coordinationrequest.ConfirmedRanges(store.values)
+}
+
 func (store *stubRequestStore) GetForUser(_ context.Context, _ string, userID string) (coordinationrequest.CoordinationRequest, error) {
 	store.getUser = userID
 	if store.getErr != nil {

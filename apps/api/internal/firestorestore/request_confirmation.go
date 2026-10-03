@@ -86,11 +86,11 @@ func (store *Request) checkMeetingSlot(ctx context.Context, tx *firestore.Transa
 		for _, field := range []string{"RequesterUserID", "TargetUserID"} {
 			// Only accepted requests reserve time. Closed or suggested history must
 			// not exhaust the reservation budget; shared locks still serialize changes.
-			docs, err := tx.Documents(store.acceptedReservationQuery(participant, field).Limit(5001)).GetAll()
+			docs, err := tx.Documents(store.acceptedReservationQuery(participant, field).Limit(coordinationrequest.ReservationRoleLimit + 1)).GetAll()
 			if err != nil {
 				return err
 			}
-			if len(docs) > 5000 {
+			if len(docs) > coordinationrequest.ReservationRoleLimit {
 				return coordinationrequest.ErrAvailabilityChanged
 			}
 			for _, doc := range docs {

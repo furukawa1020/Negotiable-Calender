@@ -117,7 +117,20 @@ func checkMeetingSlotPostgres(ctx context.Context, tx *sql.Tx, value Coordinatio
 			rows.Close()
 			return err
 		}
-		if !kind.Valid || (kind.String == string(OptionMeeting) && (!start.Valid || !end.Valid || !end.Time.After(start.Time) || (selected.StartAt.Before(end.Time) && start.Time.Before(*selected.EndAt)))) {
+		// LEFT JOIN retains missing/foreign selections; pass the same validated
+		// evidence to the domain guard used by Firestore and candidate reads.
+		other := CoordinationRequest{ID: id, Status: Accepted, AcceptedOptionID: selectedID.String}
+		if kind.Valid {
+			reserved := Option{ID: selectedID.String, RequestID: id, Type: OptionType(kind.String)}
+			if start.Valid {
+				reserved.StartAt = &start.Time
+			}
+			if end.Valid {
+				reserved.EndAt = &end.Time
+			}
+			other.Options = []Option{reserved}
+		}
+		if ConflictsWithMeeting(selected, other) {
 			rows.Close()
 			return ErrBookingConflict
 		}

@@ -101,7 +101,7 @@ func (store *Request) checkMeetingSlot(ctx context.Context, tx *firestore.Transa
 				if err := doc.DataTo(&other); err != nil {
 					return err
 				}
-				if coordinationrequest.ConflictsWithMeeting(selected, other) {
+				if other.ID != doc.Ref.ID || other.Status != coordinationrequest.Accepted || coordinationrequest.ConflictsWithMeeting(selected, other) {
 					return coordinationrequest.ErrBookingConflict
 				}
 			}

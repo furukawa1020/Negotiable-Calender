@@ -69,17 +69,17 @@ func ConflictsWithMeeting(option Option, other CoordinationRequest) bool {
 	if other.Status != Accepted {
 		return false
 	}
-	for _, reserved := range other.Options {
-		if reserved.ID != other.AcceptedOptionID {
-			continue
-		}
-		if reserved.Type != OptionMeeting {
-			return false
-		}
-		if reserved.StartAt == nil || reserved.EndAt == nil || !reserved.EndAt.After(*reserved.StartAt) {
+	// Final approval must not accept weaker evidence than candidate generation.
+	// Validate identity, selection uniqueness and type before classifying a
+	// reservation as meeting/non-meeting or deciding whether its times overlap.
+	ranges, err := ReservationRanges([]CoordinationRequest{other})
+	if err != nil || option.StartAt == nil || option.EndAt == nil || !option.EndAt.After(*option.StartAt) {
+		return true
+	}
+	for _, reserved := range ranges {
+		if option.StartAt.Before(reserved.EndAt) && reserved.StartAt.Before(*option.EndAt) {
 			return true
 		}
-		return option.StartAt.Before(*reserved.EndAt) && reserved.StartAt.Before(*option.EndAt)
 	}
-	return true // Corrupt accepted records fail closed until repaired.
+	return false
 }

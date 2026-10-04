@@ -77,6 +77,11 @@ func TestFinalApprovalRejectsCorruptReservationEvidence(t *testing.T) {
 					if _, err := b.Client.Collection("organizations").Doc(event.OrganizationID).Collection("auditLogs").Doc(event.ID).Get(ctx); !firestoreNotFound(err) {
 						t.Fatal("partial audit", err)
 					}
+					for _, participant := range []string{"alice", "bob"} {
+						if _, err := b.Client.Collection("users").Doc(participant).Collection("projectionControls").Doc("coordinationConfirmation").Get(ctx); !firestoreNotFound(err) {
+							t.Fatal("failed approval wrote a reservation lock", err)
+						}
+					}
 				})
 			}
 		}

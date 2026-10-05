@@ -53,6 +53,24 @@ describe('RequestComposer', () => {
     expect(fetch.mock.calls[2][1]?.headers).not.toEqual(fetch.mock.calls[1][1]?.headers)
   })
 
+  it.each([
+    [{ code: 'creation_expired' }, '保存前に期限または候補の開始時刻を過ぎました'],
+    [{ error: 'idempotency_key_conflict' }, '送信キーと内容が一致しません'],
+    [{ error: 'unable to verify confirmed meetings' }, '候補の空き状況を確認できませんでした'],
+    [null, '候補の空き状況を確認できませんでした'],
+  ])('explains a creation conflict and preserves safe retry identity: %j', async (body, message) => {
+    const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(json({ people })).mockResolvedValueOnce(json(body, 409)).mockResolvedValueOnce(json({ options: [] }))
+    render(<RequestComposer {...props} />)
+    await fill()
+    fireEvent.click(screen.getByRole('button', { name: '候補を生成して送信' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent(String(message))
+    expect(props.onCreated).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: '候補を生成して送信' }))
+    await waitFor(() => expect(props.onCreated).toHaveBeenCalledTimes(1))
+    expect(fetch.mock.calls[2][1]?.body).toEqual(fetch.mock.calls[1][1]?.body)
+    expect(fetch.mock.calls[2][1]?.headers).toEqual(fetch.mock.calls[1][1]?.headers)
+  })
+
   it('blocks double submit while the result is pending', async () => {
     let resolve!: (value: Response) => void
     const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(json({ people })).mockImplementationOnce(() => new Promise(done => { resolve = done }))

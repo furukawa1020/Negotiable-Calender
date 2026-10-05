@@ -92,7 +92,12 @@ export function RequestComposer({ apiURL, organizationID, requesterID, initialTa
         body: attempt.current.payload,
       })
       if (!response.ok) {
-        if (response.status === 409) throw new Error('送信キーと内容が一致しません。送信済みの依頼を確認してください。')
+        if (response.status === 409) {
+          const failure = await response.json().catch(() => ({})) as { code?: string; error?: string }
+          if (failure?.code === 'creation_expired') throw new Error('保存前に期限または候補の開始時刻を過ぎました。期限を確認して再送してください。')
+          if (failure?.error === 'idempotency_key_conflict') throw new Error('送信キーと内容が一致しません。送信済みの依頼を確認してください。')
+          throw new Error('候補の空き状況を確認できませんでした。送信済みの依頼を確認し、同じ内容で再送してください。')
+        }
         if (response.status === 401 || response.status === 403) throw new Error('送信できません。ログイン状態と、双方が同じ組織に所属していることを確認してください。')
         if (response.status === 422 || response.status === 400) throw new Error('入力内容を確認してください。自己依頼や期限切れの依頼は送信できません。')
         throw new Error('送信結果を確認できません。同じ内容で再送すると重複を防げます。内容を変える前に送信済みを確認してください。')

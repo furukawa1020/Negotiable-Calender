@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"sort"
+	"time"
 )
 
 func guardCreationMembers(ctx context.Context, tx *sql.Tx, value CoordinationRequest) error {
@@ -78,6 +79,9 @@ func (store *PostgresStore) CreateOnce(ctx context.Context, value CoordinationRe
 		return false, err
 	}
 	if err := value.Validate(); err != nil {
+		return false, err
+	}
+	if err := ValidateCreationFreshness(value, time.Now().UTC()); err != nil {
 		return false, err
 	}
 	if err := insertCoordinationRequest(ctx, tx, value); err != nil {

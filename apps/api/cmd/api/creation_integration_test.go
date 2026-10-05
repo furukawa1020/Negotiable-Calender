@@ -16,6 +16,7 @@ func testPostgresCreation(t *testing.T, ctx context.Context, db *sql.DB, store *
 			t.Fatal(err)
 		}
 	}
+	testPostgresCreationFreshness(t, ctx, db, store, fixture, now)
 	t.Run("atomic-request-creation", func(t *testing.T) {
 		value := fixture("dispatch", "alice", "bob", now.Add(time.Hour))
 		type result struct {

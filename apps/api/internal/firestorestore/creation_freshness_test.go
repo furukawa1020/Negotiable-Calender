@@ -1,6 +1,7 @@
 package firestorestore
 
 import (
+	"errors"
 	"reflect"
 	"testing"
 	"time"
@@ -50,7 +51,7 @@ func TestCreationFreshnessAndExpiredReplay(t *testing.T) {
 				}
 				return
 			}
-			if created, err := b.Request().CreateOnce(ctx, value); err == nil || created {
+			if created, err := b.Request().CreateOnce(ctx, value); !errors.Is(err, coord.ErrCreationExpired) || created {
 				t.Fatal("new expired request persisted", err)
 			}
 			for _, ref := range []*firestore.DocumentRef{ref, noteRef, eventRef} {

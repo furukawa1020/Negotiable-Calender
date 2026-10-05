@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"reflect"
 	"testing"
 	"time"
@@ -41,7 +42,7 @@ func testPostgresCreationFreshness(t *testing.T, ctx context.Context, db *sql.DB
 				}
 				return
 			}
-			if created, err := store.CreateOnce(ctx, value); err == nil || created {
+			if created, err := store.CreateOnce(ctx, value); !errors.Is(err, coord.ErrCreationExpired) || created {
 				t.Fatal("new expired request persisted", err)
 			}
 			for _, query := range []string{`SELECT count(*) FROM coordination_requests WHERE id=$1`, `SELECT count(*) FROM coordination_request_options WHERE request_id=$1`, `SELECT count(*) FROM notifications WHERE request_id=$1`, `SELECT count(*) FROM audit_logs WHERE resource_id=$1`} {

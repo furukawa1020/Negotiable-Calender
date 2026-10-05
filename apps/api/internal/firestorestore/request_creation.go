@@ -2,6 +2,7 @@ package firestorestore
 
 import (
 	"context"
+	"time"
 
 	"cloud.google.com/go/firestore"
 	coordinationrequest "github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/request"
@@ -68,6 +69,9 @@ func (store *Request) CreateOnce(ctx context.Context, value coordinationrequest.
 			return err
 		}
 		if err := value.Validate(); err != nil {
+			return err
+		}
+		if err := coordinationrequest.ValidateCreationFreshness(value, time.Now().UTC()); err != nil {
 			return err
 		}
 		note, event := coordinationrequest.CreationEffects(value)

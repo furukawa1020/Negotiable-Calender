@@ -19,9 +19,13 @@ type reservationRouteStore struct {
 	reads, historyReads int
 	participants        [2]string
 	budget              time.Duration
+	cancel              context.CancelFunc
 }
 
 func (s *reservationRouteStore) LoadConfirmedRanges(ctx context.Context, requester, target string) ([]coord.ReservedRange, error) {
+	if s.cancel != nil {
+		s.cancel()
+	}
 	s.reads++
 	s.participants = [2]string{requester, target}
 	if end, ok := ctx.Deadline(); ok {
@@ -41,7 +45,7 @@ type unsupportedReservationStore struct {
 
 func TestCandidateRoutesRequireBoundedReservationSource(t *testing.T) {
 	for _, flow := range []string{"create", "handoff"} {
-		for _, scenario := range []string{"success", "unavailable", "corrupt", "unsupported"} {
+		for _, scenario := range []string{"success", "unavailable", "corrupt", "unsupported", "cancelled"} {
 			t.Run(flow+"/"+scenario, func(t *testing.T) {
 				now := time.Now().UTC()
 				base := &handoffTestStore{stubRequestStore: stubRequestStore{value: coord.CoordinationRequest{ID: "r", OrganizationID: "org", RequesterUserID: "alice", TargetUserID: "bob", Type: coord.Meeting, Title: "private title", DurationMinutes: 15, DeadlineAt: now.Add(time.Hour), SyncPreference: coord.Either, Priority: coord.PriorityNormal, Status: coord.Suggested, CreatedAt: now, UpdatedAt: now}}}
@@ -66,6 +70,12 @@ func TestCandidateRoutesRequireBoundedReservationSource(t *testing.T) {
 					wantParticipants = [2]string{"alice", "bob"}
 				}
 				r := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+				if scenario == "cancelled" {
+					ctx, cancel := context.WithCancel(r.Context())
+					defer cancel()
+					store.cancel = cancel
+					r = r.WithContext(ctx)
+				}
 				r.Header.Set("X-Demo-User-ID", actor)
 				r.Header.Set("X-Organization-ID", "org")
 				w := httptest.NewRecorder()

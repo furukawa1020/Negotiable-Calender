@@ -40,7 +40,7 @@ func (api *API) handoffRequest(response http.ResponseWriter, request *http.Reque
 			writeHandoffError(response, err)
 			return true
 		}
-		options, err := coord.GenerateCandidates(coord.CandidateInput{Request: value, Projections: public, Reserved: reserved, Now: now})
+		options, err := coord.GenerateCandidatesContext(request.Context(), coord.CandidateInput{Request: value, Projections: public, Reserved: reserved, Now: now})
 		if err != nil {
 			writeHandoffError(response, err)
 			return true

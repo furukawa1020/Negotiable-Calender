@@ -1,6 +1,7 @@
 package request
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"time"
@@ -22,9 +23,12 @@ type candidateBoundary struct {
 // Sweep interval endpoints rather than joining rows blindly. Any overlapping
 // closed/stale/unknown row vetoes that interval, just as confirmation does.
 // Duplicate rows never duplicate starts; input ordering cannot change ranking.
-func candidateSpans(input CandidateInput) ([]candidateSpan, error) {
+func candidateSpans(ctx context.Context, input CandidateInput) ([]candidateSpan, error) {
 	boundaries := make([]candidateBoundary, 0, 2*len(input.Projections))
 	for _, segment := range input.Projections {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if err := segment.Validate(); err != nil {
 			return nil, fmt.Errorf("invalid projection: %w", err)
 		}
@@ -46,8 +50,14 @@ func candidateSpans(input CandidateInput) ([]candidateSpan, error) {
 	active := map[int]int{}
 	blocked := 0
 	for i := 0; i < len(boundaries); {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		at := boundaries[i].at
 		for i < len(boundaries) && boundaries[i].at.Equal(at) {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			boundary := boundaries[i]
 			if boundary.blocked {
 				blocked += boundary.delta
@@ -74,6 +84,9 @@ func candidateSpans(input CandidateInput) ([]candidateSpan, error) {
 		} else {
 			spans = append(spans, candidateSpan{start: at, end: end, score: score})
 		}
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	return spans, nil
 }

@@ -1,6 +1,7 @@
 package request
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"sort"
@@ -11,6 +12,7 @@ import (
 )
 
 const candidateStep = 15 * time.Minute
+const CandidateGenerationTimeout = 5 * time.Second
 
 type ReservedRange struct {
 	StartAt time.Time
@@ -30,6 +32,21 @@ type scoredOption struct {
 }
 
 func GenerateCandidates(input CandidateInput) ([]Option, error) {
+	return GenerateCandidatesContext(context.Background(), input)
+}
+
+// The budget bounds cooperative computation, not source reads or reservation
+// commits. Cancellation never returns a partial ranking or an async fallback.
+func GenerateCandidatesContext(ctx context.Context, input CandidateInput) ([]Option, error) {
+	ctx, cancel := context.WithTimeout(ctx, CandidateGenerationTimeout)
+	defer cancel()
+	return generateCandidates(ctx, input)
+}
+
+func generateCandidates(ctx context.Context, input CandidateInput) ([]Option, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if err := input.Request.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid request: %w", err)
 	}
@@ -43,15 +60,25 @@ func GenerateCandidates(input CandidateInput) ([]Option, error) {
 		return nil, fmt.Errorf("request duration exceeds supported range")
 	}
 	duration := time.Duration(input.Request.DurationMinutes) * time.Minute
-	spans, err := candidateSpans(input)
+	reserved, err := buildReservationIndex(ctx, input.Reserved)
+	if err != nil {
+		return nil, err
+	}
+	spans, err := candidateSpans(ctx, input)
 	if err != nil {
 		return nil, err
 	}
 	// Retain only the best three, not every possible start in a long calendar.
 	candidates := make([]scoredOption, 0, 4)
 	for first := 0; first < len(spans); {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		last := first
 		for last+1 < len(spans) && spans[last].end.Equal(spans[last+1].start) {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			last++
 		}
 		runStart, runEnd := spans[first].start, spans[last].end
@@ -68,16 +95,25 @@ func GenerateCandidates(input CandidateInput) ([]Option, error) {
 		}
 		part := first
 		for cursor := start; !cursor.Add(duration).After(endLimit); cursor = cursor.Add(candidateStep) {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			end := cursor.Add(duration)
-			if overlapsReserved(cursor, end, input.Reserved) {
+			if reserved.overlaps(cursor, end) {
 				continue
 			}
 			for part <= last && !spans[part].end.After(cursor) {
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
 				part++
 			}
 			// The least favorable covered span determines quality, not the first bucket.
 			score := spans[part].score
 			for i := part + 1; i <= last && spans[i].start.Before(end); i++ {
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
 				score = min(score, spans[i].score)
 			}
 			score += candidateFragmentPenalty(runStart, runEnd, cursor, end)
@@ -99,6 +135,9 @@ func GenerateCandidates(input CandidateInput) ([]Option, error) {
 			}
 		}
 		first = last + 1
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	options := make([]Option, 0, len(candidates))
 	for _, candidate := range candidates {
@@ -140,15 +179,6 @@ func asyncCandidate(value CoordinationRequest, now time.Time) Option {
 		ID: value.ID + ":async", RequestID: value.ID, Type: OptionAsync,
 		ResponseBy: &responseBy, CreatedAt: now,
 	}
-}
-
-func overlapsReserved(startAt, endAt time.Time, reserved []ReservedRange) bool {
-	for _, value := range reserved {
-		if startAt.Before(value.EndAt) && value.StartAt.Before(endAt) {
-			return true
-		}
-	}
-	return false
 }
 
 func ceilCandidateStep(value time.Time) time.Time {

@@ -676,12 +676,12 @@ func (api *API) createCoordinationRequest(response http.ResponseWriter, request 
 		writeJSON(response, status, map[string]string{"error": "unable to verify confirmed meetings"})
 		return
 	}
-	options, err := coordinationrequest.GenerateCandidates(coordinationrequest.CandidateInput{
+	options, err := coordinationrequest.GenerateCandidatesContext(request.Context(), coordinationrequest.CandidateInput{
 		Request: value, Projections: publicProjections, Reserved: reserved, Now: now,
 	})
 	if err != nil {
 		api.logger.Error("generate request candidates", "error", err)
-		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to generate request options"})
+		writeJSON(response, http.StatusServiceUnavailable, map[string]string{"error": "unable to generate request options"})
 		return
 	}
 	value.Options = options

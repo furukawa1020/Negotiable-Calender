@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	calendarintegration "github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/calendar"
+	"sort"
 	"time"
 
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/projection"
@@ -94,7 +95,19 @@ func (store *PostgresStore) confirmMeeting(ctx context.Context, requestID, userI
 
 func checkMeetingSlotPostgres(ctx context.Context, tx *sql.Tx, value CoordinationRequest, selected Option) error {
 	// Serialize against source replacement, reconnect and sync state transitions.
-	if err := calendarintegration.LockCalendarTransaction(ctx, tx, value.TargetUserID); err != nil {
+	// Stable order also covers opposite-role bookings sharing the same calendars.
+	participants := []string{value.RequesterUserID, value.TargetUserID}
+	sort.Strings(participants)
+	for _, participant := range participants {
+		if err := calendarintegration.LockCalendarTransaction(ctx, tx, participant); err != nil {
+			return err
+		}
+	}
+	requesterSource, err := calendarintegration.CheckBusyPostgres(ctx, tx, value.RequesterUserID, *selected.StartAt, *selected.EndAt)
+	if errors.Is(err, calendarintegration.ErrSourceUnavailable) {
+		return ErrAvailabilityChanged
+	}
+	if err != nil {
 		return err
 	}
 	source, err := calendarintegration.ReadSourcePostgres(ctx, tx, value.TargetUserID)
@@ -159,7 +172,7 @@ func checkMeetingSlotPostgres(ctx context.Context, tx *sql.Tx, value Coordinatio
 	}
 	rows.Close()
 	now := time.Now().UTC()
-	if !source.Readable(now) {
+	if !source.Readable(now) || !requesterSource.PrivateReadable(*selected.StartAt, *selected.EndAt, now) {
 		return ErrAvailabilityChanged
 	}
 	if _, err := ConfirmableMeeting(value, selected.ID, now); err != nil {

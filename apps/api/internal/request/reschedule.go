@@ -46,22 +46,25 @@ func ApplyReschedule(value *CoordinationRequest, actor string, command Reschedul
 	if actor == "" || (actor != value.RequesterUserID && actor != value.TargetUserID) {
 		return ErrNotFound
 	}
-	if value.Status != Accepted || !proposalIDPattern.MatchString(command.ProposalID) {
+	if (value.Status != Accepted && value.Status != Cancelled && value.Status != Completed) || !proposalIDPattern.MatchString(command.ProposalID) {
 		return ErrRescheduleInvalid
 	}
 	p := value.RescheduleProposal
+	if p != nil && p.ID == command.ProposalID && !validRescheduleReplayEvidence(*value, *p) {
+		return ErrRescheduleInvalid
+	}
 	if command.Action == "propose" {
 		// Match the timestamp precision shared by PostgreSQL and Firestore.
 		command.StartAt = command.StartAt.UTC().Truncate(time.Microsecond)
 		if p != nil && p.ID == command.ProposalID {
 			for _, option := range value.Options {
-				if option.ID == p.ID && option.StartAt != nil && option.StartAt.Equal(command.StartAt) && p.ProposerUserID == actor && p.ExpectedOptionID == command.ExpectedOptionID && p.Status == "proposed" {
+				if option.ID == p.ID && option.StartAt != nil && option.StartAt.Equal(command.StartAt) && p.ProposerUserID == actor && p.ExpectedOptionID == command.ExpectedOptionID {
 					return ErrRescheduleRepeated
 				}
 			}
 			return ErrRescheduleInvalid
 		}
-		if (p != nil && p.Status == "proposed") || len(value.Options) >= 100 {
+		if value.Status != Accepted || (p != nil && p.Status == "proposed") || len(value.Options) >= 100 {
 			return ErrRescheduleInvalid
 		}
 		if err := ValidateConfirmedCancellation(*value, actor, command.ExpectedOptionID, now); err != nil {
@@ -113,7 +116,7 @@ func ApplyReschedule(value *CoordinationRequest, actor string, command Reschedul
 	if p.Status == terminal {
 		return ErrRescheduleRepeated
 	}
-	if p.Status != "proposed" || value.AcceptedOptionID != p.ExpectedOptionID {
+	if value.Status != Accepted || p.Status != "proposed" || value.AcceptedOptionID != p.ExpectedOptionID {
 		return ErrRescheduleInvalid
 	}
 	if command.Action == "accept" {
@@ -130,6 +133,42 @@ func ApplyReschedule(value *CoordinationRequest, actor string, command Reschedul
 	value.RescheduleProposal = &copy
 	value.UpdatedAt = now
 	return nil
+}
+
+// Only the currently retained proposal is replayable; this is not a historical
+// command ledger. Validate immutable evidence before recovering a saved result,
+// including after cancellation. Replays must never revive a reservation.
+func validRescheduleReplayEvidence(value CoordinationRequest, p RescheduleProposal) bool {
+	if p.ID == p.ExpectedOptionID || (p.ProposerUserID != value.RequesterUserID && p.ProposerUserID != value.TargetUserID) {
+		return false
+	}
+	expected := p.ExpectedOptionID
+	switch p.Status {
+	case "accepted":
+		expected = p.ID
+	case "proposed", "declined", "withdrawn":
+	default:
+		return false
+	}
+	if value.AcceptedOptionID != expected {
+		return false
+	}
+	for _, id := range []string{p.ID, p.ExpectedOptionID} {
+		matches := 0
+		for _, option := range value.Options {
+			if option.ID != id {
+				continue
+			}
+			matches++
+			if option.RequestID != value.ID || option.Type != OptionMeeting || option.Validate() != nil {
+				return false
+			}
+		}
+		if matches != 1 {
+			return false
+		}
+	}
+	return true
 }
 
 func RescheduleEffects(value CoordinationRequest, actor, action string, now time.Time) (notification.Notification, audit.Event) {

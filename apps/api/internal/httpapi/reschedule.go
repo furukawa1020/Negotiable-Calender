@@ -34,10 +34,14 @@ func (api *API) rescheduleMeeting(response http.ResponseWriter, request *http.Re
 	id := request.PathValue("requestId")
 	err := store.RescheduleInOrganization(request.Context(), id, actor, org, input)
 	if err == nil || errors.Is(err, coordinationrequest.ErrRescheduleRepeated) {
+		replayed := errors.Is(err, coordinationrequest.ErrRescheduleRepeated)
 		value, err := api.requests.GetForUser(request.Context(), id, actor)
 		if err != nil {
 			writeJSON(response, 503, map[string]string{"error": "refresh request to confirm result"})
 			return
+		}
+		if replayed {
+			response.Header().Set("Idempotency-Replayed", "true")
 		}
 		writeJSON(response, 200, value)
 		return

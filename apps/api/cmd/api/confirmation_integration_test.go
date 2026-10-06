@@ -74,6 +74,7 @@ func TestPostgresAtomicConfirmation(t *testing.T) {
 	testPostgresWorkspaceLists(t, ctx, db, store, fixture, now)
 	testPostgresConfirmationEffects(t, ctx, db, store, fixture, now)
 	testPostgresCreation(t, ctx, db, store, fixture, now)
+	testPostgresRescheduleReplay(t, ctx, db, store, fixture, now)
 	testPostgresResolution(t, ctx, db, store, fixture, now)
 	testPostgresHandoff(t, ctx, db, store, fixture, now)
 	testPostgresCounterproposal(t, ctx, db, store, fixture, now)

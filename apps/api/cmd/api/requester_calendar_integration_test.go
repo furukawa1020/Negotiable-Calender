@@ -62,7 +62,7 @@ func testPostgresRequesterCalendar(t *testing.T, ctx context.Context, db *sql.DB
 			}
 			exec(`INSERT INTO calendar_source_snapshots(user_id,snapshot) VALUES('alice',$1)`, data)
 			if scenario != "disconnect" {
-				exec(`INSERT INTO calendar_connections(user_id,refresh_token_cipher,connected_at,last_synced_at) VALUES('alice','synthetic',$1,$1)`, observed)
+				exec(`INSERT INTO calendar_connections(user_id,refresh_token_cipher,granted_scopes,connected_at,last_synced_at) VALUES('alice','synthetic','',$1,$1)`, observed)
 			}
 			if scenario == "syncing" {
 				exec(`UPDATE calendar_connections SET sync_lease_id='in-flight' WHERE user_id='alice'`)

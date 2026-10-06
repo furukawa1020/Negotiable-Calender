@@ -2,6 +2,7 @@ package firestorestore
 
 import (
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
@@ -12,7 +13,7 @@ import (
 )
 
 func TestRequesterCalendarGuardsConfirmationAndReschedule(t *testing.T) {
-	for _, scenario := range []string{"busy", "free", "adjacent", "empty", "stale", "syncing", "failed", "unknown", "outside", "incomplete", "disconnect", "foreign", "invalid-time", "invalid-status", "reschedule-busy", "reschedule-stale"} {
+	for _, scenario := range []string{"busy", "free", "adjacent", "empty", "stale", "syncing", "failed", "unknown", "outside", "incomplete", "disconnect", "blocked", "foreign", "invalid-time", "invalid-status", "limit", "overflow", "reschedule-busy", "reschedule-stale"} {
 		t.Run(scenario, func(t *testing.T) {
 			b, ctx := emulatorBackend(t)
 			now := time.Now().UTC().Truncate(time.Microsecond)
@@ -43,13 +44,16 @@ func TestRequesterCalendarGuardsConfirmationAndReschedule(t *testing.T) {
 			snapshot := cal.SourceSnapshot{Revision: "requester-revision", ObservedAt: observed, From: now.Add(-time.Hour), To: now.Add(24 * time.Hour)}
 			connection := cal.Connection{UserID: "alice", LastSyncedAt: &observed}
 			inputs := privateInputsControl{ID: snapshot.Revision, Ready: true, Source: &snapshot}
-			event := privateEventRecord{UserID: "alice", StartAt: start, EndAt: start.Add(30 * time.Minute), BusyStatus: privateevent.Busy}
-			allowed := scenario == "free" || scenario == "adjacent" || scenario == "empty"
+			event := privateEventRecord{UserID: "alice", StartAt: start, EndAt: start.Add(30 * time.Minute), BusyStatus: privateevent.Free}
+			allowed := scenario == "free" || scenario == "adjacent" || scenario == "empty" || scenario == "limit"
 			switch scenario {
+			case "busy", "reschedule-busy":
+				event.BusyStatus = privateevent.Busy
 			case "free":
 				event.BusyStatus = privateevent.Free
 			case "adjacent":
 				event.EndAt, event.StartAt = start, start.Add(-time.Hour)
+				event.BusyStatus = privateevent.Busy
 			case "stale", "reschedule-stale":
 				snapshot.ObservedAt = now.Add(-cal.SourceMaxAge)
 				connection.LastSyncedAt = &snapshot.ObservedAt
@@ -63,6 +67,8 @@ func TestRequesterCalendarGuardsConfirmationAndReschedule(t *testing.T) {
 				snapshot.To = start.Add(time.Minute)
 			case "incomplete":
 				inputs.Ready = false
+			case "blocked":
+				putDocument(t, ctx, b.projectionBlock("alice"), map[string]any{"Blocked": true})
 			case "foreign":
 				event.UserID = "carol"
 			case "invalid-time":
@@ -74,7 +80,22 @@ func TestRequesterCalendarGuardsConfirmationAndReschedule(t *testing.T) {
 			if scenario != "disconnect" {
 				putDocument(t, ctx, b.Client.Collection("calendarConnections").Doc("alice"), connection)
 			}
-			if scenario != "empty" {
+			if scenario == "limit" || scenario == "overflow" {
+				count := 5000
+				if scenario == "overflow" {
+					count++
+				}
+				batch := b.Client.Batch()
+				for i := 0; i < count; i++ {
+					batch.Set(b.Client.Collection("users").Doc("alice").Collection("privateEvents").Doc(fmt.Sprintf("synthetic-%05d", i)), event)
+					if (i+1)%400 == 0 || i == count-1 {
+						if _, err := batch.Commit(ctx); err != nil {
+							t.Fatal(err)
+						}
+						batch = b.Client.Batch()
+					}
+				}
+			} else if scenario != "empty" {
 				putDocument(t, ctx, b.Client.Collection("users").Doc("alice").Collection("privateEvents").Doc("synthetic"), event)
 			}
 			before, err := store.GetForUser(ctx, v.ID, "alice")

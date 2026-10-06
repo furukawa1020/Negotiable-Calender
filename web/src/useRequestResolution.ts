@@ -20,7 +20,7 @@ async function readCommandError(response: Response, acceptance: boolean): Promis
       const messages: Record<string, string> = {
         candidate_expired: 'この候補は開始済み、または依頼の期限外です。新しい日時で依頼・提案してください。',
         candidate_invalid: 'この候補は会議として確定できません。別の時間を提案してください。',
-        availability_changed: '公開された対応可能時間が変わったか、同期を確認できません。同期・更新後に別の時間を提案してください。',
+        availability_changed: '対応可能時間が変わったか、参加者のカレンダーの空き状況・同期を確認できません。各自のカレンダーを同期・更新後に別の時間を提案してください。',
         booking_conflict: '重なる確定済みの調整、または同時更新を検出しました。更新して確認し、必要なら別の時間を提案してください。',
       }
       throw new CommandError(Object.hasOwn(messages, code) ? messages[code] : '依頼の状態が変わりました。更新して確認してください。')

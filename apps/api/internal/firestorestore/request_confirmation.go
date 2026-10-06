@@ -75,6 +75,10 @@ func (store *Request) confirmMeeting(ctx context.Context, requestID, userID, org
 // Reads the conflict/publication snapshot, then writes only the shared participant locks.
 // Callers must finish all other transaction reads before calling this helper.
 func (store *Request) checkMeetingSlot(ctx context.Context, tx *firestore.Transaction, value coordinationrequest.CoordinationRequest, selected coordinationrequest.Option) error {
+	requesterSource, err := store.requesterCalendar(ctx, tx, value.RequesterUserID, *selected.StartAt, *selected.EndAt)
+	if err != nil {
+		return err
+	}
 	// Both roles share the same per-person serialization document across all orgs.
 	locks := []*firestore.DocumentRef{}
 	for _, participant := range []string{value.RequesterUserID, value.TargetUserID} {
@@ -112,6 +116,9 @@ func (store *Request) checkMeetingSlot(ctx context.Context, tx *firestore.Transa
 		return err
 	}
 	now := time.Now().UTC()
+	if !requesterSource.PrivateReadable(*selected.StartAt, *selected.EndAt, now) {
+		return coordinationrequest.ErrAvailabilityChanged
+	}
 	if _, err := coordinationrequest.ConfirmableMeeting(value, selected.ID, now); err != nil {
 		return err
 	}

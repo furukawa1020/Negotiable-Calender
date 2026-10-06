@@ -14,7 +14,7 @@ import (
 )
 
 func testPostgresRequesterCalendar(t *testing.T, ctx context.Context, db *sql.DB, store *coord.PostgresStore, fixture func(string, string, string, time.Time) coord.CoordinationRequest, now time.Time) {
-	for _, scenario := range []string{"busy", "free", "adjacent", "empty", "stale", "syncing", "failed", "unknown", "outside", "disconnect", "invalid-time", "invalid-status", "reschedule-busy", "reschedule-stale"} {
+	for _, scenario := range []string{"busy", "free", "adjacent", "empty", "stale", "syncing", "failed", "unknown", "outside", "disconnect", "invalid-time", "invalid-status", "limit", "overflow", "reschedule-busy", "reschedule-stale"} {
 		t.Run("requester-calendar/"+scenario, func(t *testing.T) {
 			exec := func(q string, args ...any) {
 				t.Helper()
@@ -70,12 +70,16 @@ func testPostgresRequesterCalendar(t *testing.T, ctx context.Context, db *sql.DB
 			if scenario == "failed" {
 				exec(`UPDATE calendar_connections SET last_error_code='timeout' WHERE user_id='alice'`)
 			}
-			end, busy := start.Add(30*time.Minute), "busy"
+			end, busy := start.Add(30*time.Minute), "free"
+			if scenario == "busy" || scenario == "reschedule-busy" {
+				busy = "busy"
+			}
 			if scenario == "free" {
 				busy = "free"
 			}
 			if scenario == "adjacent" {
 				end, start = start, start.Add(-time.Hour)
+				busy = "busy"
 			}
 			if scenario == "invalid-time" {
 				end = start
@@ -83,7 +87,13 @@ func testPostgresRequesterCalendar(t *testing.T, ctx context.Context, db *sql.DB
 			if scenario == "invalid-status" {
 				busy = "corrupt"
 			}
-			if scenario != "empty" {
+			if scenario == "limit" || scenario == "overflow" {
+				count := 5000
+				if scenario == "overflow" {
+					count++
+				}
+				exec(`INSERT INTO private_events(user_id,provider_event_id,calendar_id,start_at,end_at,busy_status,visibility,created_at,updated_at) SELECT 'alice','synthetic-'||i,'primary',$1,$2,'free','default',$3,$3 FROM generate_series(1,$4::int) i`, start, end, now, count)
+			} else if scenario != "empty" {
 				exec(`INSERT INTO private_events(user_id,provider_event_id,calendar_id,start_at,end_at,busy_status,visibility,created_at,updated_at) VALUES('alice','synthetic','primary',$1,$2,$3,'default',$4,$4)`, start, end, busy, now)
 			}
 			before, err := store.GetForUser(ctx, v.ID, "alice")
@@ -96,7 +106,7 @@ func testPostgresRequesterCalendar(t *testing.T, ctx context.Context, db *sql.DB
 			} else {
 				err = store.ConfirmMeeting(ctx, v.ID, "bob", "org", v.Options[0].ID)
 			}
-			allowed := scenario == "free" || scenario == "adjacent" || scenario == "empty"
+			allowed := scenario == "free" || scenario == "adjacent" || scenario == "empty" || scenario == "limit"
 			if allowed && err != nil {
 				t.Fatal("free requester blocked", err)
 			}

@@ -74,8 +74,37 @@ Firestore control cleanup). Cancellation of already-confirmed meetings remains
 possible without a fresh source; accepted meetings are not automatically cancelled.
 
 The target's imported availability is covered here. This is not a reservation in
-Google, an instantaneous external change detector, or a new check of the requester's
-private Google events. Real-account OAuth acceptance remains #76.
+Google or an instantaneous external change detector. Real-account OAuth acceptance
+remains #76.
+
+## Requester calendar at final acceptance (#203)
+
+Confirmation and reschedule acceptance also check the requester's saved private
+busy spans inside the booking transaction. A calendar-managed requester needs a
+fresh, committed source receipt covering the entire meeting. Sync-in-progress,
+incomplete writes, failed sync, reconnect, disconnect and unknown receipts fail
+closed. This check does not require the requester to publish incoming-request
+availability or have a manager policy. Never-connected accounts retain the
+policy-only behavior; that is not proof of external calendar availability.
+
+Only time ranges and busy/free status are read, with an owner check in Firestore.
+Busy, tentative and unknown spans block overlaps; free spans and exactly adjacent
+events do not. Event names, provider IDs, descriptions and attendee details are not
+read or returned. Refusal uses the existing generic `availability_changed` result,
+without indicating whose calendar or which event caused it. Both stores examine at
+most 5,001 minimal records from the synced cache: more than 5,000 or malformed
+evidence refuses acceptance instead of interpreting an incomplete set as free.
+The budget includes the entire cache, not only overlapping events. This bounded,
+conservative first version needs no new index or external API call.
+
+PostgreSQL locks both participants' calendar lifecycles in stable user-ID order.
+Firestore reads requester connection/input/block controls before any booking
+writes; source changes participate in its transaction retry checks. Freshness is
+checked again after the target availability/conflict reads. Rejected reschedules
+keep the original reservation and create no acceptance effects. Already-saved
+confirmation/reschedule retries and cancellation do not acquire a new freshness
+requirement. Candidate generation does not yet filter the requester's external
+busy spans: suggestions remain provisional and final acceptance is authoritative.
 
 ## Verification
 

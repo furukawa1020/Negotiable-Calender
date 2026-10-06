@@ -30,6 +30,7 @@ func testPostgresRescheduleReplay(t *testing.T, ctx context.Context, db *sql.DB,
 				if err := store.Create(ctx, value); err != nil {
 					t.Fatal(err)
 				}
+				exec(`UPDATE coordination_requests SET accepted_option_id=$1 WHERE id=$2`, value.AcceptedOptionID, value.ID)
 				proposal := coord.RescheduleCommand{Action: "propose", ProposalID: "replay-proposal", ExpectedOptionID: value.AcceptedOptionID, StartAt: now.Add(8 * time.Hour)}
 				if err := store.RescheduleInOrganization(ctx, value.ID, "alice", "org", proposal); err != nil {
 					t.Fatal(err)

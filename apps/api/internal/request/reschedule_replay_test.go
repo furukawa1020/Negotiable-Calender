@@ -10,8 +10,8 @@ import (
 func TestRescheduleReplaySurvivesResolutionAndCancellation(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	for _, action := range []string{"accept", "decline", "withdraw"} {
-		for _, closed := range []bool{false, true} {
-			t.Run(action+"/"+map[bool]string{false: "accepted", true: "cancelled"}[closed], func(t *testing.T) {
+		for _, status := range []Status{Accepted, Cancelled, Completed} {
+			t.Run(action+"/"+string(status), func(t *testing.T) {
 				value := rescheduleFixture(now)
 				proposal := RescheduleCommand{Action: "propose", ProposalID: "proposal-replay", ExpectedOptionID: "original", StartAt: now.Add(2 * time.Hour)}
 				if err := ApplyReschedule(&value, "alice", proposal, now); err != nil {
@@ -25,9 +25,7 @@ func TestRescheduleReplaySurvivesResolutionAndCancellation(t *testing.T) {
 				if err := ApplyReschedule(&value, actor, resolution, now); err != nil {
 					t.Fatal(err)
 				}
-				if closed {
-					value.Status = Cancelled
-				}
+				value.Status = status
 				before := value
 				before.Options = append([]Option{}, value.Options...)
 				beforeProposal := *value.RescheduleProposal

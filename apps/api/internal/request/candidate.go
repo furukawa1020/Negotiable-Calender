@@ -7,6 +7,7 @@ import (
 	"sort"
 	"time"
 
+	cal "github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/calendar"
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/policy"
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/projection"
 )
@@ -20,10 +21,11 @@ type ReservedRange struct {
 }
 
 type CandidateInput struct {
-	Request     CoordinationRequest
-	Projections []projection.ScheduleProjection
-	Reserved    []ReservedRange
-	Now         time.Time
+	Request           CoordinationRequest
+	Projections       []projection.ScheduleProjection
+	Reserved          []ReservedRange
+	Now               time.Time
+	RequesterCalendar *cal.CandidateAvailability
 }
 
 type scoredOption struct {

@@ -14,6 +14,17 @@ import (
 )
 
 func testPostgresRequesterCalendar(t *testing.T, ctx context.Context, db *sql.DB, store *coord.PostgresStore, fixture func(string, string, string, time.Time) coord.CoordinationRequest, now time.Time) {
+	if got, err := store.LoadRequesterCalendar(ctx, "missing"); err == nil || got.Validate(now) == nil {
+		t.Fatal("missing requester treated as free")
+	}
+	if got, err := store.LoadRequesterCalendar(ctx, "alice"); err != nil || !got.Allows(now, now.Add(time.Hour), now) {
+		t.Fatal("never-connected requester blocked", err)
+	}
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	if got, err := store.LoadRequesterCalendar(cancelled, "alice"); err == nil || got.Validate(now) == nil {
+		t.Fatal("cancelled source returned usable data")
+	}
 	for _, scenario := range []string{"busy", "free", "adjacent", "empty", "stale", "syncing", "failed", "unknown", "outside", "disconnect", "invalid-time", "invalid-status", "limit", "overflow", "reschedule-busy", "reschedule-stale"} {
 		t.Run("requester-calendar/"+scenario, func(t *testing.T) {
 			exec := func(q string, args ...any) {
@@ -96,6 +107,19 @@ func testPostgresRequesterCalendar(t *testing.T, ctx context.Context, db *sql.DB
 			} else if scenario != "empty" {
 				exec(`INSERT INTO private_events(user_id,provider_event_id,calendar_id,start_at,end_at,busy_status,visibility,created_at,updated_at) VALUES('alice','synthetic','primary',$1,$2,$3,'default',$4,$4)`, start, end, busy, now)
 			}
+			candidateSnapshot, candidateErr := store.LoadRequesterCalendar(ctx, "alice")
+			wantAllowed := scenario == "free" || scenario == "adjacent" || scenario == "empty" || scenario == "limit"
+			wantSource := wantAllowed || scenario == "busy" || scenario == "reschedule-busy" || scenario == "outside"
+			if (candidateErr == nil) != wantSource {
+				t.Fatal("candidate source result", candidateErr)
+			}
+			candidateStart := *v.Options[0].StartAt
+			if rescheduling {
+				candidateStart = command.StartAt
+			}
+			if candidateErr == nil && candidateSnapshot.Allows(candidateStart, candidateStart.Add(30*time.Minute), time.Now().UTC()) != wantAllowed {
+				t.Fatal("candidate source slot predicate")
+			}
 			before, err := store.GetForUser(ctx, v.ID, "alice")
 			if err != nil {
 				t.Fatal(err)
@@ -135,6 +159,9 @@ func testPostgresRequesterCalendar(t *testing.T, ctx context.Context, db *sql.DB
 			}
 			if allowed {
 				exec(`UPDATE calendar_connections SET last_error_code='timeout' WHERE user_id='alice'`)
+				if got, err := store.LoadRequesterCalendar(ctx, "alice"); err == nil || got.Validate(time.Now().UTC()) == nil {
+					t.Fatal("changed source reused old successful read")
+				}
 				if err := store.ConfirmMeeting(ctx, v.ID, "bob", "org", v.Options[0].ID); !errors.Is(err, coord.ErrAlreadyAccepted) {
 					t.Fatal("saved confirmation blocked", err)
 				}

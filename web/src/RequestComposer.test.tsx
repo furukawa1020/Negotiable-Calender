@@ -55,6 +55,7 @@ describe('RequestComposer', () => {
 
   it.each([
     [{ code: 'creation_expired' }, '保存前に期限または候補の開始時刻を過ぎました'],
+    [{ code: 'availability_changed' }, 'カレンダーを同期・更新して、同じ内容で再送'],
     [{ error: 'idempotency_key_conflict' }, '送信キーと内容が一致しません'],
     [{ error: 'unable to verify confirmed meetings' }, '候補の空き状況を確認できませんでした'],
     [null, '候補の空き状況を確認できませんでした'],

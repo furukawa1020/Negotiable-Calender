@@ -40,7 +40,7 @@ func (api *API) handoffRequest(response http.ResponseWriter, request *http.Reque
 			writeHandoffError(response, err)
 			return true
 		}
-		options, err := coord.GenerateCandidatesContext(request.Context(), coord.CandidateInput{Request: value, Projections: public, Reserved: reserved, Now: now})
+		options, err := api.generateRequestCandidates(request.Context(), value, public, reserved, now)
 		if err != nil {
 			writeHandoffError(response, err)
 			return true
@@ -62,6 +62,8 @@ func (api *API) handoffRequest(response http.ResponseWriter, request *http.Reque
 func writeHandoffError(response http.ResponseWriter, err error) {
 	status, message, code := 503, "unable to confirm handoff; retry the same recipient", "handoff_unavailable"
 	switch {
+	case errors.Is(err, coord.ErrAvailabilityChanged):
+		status, message, code = 409, "unable to verify calendar availability; sync and retry", "availability_changed"
 	case errors.Is(err, coord.ErrNotFound):
 		status, message, code = 404, "coordination request not found", "not_found"
 	case errors.Is(err, coord.ErrCreationForbidden):

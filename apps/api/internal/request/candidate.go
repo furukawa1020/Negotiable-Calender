@@ -7,6 +7,7 @@ import (
 	"sort"
 	"time"
 
+	cal "github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/calendar"
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/policy"
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/projection"
 )
@@ -20,10 +21,11 @@ type ReservedRange struct {
 }
 
 type CandidateInput struct {
-	Request     CoordinationRequest
-	Projections []projection.ScheduleProjection
-	Reserved    []ReservedRange
-	Now         time.Time
+	Request           CoordinationRequest
+	Projections       []projection.ScheduleProjection
+	Reserved          []ReservedRange
+	Now               time.Time
+	RequesterCalendar *cal.CandidateAvailability
 }
 
 type scoredOption struct {
@@ -55,6 +57,9 @@ func generateCandidates(ctx context.Context, input CandidateInput) ([]Option, er
 	}
 	if input.Request.SyncPreference == AsyncPreferred {
 		return []Option{asyncCandidate(input.Request, input.Now)}, nil
+	}
+	if input.RequesterCalendar != nil && input.RequesterCalendar.Validate(input.Now) != nil {
+		return nil, ErrAvailabilityChanged
 	}
 	if int64(input.Request.DurationMinutes) > math.MaxInt64/int64(time.Minute) {
 		return nil, fmt.Errorf("request duration exceeds supported range")
@@ -99,6 +104,9 @@ func generateCandidates(ctx context.Context, input CandidateInput) ([]Option, er
 				return nil, err
 			}
 			end := cursor.Add(duration)
+			if input.RequesterCalendar != nil && !input.RequesterCalendar.Allows(cursor, end, input.Now) {
+				continue
+			}
 			if reserved.overlaps(cursor, end) {
 				continue
 			}

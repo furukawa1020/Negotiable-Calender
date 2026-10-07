@@ -95,6 +95,7 @@ export function RequestComposer({ apiURL, organizationID, requesterID, initialTa
         if (response.status === 409) {
           const failure = await response.json().catch(() => ({})) as { code?: string; error?: string }
           if (failure?.code === 'creation_expired') throw new Error('保存前に期限または候補の開始時刻を過ぎました。期限を確認して再送してください。')
+          if (failure?.code === 'availability_changed') throw new Error('カレンダーの空き状況を確認できません。カレンダーを同期・更新して、同じ内容で再送してください。')
           if (failure?.error === 'idempotency_key_conflict') throw new Error('送信キーと内容が一致しません。送信済みの依頼を確認してください。')
           throw new Error('候補の空き状況を確認できませんでした。送信済みの依頼を確認し、同じ内容で再送してください。')
         }

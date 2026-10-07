@@ -19,6 +19,7 @@ func TestRequesterCalendarGuardsConfirmationAndReschedule(t *testing.T) {
 			now := time.Now().UTC().Truncate(time.Microsecond)
 			v := confirmationRequest("requester-calendar", "alice", "bob", now, now.Add(time.Hour))
 			store := b.Request()
+			putDocument(t, ctx, b.Client.Collection("users").Doc("alice"), userRecord{ID: "alice"})
 			if err := store.Create(ctx, v); err != nil {
 				t.Fatal(err)
 			}
@@ -97,6 +98,14 @@ func TestRequesterCalendarGuardsConfirmationAndReschedule(t *testing.T) {
 				}
 			} else if scenario != "empty" {
 				putDocument(t, ctx, b.Client.Collection("users").Doc("alice").Collection("privateEvents").Doc("synthetic"), event)
+			}
+			candidateSnapshot, candidateErr := store.LoadRequesterCalendar(ctx, "alice")
+			wantSource := allowed || scenario == "busy" || scenario == "reschedule-busy" || scenario == "outside"
+			if (candidateErr == nil) != wantSource {
+				t.Fatal("candidate source result", candidateErr)
+			}
+			if candidateErr == nil && candidateSnapshot.Allows(start, start.Add(30*time.Minute), time.Now().UTC()) != allowed {
+				t.Fatal("candidate source slot predicate")
 			}
 			before, err := store.GetForUser(ctx, v.ID, "alice")
 			if err != nil {

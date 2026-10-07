@@ -87,7 +87,7 @@ func TestCandidateRoutesRequireBoundedReservationSource(t *testing.T) {
 						want = 201
 					}
 				}
-				if scenario == "corrupt" && flow == "create" {
+				if scenario == "corrupt" {
 					want = 409
 				}
 				if w.Code != want || store.historyReads != 0 || strings.Contains(w.Body.String(), "private database") {

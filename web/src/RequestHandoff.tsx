@@ -52,6 +52,13 @@ export function RequestHandoff({ apiURL, organizationID, actor, requestID, reque
         body: JSON.stringify({ delegateUserId: target }),
       })
       if (!response.ok) {
+        if (response.status === 409) {
+          const failure: unknown = await response.json().catch(() => null)
+          if (failure && typeof failure === 'object' && 'code' in failure && failure.code === 'availability_changed') {
+            if (alive.current) setError('参加者のカレンダーの空き状況を確認できません。各自のカレンダーを同期・更新後、同じ相手への引継ぎを再試行してください。')
+            return
+          }
+        }
         if ([400, 401, 403, 404, 409].includes(response.status)) {
           if (alive.current) setError('引継ぎできません。期限・所属・最新の担当を一覧で確認してください。引継ぎは1回までです。')
           return

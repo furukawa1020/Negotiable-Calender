@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/audit"
+	cal "github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/calendar"
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/notification"
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/organization"
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/policy"
@@ -23,6 +24,10 @@ import (
 
 type stubDatabase struct {
 	err error
+}
+
+func (store *stubRequestStore) LoadRequesterCalendar(context.Context, string) (cal.CandidateAvailability, error) {
+	return cal.NewCandidateAvailability(cal.SourceState{}, nil, time.Now().UTC())
 }
 
 type stubPolicyStore struct {

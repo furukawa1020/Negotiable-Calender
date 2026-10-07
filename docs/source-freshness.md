@@ -103,8 +103,37 @@ writes; source changes participate in its transaction retry checks. Freshness is
 checked again after the target availability/conflict reads. Rejected reschedules
 keep the original reservation and create no acceptance effects. Already-saved
 confirmation/reschedule retries and cancellation do not acquire a new freshness
-requirement. Candidate generation does not yet filter the requester's external
-busy spans: suggestions remain provisional and final acceptance is authoritative.
+requirement. Suggestions remain provisional and final acceptance is authoritative.
+
+## Requester filtering before candidate ranking (#205)
+
+New requests and handoff candidate regeneration load an immutable private decision
+snapshot from the requester's stored calendar. Firestore uses a read-only
+transaction (including the account-deletion, input, connection and disconnect
+controls); PostgreSQL uses a read-only repeatable-read transaction. Source and
+minimal busy records therefore come from one coherent snapshot. Reads retain the
+5,000-record cap with an overflow sentinel and a 10-second budget, without new
+indexes. Missing users, failed reads, incomplete sync, invalid or stale evidence,
+and overflow cannot fall back to an unconnected/free calendar.
+
+The generator filters occupied slots and times outside proven source coverage
+before selecting the best three candidates. Only the overlapping proven part of
+the request window is usable; a deadline beyond coverage does not discard valid
+earlier slots. Busy intervals are copied, sorted and merged once for logarithmic
+lookup. Free intervals and touching boundaries retain their existing semantics.
+Source observation freshness is rechecked before and after generation. A valid
+source with no meeting slot uses the existing asynchronous alternative; a failed
+source instead returns a generic availability error before creating/handoffing the
+request. The UI advises sync and same-command retry without displaying provider
+errors, event details or identifying the blocking event.
+
+Saved create/handoff replays bypass new source reads, and explicitly async-preferred
+requests do not acquire a calendar dependency. Never-connected users preserve
+existing behavior. The private snapshot exposes only slot decisions, refuses JSON
+serialization and retains neither event identifiers/details nor connection tokens.
+It is not a reservation: a sync, new booking or policy update after the snapshot can
+still invalidate candidates. Existing transactional confirmation/reschedule checks
+remain mandatory. AI planning and external-calendar writes are unchanged.
 
 ## Verification
 

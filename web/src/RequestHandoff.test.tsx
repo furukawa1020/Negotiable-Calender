@@ -11,6 +11,18 @@ async function select() {
   await screen.findByRole('option', { name: '引継ぎ担当' })
   fireEvent.change(screen.getByLabelText('引継ぎ先'), { target: { value: 'carol' } })
 }
+
+it('explains unavailable calendar evidence without leaking details and retries the same recipient', async () => {
+  const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(json({ people })).mockResolvedValueOnce(json({ code: 'availability_changed', error: 'PRIVATE_EVENT_DETAIL' }, 409)).mockResolvedValueOnce(json({ id: 'r', handedOff: true, delegatedUserId: 'carol' }))
+  render(<RequestHandoff {...props} />); await select()
+  fireEvent.click(screen.getByRole('button', { name: 'この相手へ引き継ぐ' }))
+  expect(await screen.findByRole('alert')).toHaveTextContent('各自のカレンダーを同期・更新後')
+  expect(screen.queryByText(/PRIVATE_EVENT_DETAIL/)).not.toBeInTheDocument()
+  expect(props.onDone).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button', { name: 'この相手へ引き継ぐ' }))
+  await waitFor(() => expect(props.onDone).toHaveBeenCalledTimes(1))
+  expect(fetch.mock.calls[1][1]?.body).toBe(fetch.mock.calls[2][1]?.body)
+})
 it('loads on demand, excludes self and requester, and acknowledges the actual recipient', async () => {
   const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(json({ people })).mockResolvedValueOnce(json({ id: 'r', handedOff: true, delegatedUserId: 'carol' }))
   render(<RequestHandoff {...props} />)

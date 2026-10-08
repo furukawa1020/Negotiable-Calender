@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -25,10 +26,18 @@ func testPostgresMeetingEvidence(t *testing.T, ctx context.Context, db *sql.DB, 
 				t.Fatal(err)
 			}
 			defer db.ExecContext(ctx, "DELETE FROM coordination_requests WHERE id=$1", value.ID)
+			// Create persists the initial request fields, not a confirmed selection.
+			// Seed that lifecycle field explicitly to exercise the replay path.
+			if _, err := db.ExecContext(ctx, "UPDATE coordination_requests SET accepted_option_id=$1 WHERE id=$2", value.AcceptedOptionID, value.ID); err != nil {
+				t.Fatal(err)
+			}
 			if _, err := db.ExecContext(ctx, "UPDATE coordination_request_options SET type='async' WHERE request_id=$1", value.ID); err != nil {
 				t.Fatal(err)
 			}
-			var err error
+			before, err := store.GetForUser(ctx, value.ID, "alice")
+			if err != nil || before.AcceptedOptionID != value.AcceptedOptionID || before.Status != value.Status {
+				t.Fatal("invalid lifecycle fixture", err)
+			}
 			want := coord.ErrCancellationInvalid
 			if action == "confirm-replay" {
 				want = coord.ErrCandidateInvalid
@@ -40,7 +49,7 @@ func testPostgresMeetingEvidence(t *testing.T, ctx context.Context, db *sql.DB, 
 				t.Errorf("got %v want %v", err, want)
 			}
 			got, err := store.GetForUser(ctx, value.ID, "alice")
-			if err != nil || got.Status != value.Status || got.AcceptedOptionID != value.AcceptedOptionID || !got.UpdatedAt.Equal(value.UpdatedAt) || len(got.Options) != 1 || got.Options[0].Type != coord.OptionAsync {
+			if err != nil || !reflect.DeepEqual(got, before) {
 				t.Fatal("rejection mutated request", err)
 			}
 			for _, query := range []string{"SELECT COUNT(*) FROM notifications WHERE request_id=$1", "SELECT COUNT(*) FROM audit_logs WHERE resource_id=$1"} {

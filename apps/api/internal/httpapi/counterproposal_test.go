@@ -99,3 +99,27 @@ func TestCounterproposalRoutes(t *testing.T) {
 		t.Fatal("duplicate HTTP effects")
 	}
 }
+
+func TestCorruptConfirmationDoesNotAcknowledgeReplay(t *testing.T) {
+	now := time.Now().UTC()
+	start, end := now.Add(time.Hour), now.Add(90*time.Minute)
+	for _, state := range []coord.Status{coord.Suggested, coord.Accepted} {
+		t.Run(string(state), func(t *testing.T) {
+			option := coord.Option{ID: "o", RequestID: "r", Type: coord.OptionMeeting, StartAt: &start, EndAt: &end, CreatedAt: now}
+			s := &proposalTestStore{stubRequestStore: stubRequestStore{value: coord.CoordinationRequest{ID: "r", OrganizationID: "org", RequesterUserID: "alice", TargetUserID: "bob", Status: state, AcceptedOptionID: "o", Options: []coord.Option{option, option}}}}
+			notes, audits := &stubNotificationStore{}, &stubAuditStore{}
+			h := NewWithStores(stubDatabase{}, &stubPolicyStore{}, &stubProjectionStore{}, &stubOrganizationStore{}, s, notes, audits, "", testLogger())
+			r := httptest.NewRequest(http.MethodPost, "/api/v1/requests/r/accept", strings.NewReader(`{"optionId":"o"}`))
+			r.Header.Set("X-Demo-User-ID", "bob")
+			r.Header.Set("X-Organization-ID", "org")
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, r)
+			if w.Code != http.StatusConflict || w.Header().Get("Idempotency-Replayed") != "" || !strings.Contains(w.Body.String(), "candidate_invalid") {
+				t.Fatal(w.Code, w.Body.String(), w.Header())
+			}
+			if s.confirmations != 0 || s.value.Status != state || len(notes.values) != 0 || len(audits.values) != 0 {
+				t.Fatal("rejected command had effects")
+			}
+		})
+	}
+}

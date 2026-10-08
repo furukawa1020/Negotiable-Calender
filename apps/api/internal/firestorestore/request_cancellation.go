@@ -32,7 +32,7 @@ func (store *Request) cancelConfirmed(ctx context.Context, requestID, actor, org
 		if err := doc.DataTo(&value); err != nil {
 			return err
 		}
-		if actor == "" || (actor != value.RequesterUserID && actor != value.TargetUserID) || (org != "" && org != value.OrganizationID) {
+		if value.ID != doc.Ref.ID || actor == "" || (actor != value.RequesterUserID && actor != value.TargetUserID) || (org != "" && org != value.OrganizationID) {
 			return coordinationrequest.ErrNotFound
 		}
 		if err := store.guardRequestAccounts(ctx, tx, value); err != nil {

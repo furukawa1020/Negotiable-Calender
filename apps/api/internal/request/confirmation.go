@@ -18,19 +18,14 @@ var (
 )
 
 func ConfirmableMeeting(value CoordinationRequest, optionID string, now time.Time) (Option, error) {
-	for _, option := range value.Options {
-		if option.ID != optionID {
-			continue
-		}
-		if option.RequestID != value.ID || option.Type != OptionMeeting || option.Validate() != nil {
-			return Option{}, ErrCandidateInvalid
-		}
-		if !value.DeadlineAt.After(now) || !option.StartAt.After(now) || option.EndAt.After(value.DeadlineAt) {
-			return Option{}, ErrCandidateExpired
-		}
-		return option, nil
+	option, err := meetingEvidence(value, optionID)
+	if err != nil {
+		return Option{}, err
 	}
-	return Option{}, ErrCandidateInvalid
+	if !value.DeadlineAt.After(now) || !option.StartAt.After(now) || option.EndAt.After(value.DeadlineAt) {
+		return Option{}, ErrCandidateExpired
+	}
+	return option, nil
 }
 
 // Require complete, unexpired coverage. Unknown, gaps, or contradictory closed

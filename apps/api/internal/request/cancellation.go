@@ -32,16 +32,18 @@ func ValidateConfirmedCancellation(value CoordinationRequest, actor, optionID st
 	if optionID == "" || value.AcceptedOptionID != optionID {
 		return ErrCancellationInvalid
 	}
+	option, err := meetingEvidence(value, optionID)
+	if err != nil {
+		return ErrCancellationInvalid
+	}
 	if value.Status == Cancelled {
 		return ErrAlreadyCancelled
 	}
 	if value.Status != Accepted {
 		return ErrCancellationInvalid
 	}
-	for _, option := range value.Options {
-		if option.ID == optionID && option.RequestID == value.ID && option.Type == OptionMeeting && option.Validate() == nil && option.StartAt.After(now) {
-			return nil
-		}
+	if option.StartAt.After(now) {
+		return nil
 	}
 	return ErrCancellationInvalid
 }

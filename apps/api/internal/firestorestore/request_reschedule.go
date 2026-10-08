@@ -31,7 +31,7 @@ func (store *Request) reschedule(ctx context.Context, id, actor, org string, com
 		if err := doc.DataTo(&value); err != nil {
 			return err
 		}
-		if (actor != value.RequesterUserID && actor != value.TargetUserID) || (org != "" && org != value.OrganizationID) {
+		if value.ID != doc.Ref.ID || (actor != value.RequesterUserID && actor != value.TargetUserID) || (org != "" && org != value.OrganizationID) {
 			return coordinationrequest.ErrNotFound
 		}
 		if err := store.guardRequestAccounts(ctx, tx, value); err != nil {

@@ -24,7 +24,7 @@ func (store *Request) ProposeMeeting(ctx context.Context, id, actor, org string,
 		if err := doc.DataTo(&value); err != nil {
 			return err
 		}
-		if actor == "" || actor != value.TargetUserID || org == "" || org != value.OrganizationID {
+		if value.ID != doc.Ref.ID || actor == "" || actor != value.TargetUserID || org == "" || org != value.OrganizationID {
 			return coord.ErrNotFound
 		}
 		if err := store.guardCreation(ctx, tx, value); err != nil {

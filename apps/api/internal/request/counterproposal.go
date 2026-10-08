@@ -33,10 +33,11 @@ func PrepareProposal(value *CoordinationRequest, actor, org string, start, end, 
 	id := fmt.Sprintf("offer-%x", sha256.Sum256([]byte(value.ID+"\x00"+actor+"\x00"+start.Format(time.RFC3339Nano)+"\x00"+end.Format(time.RFC3339Nano))))
 	for _, old := range value.Options {
 		if old.ID == id {
-			if old.ProposedByUserID != actor || old.Type != OptionMeeting || old.StartAt == nil || old.EndAt == nil || !old.StartAt.Equal(start) || !old.EndAt.Equal(end) {
+			selected, err := meetingEvidence(*value, id)
+			if err != nil || selected.ProposedByUserID != actor || !selected.StartAt.Equal(start) || !selected.EndAt.Equal(end) {
 				return Option{}, false, ErrProposalConflict
 			}
-			return old, true, nil
+			return selected, true, nil
 		}
 	}
 	if value.Status != Suggested || value.AcceptedOptionID != "" {
@@ -63,19 +64,17 @@ func AuthorizeConfirmation(value CoordinationRequest, actor, optionID string) er
 	if actor == "" || (actor != value.RequesterUserID && actor != value.TargetUserID) {
 		return ErrNotFound
 	}
-	for _, option := range value.Options {
-		if option.ID != optionID {
-			continue
-		}
-		if option.ProposedByUserID == "" && actor == value.TargetUserID {
-			return nil
-		}
-		if option.ProposedByUserID == value.TargetUserID && actor == value.RequesterUserID {
-			return nil
-		}
-		return ErrNotFound
+	option, err := meetingEvidence(value, optionID)
+	if err != nil {
+		return err
 	}
-	return ErrCandidateInvalid
+	if option.ProposedByUserID == "" && actor == value.TargetUserID {
+		return nil
+	}
+	if option.ProposedByUserID == value.TargetUserID && actor == value.RequesterUserID {
+		return nil
+	}
+	return ErrNotFound
 }
 
 func ProposalEffects(value CoordinationRequest, option Option) (notification.Notification, audit.Event) {

@@ -47,6 +47,18 @@ or booking_conflict. The UI keeps the request unchanged and points to another
 time or refreshing sync. Repeating the same accepted option returns 200 without
 duplicating audit/notification creation. Different options cannot overwrite an
 accepted choice. Transport failures after commit are therefore safe to retry.
+
+Meeting selection integrity is checked before authorization can acknowledge a
+confirmation replay (#207): the requested option ID must occur exactly once, be
+a valid meeting and belong to that request. The same immutable evidence check
+guards counterproposal replay and confirmed cancellation, including cancellation
+replay. Firestore confirmation, counterproposal, cancellation and rescheduling
+also require the stored request ID to match the addressed document. Ambiguous or
+corrupt records are rejected without repairing them or writing lifecycle effects.
+Valid retries still do not require future meeting times or a fresh calendar read.
+PostgreSQL primary/foreign keys enforce selection uniqueness/ownership, and the
+shared guard additionally rejects non-meeting evidence even on replay.
+
 New acceptance commits its requester app notification and audit in the same storage
 transaction as the reservation (#113). A failed effect insert rolls everything back;
 stable insert-only IDs fail closed on collisions. Concurrent/repeated acceptance

@@ -26,7 +26,7 @@ func (store *Request) confirmMeeting(ctx context.Context, requestID, userID, org
 		if err := doc.DataTo(&value); err != nil {
 			return err
 		}
-		if org != "" && org != value.OrganizationID {
+		if value.ID != doc.Ref.ID || (org != "" && org != value.OrganizationID) {
 			return coordinationrequest.ErrNotFound
 		}
 		if err := coordinationrequest.AuthorizeConfirmation(value, userID, optionID); err != nil {

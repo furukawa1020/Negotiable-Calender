@@ -161,19 +161,21 @@ func (provider *GoogleProvider) ListBusy(ctx context.Context, accessToken string
 }
 
 func (provider *GoogleProvider) ListChanges(ctx context.Context, accessToken, syncToken string, from, to time.Time) (ChangeSet, error) {
+	cursor := decodeGoogleBusyCursor(syncToken)
 	query := url.Values{
 		"singleEvents": {"true"}, "showDeleted": {"true"}, "maxResults": {"2500"},
-		"fields": {"items(id,start,end,transparency,status),nextPageToken,nextSyncToken"},
+		"fields": {"timeZone,items(id,start,end,transparency,status),nextPageToken,nextSyncToken"},
 	}
-	full := syncToken == ""
+	full := cursor.Token == ""
 	if full {
 		query.Set("timeMin", from.Format(time.RFC3339))
 		query.Set("timeMax", to.Format(time.RFC3339))
 	} else {
-		query.Set("syncToken", syncToken)
+		query.Set("syncToken", cursor.Token)
 	}
 
 	nextPage := ""
+	calendarZone := ""
 	result := ChangeSet{Full: full, Upserts: []BusySpan{}, DeletedProviderEventIDs: []string{}}
 	for {
 		if nextPage != "" {
@@ -202,11 +204,12 @@ func (provider *GoogleProvider) ListChanges(ctx context.Context, accessToken, sy
 			return ChangeSet{}, providerStatusError{service: "calendar events", status: status}
 		}
 		var body struct {
+			TimeZone      string `json:"timeZone"`
 			NextPageToken string `json:"nextPageToken"`
 			NextSyncToken string `json:"nextSyncToken"`
 			Items         []struct {
 				ID, Transparency, Status string
-				Start, End               struct{ DateTime, Date string }
+				Start, End               googleEventTime
 			} `json:"items"`
 		}
 		err = json.NewDecoder(response.Body).Decode(&body)
@@ -214,9 +217,21 @@ func (provider *GoogleProvider) ListChanges(ctx context.Context, accessToken, sy
 		if err != nil {
 			return ChangeSet{}, fmt.Errorf("decode calendar events: %w", err)
 		}
+		location, err := calendarLocation(body.TimeZone)
+		if err != nil {
+			return ChangeSet{}, errCalendarEvidence
+		}
+		if !full && body.TimeZone != cursor.TimeZone {
+			// Existing all-day instances need rebasing even if absent from delta.
+			return ChangeSet{}, ErrSyncTokenExpired
+		}
+		if calendarZone != "" && body.TimeZone != calendarZone {
+			return ChangeSet{}, errCalendarEvidence
+		}
+		calendarZone = body.TimeZone
 		for _, item := range body.Items {
-			if item.ID == "" {
-				continue
+			if strings.TrimSpace(item.ID) == "" {
+				return ChangeSet{}, errCalendarEvidence
 			}
 			if item.Status == "cancelled" {
 				if !full {
@@ -224,13 +239,9 @@ func (provider *GoogleProvider) ListChanges(ctx context.Context, accessToken, sy
 				}
 				continue
 			}
-			start, err := googleTime(item.Start.DateTime, item.Start.Date)
+			start, end, err := googleBusyRange(item.Start, item.End, location)
 			if err != nil {
-				continue
-			}
-			end, err := googleTime(item.End.DateTime, item.End.Date)
-			if err != nil || !end.After(start) {
-				continue
+				return ChangeSet{}, err
 			}
 			result.Upserts = append(result.Upserts, BusySpan{ProviderEventID: item.ID, CalendarID: "primary", StartAt: start, EndAt: end, Busy: item.Transparency != "transparent"})
 		}
@@ -238,7 +249,7 @@ func (provider *GoogleProvider) ListChanges(ctx context.Context, accessToken, sy
 			if body.NextSyncToken == "" {
 				return ChangeSet{}, fmt.Errorf("calendar events response missing next sync token")
 			}
-			result.NextSyncToken = body.NextSyncToken
+			result.NextSyncToken = encodeGoogleBusyCursor(calendarZone, body.NextSyncToken)
 			return result, nil
 		}
 		nextPage = body.NextPageToken

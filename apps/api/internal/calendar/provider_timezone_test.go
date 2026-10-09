@@ -151,3 +151,69 @@ func TestMalformedProviderSyncDoesNotPublishOrAdvanceCursor(t *testing.T) {
 		t.Fatal("failure published or committed source")
 	}
 }
+
+func TestGoogleTimezonePaginationAndCancellation(t *testing.T) {
+	for _, delta := range []bool{false, true} {
+		t.Run(fmt.Sprint(delta), func(t *testing.T) {
+			pages := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				pages++
+				if delta && r.URL.Query().Get("syncToken") != "old" {
+					t.Error("delta cursor changed across pages")
+				}
+				if r.URL.Query().Get("pageToken") == "" {
+					io.WriteString(w, `{"timeZone":"Asia/Tokyo","items":[{"id":"day","start":{"date":"2026-10-09"},"end":{"date":"2026-10-10"}}],"nextPageToken":"page2"}`)
+				} else {
+					io.WriteString(w, `{"timeZone":"Asia/Tokyo","items":[{"id":"cancelled","status":"cancelled"},{"id":"free","transparency":"transparent","start":{"dateTime":"2026-10-09T10:00:00+09:00"},"end":{"dateTime":"2026-10-09T11:00:00+09:00"}}],"nextSyncToken":"new"}`)
+				}
+			}))
+			defer server.Close()
+			provider := NewGoogleProvider(GoogleConfig{}, server.Client())
+			provider.eventsURL = server.URL
+			cursor := ""
+			if delta {
+				cursor = testTimezoneCursor("Asia/Tokyo", "old")
+			}
+			changes, err := provider.ListChanges(context.Background(), "access", cursor, time.Now(), time.Now().Add(time.Hour))
+			if err != nil || pages != 2 || len(changes.Upserts) != 2 || changes.Upserts[1].Busy || changes.Upserts[1].StartAt.Format(time.RFC3339) != "2026-10-09T01:00:00Z" {
+				t.Fatal("pagination lost evidence", err)
+			}
+			wantDeleted := 0
+			if delta {
+				wantDeleted = 1
+			}
+			if len(changes.DeletedProviderEventIDs) != wantDeleted || changes.NextSyncToken != testTimezoneCursor("Asia/Tokyo", "new") {
+				t.Fatal("cursor or cancellation mismatch")
+			}
+		})
+	}
+}
+
+func TestCalendarTimezoneChangeRecoversThroughFullSync(t *testing.T) {
+	queries := []string{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/token" {
+			io.WriteString(w, `{"access_token":"access","expires_in":3600}`)
+			return
+		}
+		queries = append(queries, r.URL.Query().Get("syncToken"))
+		io.WriteString(w, `{"timeZone":"Asia/Tokyo","items":[{"id":"day","start":{"date":"2026-10-09"},"end":{"date":"2026-10-10"}}],"nextSyncToken":"new"}`)
+	}))
+	defer server.Close()
+	provider := NewGoogleProvider(GoogleConfig{ClientID: "client", RedirectURL: "https://example.test/callback"}, server.Client())
+	provider.tokenURL, provider.eventsURL = server.URL+"/token", server.URL+"/events"
+	cipher := testCipher(t)
+	encrypted, err := cipher.Encrypt("refresh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := &backgroundStubStore{stubStore: stubStore{connection: Connection{UserID: "u", RefreshTokenCipher: encrypted, SyncToken: testTimezoneCursor("UTC", "old")}}}
+	projector := &stubProjector{}
+	handler := NewHandler(http.NotFoundHandler(), store, provider, cipher, projector, HandlerConfig{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if _, err := handler.SyncUser(context.Background(), "u"); err != nil {
+		t.Fatal(err)
+	}
+	if len(queries) != 2 || queries[0] != "old" || queries[1] != "" || !store.changes.Full || !projector.rebuilt || store.successToken != testTimezoneCursor("Asia/Tokyo", "new") {
+		t.Fatal("timezone change did not fully rebase")
+	}
+}

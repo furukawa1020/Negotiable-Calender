@@ -39,10 +39,39 @@ the token-encryption key are configured. New connections are scheduled
 immediately; successful connections are checked every 15 minutes.
 
 The first run imports the configured rolling window and saves Google's opaque
-sync cursor. Later runs use that cursor, upsert changed recurring instances, and
+sync cursor inside an internal versioned envelope. Later runs unwrap that cursor, upsert changed recurring instances, and
 delete cancelled instances. A `410 Gone` cursor expiry triggers one full-window
 recovery. Public projections are rebuilt before the new cursor is committed, so
 a failed rebuild does not advance the cursor. Multi-batch Firestore publication atomicity remains tracked in #88.
+
+### All-day timezone interpretation and rebasing (#209)
+
+All-day date ranges use the IANA timezone from the events response's `timeZone`,
+not UTC midnight, the server timezone, or the viewer's device timezone. Both date
+boundaries are converted independently to UTC with an exclusive end; DST days
+can therefore span 23 or 25 hours. Timed events retain their explicit RFC3339
+instants. This follows Google's [calendar-timezone semantics](https://developers.google.com/workspace/calendar/api/concepts/events-calendars#calendar_time_zone).
+IANA timezone data is embedded in the API binary for minimal runtime images.
+
+The `gcal-busy-v2` cursor envelope binds the provider token to the calendar
+timezone and corrected interpretation. Legacy raw cursors and invalid envelopes
+trigger a full-window read on the next sync. A timezone change invalidates a
+delta and uses the existing one-time full-sync recovery; inconsistent timezones
+across full-sync pages fail closed. Only the original opaque token is sent to
+Google. No database migration, extra consent or new Google endpoint is required.
+
+Missing/invalid calendar zones, missing event IDs, mixed date/dateTime ranges,
+invalid times and non-positive ranges reject the whole response, including all
+previous pages. Cancelled events can still omit times and delete delta instances.
+No partial changes, cursor advance or successful publication occurs on parser
+failure; the existing failure/backoff gate hides stale public availability.
+Errors do not include the event ID, supplied timestamp or source content.
+
+Deployment itself does not rewrite cached events: legacy coverage is corrected
+after the next successful sync (manual or scheduled). Existing source freshness
+limits and sync failure fences still apply. Unrepresentable date boundaries fail
+closed; offset-less timed values are not guessed. The owner's private-event UI
+continues to receive all-day dates as dates, without a synthetic UTC conversion.
 
 Workers claim due connections with PostgreSQL `FOR UPDATE SKIP LOCKED` and a
 two-minute scheduling reservation. Manual and background executions additionally

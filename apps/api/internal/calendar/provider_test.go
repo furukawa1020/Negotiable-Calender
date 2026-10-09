@@ -50,6 +50,7 @@ func TestCalendarProviderExchangesRefreshTokenAndRedactsEventDetails(t *testing.
 				t.Errorf("private fields requested: %s", fields)
 			}
 			_ = json.NewEncoder(response).Encode(map[string]any{
+				"timeZone": "Asia/Tokyo",
 				"items": []map[string]any{{
 					"id": "event-1", "summary": "Board secret", "description": "never store",
 					"start": map[string]string{"dateTime": "2026-09-03T09:00:00+09:00"},
@@ -92,6 +93,7 @@ func TestCalendarProviderUsesIncrementalCursorAndDeletesCancelledInstances(t *te
 			t.Error("incremental request included incompatible time bounds")
 		}
 		_ = json.NewEncoder(response).Encode(map[string]any{
+			"timeZone": "Asia/Tokyo",
 			"items": []map[string]any{
 				{"id": "deleted-instance", "status": "cancelled"},
 				{"id": "changed-instance", "start": map[string]string{"dateTime": "2026-09-03T09:00:00+09:00"}, "end": map[string]string{"dateTime": "2026-09-03T10:00:00+09:00"}},
@@ -102,11 +104,11 @@ func TestCalendarProviderUsesIncrementalCursorAndDeletesCancelledInstances(t *te
 	defer server.Close()
 	provider := NewGoogleProvider(GoogleConfig{ClientID: "client", RedirectURL: "https://app.example/callback"}, server.Client())
 	provider.eventsURL = server.URL
-	changes, err := provider.ListChanges(context.Background(), "access", "sync-old", time.Time{}, time.Time{})
+	changes, err := provider.ListChanges(context.Background(), "access", testTimezoneCursor("Asia/Tokyo", "sync-old"), time.Time{}, time.Time{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if changes.Full || changes.NextSyncToken != "sync-new" || len(changes.Upserts) != 1 {
+	if changes.Full || changes.NextSyncToken != testTimezoneCursor("Asia/Tokyo", "sync-new") || len(changes.Upserts) != 1 {
 		t.Fatalf("unexpected changes %#v", changes)
 	}
 	if len(changes.DeletedProviderEventIDs) != 1 || changes.DeletedProviderEventIDs[0] != "deleted-instance" {
@@ -122,7 +124,7 @@ func TestCalendarProviderReportsExpiredSyncCursor(t *testing.T) {
 	defer server.Close()
 	provider := NewGoogleProvider(GoogleConfig{ClientID: "client", RedirectURL: "https://app.example/callback"}, server.Client())
 	provider.eventsURL = server.URL
-	_, err := provider.ListChanges(context.Background(), "access", "expired", time.Time{}, time.Time{})
+	_, err := provider.ListChanges(context.Background(), "access", testTimezoneCursor("UTC", "expired"), time.Time{}, time.Time{})
 	if !errors.Is(err, ErrSyncTokenExpired) {
 		t.Fatalf("error = %v", err)
 	}

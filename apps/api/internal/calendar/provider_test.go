@@ -134,6 +134,7 @@ func TestCalendarRefreshClassifiesRevokedGrant(t *testing.T) {
 	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
 		response.WriteHeader(http.StatusBadRequest)
+		_, _ = response.Write([]byte(`{"error":"invalid_grant"}`))
 	}))
 	defer server.Close()
 	provider := NewGoogleProvider(GoogleConfig{ClientID: "client", RedirectURL: "https://app.example/callback"}, server.Client())

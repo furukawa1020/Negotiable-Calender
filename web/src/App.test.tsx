@@ -131,7 +131,8 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: '次の月' })).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Personのアカウントメニュー' }))
-    expect(screen.getByText(/前回の同期に失敗しました（timeout）/)).toBeInTheDocument()
+    expect(screen.getByText(/前回の同期に失敗しました。時間をおいて同期を再試行してください/)).toBeInTheDocument()
+    expect(screen.queryByText(/（timeout）/)).not.toBeInTheDocument()
     fireEvent.click(await screen.findByRole('button', { name: 'busy時間を同期' }))
     expect(await screen.findByText('Google Calendarから3件のbusy時間を同期しました。予定名は保存していません。')).toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledWith(

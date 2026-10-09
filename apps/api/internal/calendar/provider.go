@@ -52,8 +52,9 @@ type GoogleProvider struct {
 }
 
 type providerStatusError struct {
-	service string
-	status  int
+	service  string
+	status   int
+	category string
 }
 
 func (value providerStatusError) Error() string {
@@ -88,7 +89,7 @@ func (provider *GoogleProvider) Exchange(ctx context.Context, code, verifier str
 func (provider *GoogleProvider) Refresh(ctx context.Context, refreshToken string) (TokenSet, error) {
 	tokens, err := provider.token(ctx, url.Values{"grant_type": {"refresh_token"}, "refresh_token": {refreshToken}})
 	var statusErr providerStatusError
-	if errors.As(err, &statusErr) && (statusErr.status == http.StatusBadRequest || statusErr.status == http.StatusUnauthorized) {
+	if errors.As(err, &statusErr) && statusErr.category == "invalid_grant" {
 		return TokenSet{}, fmt.Errorf("%w: token refresh rejected", ErrReconnectRequired)
 	}
 	return tokens, err
@@ -110,7 +111,7 @@ func (provider *GoogleProvider) token(ctx context.Context, form url.Values) (Tok
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return TokenSet{}, providerStatusError{service: "calendar token", status: response.StatusCode}
+		return TokenSet{}, googleFailure(ctx, response, true, "calendar token")
 	}
 	var body struct {
 		AccessToken  string `json:"access_token"`
@@ -204,14 +205,10 @@ func (provider *GoogleProvider) ListChanges(ctx context.Context, accessToken, sy
 			response.Body.Close()
 			return ChangeSet{}, ErrSyncTokenExpired
 		}
-		if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden {
-			response.Body.Close()
-			return ChangeSet{}, ErrReconnectRequired
-		}
 		if response.StatusCode != http.StatusOK {
-			status := response.StatusCode
+			err := googleFailure(ctx, response, false, "calendar events")
 			response.Body.Close()
-			return ChangeSet{}, providerStatusError{service: "calendar events", status: status}
+			return ChangeSet{}, err
 		}
 		var body struct {
 			TimeZone      string `json:"timeZone"`
@@ -302,14 +299,10 @@ func (provider *GoogleProvider) ListPrivateEvents(ctx context.Context, accessTok
 		if err != nil {
 			return nil, fmt.Errorf("list private calendar events: %w", err)
 		}
-		if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden {
-			response.Body.Close()
-			return nil, ErrReconnectRequired
-		}
 		if response.StatusCode != http.StatusOK {
-			status := response.StatusCode
+			err := googleFailure(ctx, response, false, "private calendar events")
 			response.Body.Close()
-			return nil, providerStatusError{service: "private calendar events", status: status}
+			return nil, err
 		}
 		var body struct {
 			NextPageToken string `json:"nextPageToken"`

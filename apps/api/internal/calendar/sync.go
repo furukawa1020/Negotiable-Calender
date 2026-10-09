@@ -169,6 +169,13 @@ func failureCode(err error) string {
 	case errors.Is(err, context.Canceled):
 		return "cancelled"
 	default:
+		var statusErr providerStatusError
+		if errors.As(err, &statusErr) {
+			switch statusErr.category {
+			case "rate_limited", "provider_configuration", "provider_denied":
+				return statusErr.category
+			}
+		}
 		return "temporary_failure"
 	}
 }

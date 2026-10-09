@@ -18,6 +18,9 @@ type userTimezoneStore interface {
 }
 
 func (handler *Handler) privateEvents(response http.ResponseWriter, request *http.Request) {
+	// Owner-only reads, including authentication/provider failures, must not be
+	// cached as if they were a reusable calendar response.
+	response.Header().Set("Cache-Control", "no-store")
 	userID, ok := handler.userID(response, request)
 	if !ok {
 		return
@@ -78,7 +81,6 @@ func (handler *Handler) privateEvents(response http.ResponseWriter, request *htt
 			timezone = value
 		}
 	}
-	response.Header().Set("Cache-Control", "no-store")
 	writeJSON(response, http.StatusOK, map[string]any{
 		"userId": userID, "timezone": timezone, "from": from, "to": to, "events": events,
 	})

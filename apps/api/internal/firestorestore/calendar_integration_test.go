@@ -42,6 +42,7 @@ func TestCalendarOAuthSyncPublicationAndDisconnect(t *testing.T) {
 	challenge := ""
 	eventCalls := 0
 	malformed := false
+	pageCycle := false
 	cursors := []string{}
 	client := &http.Client{Transport: calendarRoundTrip(func(r *http.Request) (*http.Response, error) {
 		var body any
@@ -78,6 +79,9 @@ func TestCalendarOAuthSyncPublicationAndDisconnect(t *testing.T) {
 			items = append(items, map[string]any{"id": id, "start": map[string]string{"dateTime": now.Add(time.Hour).Format(time.RFC3339)}, "end": map[string]string{"dateTime": now.Add(2 * time.Hour).Format(time.RFC3339)}, "summary": "MUST_NOT_PERSIST", "description": "PRIVATE_DESCRIPTION"})
 			items = append(items, map[string]any{"id": "all-day", "start": map[string]string{"date": dayStart.In(tokyo).Format("2006-01-02")}, "end": map[string]string{"date": dayEnd.In(tokyo).Format("2006-01-02")}})
 			body = map[string]any{"timeZone": "Asia/Tokyo", "items": items, "nextSyncToken": fmt.Sprintf("cursor-%d", eventCalls)}
+			if pageCycle {
+				body = map[string]any{"timeZone": "Asia/Tokyo", "items": items, "nextPageToken": "repeated-page"}
+			}
 			if malformed {
 				body = map[string]any{"timeZone": "Asia/Tokyo", "items": []any{map[string]any{"id": "broken", "start": map[string]string{"date": "not-a-date"}, "end": map[string]string{"date": "2026-10-10"}}}, "nextSyncToken": "must-not-commit"}
 			}
@@ -213,20 +217,26 @@ func TestCalendarOAuthSyncPublicationAndDisconnect(t *testing.T) {
 	}
 	// A malformed provider response must not replace the last complete cache or
 	// advance its cursor, and the existing failure gate must hide public evidence.
-	malformed = true
-	sync(http.StatusBadGateway)
-	afterFailure, err := b.Calendar().GetConnection(ctx, "alice")
-	if err != nil || afterFailure.SyncToken != connection.SyncToken || afterFailure.LastSyncedAt == nil || !afterFailure.LastSyncedAt.Equal(*connection.LastSyncedAt) || afterFailure.LastErrorCode == "" || afterFailure.ReconnectRequired {
-		t.Fatal("malformed sync advanced source or requested unnecessary consent", err)
-	}
-	for _, before := range docs {
-		after, err := before.Ref.Get(ctx)
-		if err != nil || !before.UpdateTime.Equal(after.UpdateTime) {
-			t.Fatal("malformed sync rewrote private evidence", err)
+	for _, failure := range []string{"malformed", "page-cycle"} {
+		malformed, pageCycle = failure == "malformed", failure == "page-cycle"
+		beforeCalls := eventCalls
+		sync(http.StatusBadGateway)
+		if pageCycle && eventCalls-beforeCalls != 2 {
+			t.Fatal("page cycle was not bounded")
 		}
+		afterFailure, err := b.Calendar().GetConnection(ctx, "alice")
+		if err != nil || afterFailure.SyncToken != connection.SyncToken || afterFailure.LastSyncedAt == nil || !afterFailure.LastSyncedAt.Equal(*connection.LastSyncedAt) || afterFailure.LastErrorCode == "" || afterFailure.ReconnectRequired {
+			t.Fatal("failed sync advanced source or requested unnecessary consent", failure, err)
+		}
+		for _, before := range docs {
+			after, err := before.Ref.Get(ctx)
+			if err != nil || !before.UpdateTime.Equal(after.UpdateTime) {
+				t.Fatal("failed sync rewrote private evidence", failure, err)
+			}
+		}
+		assertHidden()
 	}
-	assertHidden()
-	malformed = false
+	malformed, pageCycle = false, false
 	sync(http.StatusOK)
 	putDocument(t, ctx, b.Client.Collection("users").Doc("bob").Collection("scheduleProjections").Doc("other"), published[0])
 	for i := 0; i < 2; i++ {

@@ -160,6 +160,28 @@ multi-batch atomicity (#88), and reliable scheduled
 sync when Cloud Run scales to zero (#89). The deployed demo and synthetic tests
 must not be described as a completed real Google Calendar integration.
 
+## Provider failure recovery
+
+Calendar event HTTP 403 is not automatically a revoked grant. Bounded error
+responses (at most 16 KiB plus one overflow byte) classify allowlisted quota
+reasons and HTTP 429 as `rate_limited`; unrecognized or conflicting 403 reasons
+remain `provider_denied`. Both retain the existing scheduled backoff, without
+accepting partial results or making stale availability public. No immediate
+retry loop or new Google permissions are introduced.
+
+Event HTTP 401 or explicit `insufficientPermissions` requires reconnect. Refresh
+responses require explicit `invalid_grant` before disabling a grant. Explicit
+`invalid_client` / `unauthorized_client` is `provider_configuration`: the operator
+must repair app configuration; asking users to reconnect does not repair it.
+Empty/malformed refresh failures remain temporary. Provider messages and raw
+reasons are not persisted, logged, or reflected in the UI. A successful sync
+clears the failure and restores eligible publication through existing checks.
+
+This classification concerns Calendar/token API calls, not OAuth consent-screen
+testing or verification restrictions (#121/#76). Existing connections already
+marked reconnect-required are not automatically re-enabled by deployment.
+Reference: https://developers.google.com/workspace/calendar/api/guides/errors
+
 ## Sync ownership and lifecycle races
 
 Every manual or background sync acquires a random execution ID with a two-minute

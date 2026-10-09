@@ -43,9 +43,11 @@ func TestCalendarOAuthSyncPublicationAndDisconnect(t *testing.T) {
 	eventCalls := 0
 	malformed := false
 	pageCycle := false
+	providerFailure := ""
 	cursors := []string{}
 	client := &http.Client{Transport: calendarRoundTrip(func(r *http.Request) (*http.Response, error) {
 		var body any
+		status := http.StatusOK
 		switch r.URL.Host + r.URL.Path {
 		case "oauth2.googleapis.com/token":
 			if err := r.ParseForm(); err != nil {
@@ -60,6 +62,9 @@ func TestCalendarOAuthSyncPublicationAndDisconnect(t *testing.T) {
 				return nil, errors.New("invalid decrypted refresh token")
 			}
 			body = map[string]any{"access_token": "synthetic-access", "refresh_token": "synthetic-refresh", "expires_in": 3600, "scope": calendarintegration.CalendarOwnedEventsReadonlyScope}
+			if providerFailure == "configuration" {
+				status, body = http.StatusUnauthorized, map[string]string{"error": "invalid_client", "error_description": "PRIVATE_ERROR"}
+			}
 		case "www.googleapis.com/calendar/v3/calendars/primary/events":
 			if r.Header.Get("Authorization") != "Bearer synthetic-access" {
 				return nil, errors.New("missing access token")
@@ -85,6 +90,13 @@ func TestCalendarOAuthSyncPublicationAndDisconnect(t *testing.T) {
 			if malformed {
 				body = map[string]any{"timeZone": "Asia/Tokyo", "items": []any{map[string]any{"id": "broken", "start": map[string]string{"date": "not-a-date"}, "end": map[string]string{"date": "2026-10-10"}}}, "nextSyncToken": "must-not-commit"}
 			}
+			if providerFailure == "quota" || providerFailure == "denied" {
+				reason := "rateLimitExceeded"
+				if providerFailure == "denied" {
+					reason = "unknownReason"
+				}
+				status, body = http.StatusForbidden, map[string]any{"error": map[string]any{"errors": []any{map[string]string{"reason": reason}}, "message": "PRIVATE_ERROR"}}
+			}
 		default:
 			return nil, fmt.Errorf("unexpected external request: %s", r.URL.Host)
 		}
@@ -92,7 +104,7 @@ func TestCalendarOAuthSyncPublicationAndDisconnect(t *testing.T) {
 		if err != nil {
 			return nil, err
 		}
-		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(string(data))), Request: r}, nil
+		return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(string(data))), Request: r}, nil
 	})}
 	provider := calendarintegration.NewGoogleProvider(calendarintegration.GoogleConfig{ClientID: "synthetic-client", ClientSecret: "synthetic-secret", RedirectURL: "https://app.example/api/v1/calendar/google/callback"}, client)
 	handler := calendarintegration.NewHandler(http.NotFoundHandler(), b.Calendar(), provider, cipher, projection.NewRebuilder(b.Calendar(), b.Policy()), calendarintegration.HandlerConfig{WebOrigin: "https://app.example", SyncPast: time.Hour, SyncFuture: 24 * time.Hour}, slog.New(slog.NewTextHandler(io.Discard, nil)))
@@ -217,8 +229,9 @@ func TestCalendarOAuthSyncPublicationAndDisconnect(t *testing.T) {
 	}
 	// A malformed provider response must not replace the last complete cache or
 	// advance its cursor, and the existing failure gate must hide public evidence.
-	for _, failure := range []string{"malformed", "page-cycle"} {
+	for _, failure := range []string{"malformed", "page-cycle", "quota", "configuration", "denied"} {
 		malformed, pageCycle = failure == "malformed", failure == "page-cycle"
+		providerFailure = failure
 		beforeCalls := eventCalls
 		sync(http.StatusBadGateway)
 		if pageCycle && eventCalls-beforeCalls != 2 {
@@ -227,6 +240,11 @@ func TestCalendarOAuthSyncPublicationAndDisconnect(t *testing.T) {
 		afterFailure, err := b.Calendar().GetConnection(ctx, "alice")
 		if err != nil || afterFailure.SyncToken != connection.SyncToken || afterFailure.LastSyncedAt == nil || !afterFailure.LastSyncedAt.Equal(*connection.LastSyncedAt) || afterFailure.LastErrorCode == "" || afterFailure.ReconnectRequired {
 			t.Fatal("failed sync advanced source or requested unnecessary consent", failure, err)
+		}
+		if expected := map[string]string{"quota": "rate_limited", "configuration": "provider_configuration", "denied": "provider_denied"}[failure]; expected != "" {
+			if afterFailure.LastErrorCode != expected || afterFailure.NextAttemptAt == nil || !afterFailure.NextAttemptAt.After(time.Now().UTC()) || afterFailure.SyncLeaseID != "" {
+				t.Fatal("failure lost retry eligibility or safe classification", failure)
+			}
 		}
 		for _, before := range docs {
 			after, err := before.Ref.Get(ctx)
@@ -237,7 +255,12 @@ func TestCalendarOAuthSyncPublicationAndDisconnect(t *testing.T) {
 		assertHidden()
 	}
 	malformed, pageCycle = false, false
+	providerFailure = ""
 	sync(http.StatusOK)
+	recovered, err := b.Calendar().GetConnection(ctx, "alice")
+	if err != nil || recovered.LastErrorCode != "" || recovered.ReconnectRequired || recovered.FailureCount != 0 {
+		t.Fatal("healthy provider did not recover without new consent", err)
+	}
 	putDocument(t, ctx, b.Client.Collection("users").Doc("bob").Collection("scheduleProjections").Doc("other"), published[0])
 	for i := 0; i < 2; i++ {
 		w := call(http.MethodDelete, "/api/v1/calendar/connection")

@@ -3,6 +3,17 @@ import { describe, expect, it } from 'vitest'
 import { CalendarSyncStatus } from './CalendarSyncStatus'
 
 describe('CalendarSyncStatus', () => {
+  it.each([
+    ['rate_limited', '再接続は不要です'],
+    ['provider_configuration', '再接続では解消しません'],
+    ['provider_denied', '運営者にお問い合わせください'],
+    ['private-provider-message', '時間をおいて同期を再試行してください'],
+  ])('shows static recovery guidance for %s without reflecting provider codes', (code, text) => {
+    render(<CalendarSyncStatus mode="external" connection={{ reconnectRequired: false, lastErrorCode: code }} />)
+    expect(screen.getByText(new RegExp(text))).toBeInTheDocument()
+    expect(screen.queryByText(new RegExp(code))).not.toBeInTheDocument()
+    expect(screen.queryByText(/同期・再接続/)).not.toBeInTheDocument()
+  })
   it('warns when the server cannot verify a recently timestamped source', () => {
     render(<CalendarSyncStatus mode="external" connection={{ reconnectRequired: false, sourceFresh: false, lastSyncedAt: new Date().toISOString() }} />)
     expect(screen.getByText(/鮮度を確認できません/)).toBeInTheDocument()

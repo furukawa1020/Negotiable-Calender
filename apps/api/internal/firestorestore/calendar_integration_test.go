@@ -27,6 +27,13 @@ func (f calendarRoundTrip) RoundTrip(r *http.Request) (*http.Response, error) { 
 func TestCalendarOAuthSyncPublicationAndDisconnect(t *testing.T) {
 	b, ctx := emulatorBackend(t)
 	now := time.Now().UTC().Truncate(time.Second)
+	tokyo, err := time.LoadLocation("Asia/Tokyo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	localDay := now.In(tokyo).AddDate(0, 0, 1)
+	dayStart := time.Date(localDay.Year(), localDay.Month(), localDay.Day(), 0, 0, 0, 0, tokyo).UTC()
+	dayEnd := dayStart.Add(24 * time.Hour)
 	putDocument(t, ctx, b.Client.Collection("users").Doc("alice"), userRecord{ID: "alice", Timezone: "Asia/Tokyo"})
 	cipher, err := calendarintegration.NewTokenCipher(base64.StdEncoding.EncodeToString(make([]byte, 32)))
 	if err != nil {
@@ -34,6 +41,7 @@ func TestCalendarOAuthSyncPublicationAndDisconnect(t *testing.T) {
 	}
 	challenge := ""
 	eventCalls := 0
+	malformed := false
 	cursors := []string{}
 	client := &http.Client{Transport: calendarRoundTrip(func(r *http.Request) (*http.Response, error) {
 		var body any
@@ -63,12 +71,16 @@ func TestCalendarOAuthSyncPublicationAndDisconnect(t *testing.T) {
 			eventCalls++
 			id := "event-1"
 			items := []any{}
-			if cursor == "cursor-1" {
+			if cursor != "" {
 				id = "event-2"
 				items = append(items, map[string]any{"id": "event-1", "status": "cancelled"})
 			}
 			items = append(items, map[string]any{"id": id, "start": map[string]string{"dateTime": now.Add(time.Hour).Format(time.RFC3339)}, "end": map[string]string{"dateTime": now.Add(2 * time.Hour).Format(time.RFC3339)}, "summary": "MUST_NOT_PERSIST", "description": "PRIVATE_DESCRIPTION"})
-			body = map[string]any{"items": items, "nextSyncToken": fmt.Sprintf("cursor-%d", eventCalls)}
+			items = append(items, map[string]any{"id": "all-day", "start": map[string]string{"date": dayStart.In(tokyo).Format("2006-01-02")}, "end": map[string]string{"date": dayEnd.In(tokyo).Format("2006-01-02")}})
+			body = map[string]any{"timeZone": "Asia/Tokyo", "items": items, "nextSyncToken": fmt.Sprintf("cursor-%d", eventCalls)}
+			if malformed {
+				body = map[string]any{"timeZone": "Asia/Tokyo", "items": []any{map[string]any{"id": "broken", "start": map[string]string{"date": "not-a-date"}, "end": map[string]string{"date": "2026-10-10"}}}, "nextSyncToken": "must-not-commit"}
+			}
 		default:
 			return nil, fmt.Errorf("unexpected external request: %s", r.URL.Host)
 		}
@@ -168,8 +180,18 @@ func TestCalendarOAuthSyncPublicationAndDisconnect(t *testing.T) {
 		t.Fatalf("incremental cursor chain: %v", cursors)
 	}
 	events, err := b.Calendar().ListPrivateEvents(ctx, "alice", now, now.Add(24*time.Hour))
-	if err != nil || len(events) != 1 || events[0].ProviderEventID != "event-2" {
+	if err != nil || len(events) != 2 {
 		t.Fatalf("incremental replacement: %v %v", events, err)
+	}
+	seen := map[string]bool{}
+	for _, event := range events {
+		seen[event.ProviderEventID] = true
+		if event.ProviderEventID == "all-day" && (!event.StartAt.Equal(dayStart) || !event.EndAt.Equal(dayEnd)) {
+			t.Fatal("all-day range persisted in wrong timezone")
+		}
+	}
+	if !seen["all-day"] || !seen["event-2"] || seen["event-1"] {
+		t.Fatal("incorrect delta replacement")
 	}
 	docs, err := b.Client.Collection("users").Doc("alice").Collection("privateEvents").Documents(ctx).GetAll()
 	if err != nil {
@@ -186,9 +208,26 @@ func TestCalendarOAuthSyncPublicationAndDisconnect(t *testing.T) {
 		t.Fatalf("sync did not publish: %v", err)
 	}
 	connection, err = b.Calendar().GetConnection(ctx, "alice")
-	if err != nil || connection.SyncToken != "cursor-2" || connection.LastSyncedAt == nil {
+	if err != nil || !strings.HasPrefix(connection.SyncToken, "gcal-busy-v2.") || connection.LastSyncedAt == nil {
 		t.Fatal("sync completion missing")
 	}
+	// A malformed provider response must not replace the last complete cache or
+	// advance its cursor, and the existing failure gate must hide public evidence.
+	malformed = true
+	sync(http.StatusBadGateway)
+	afterFailure, err := b.Calendar().GetConnection(ctx, "alice")
+	if err != nil || afterFailure.SyncToken != connection.SyncToken || afterFailure.LastSyncedAt == nil || !afterFailure.LastSyncedAt.Equal(*connection.LastSyncedAt) || afterFailure.LastErrorCode == "" || afterFailure.ReconnectRequired {
+		t.Fatal("malformed sync advanced source or requested unnecessary consent", err)
+	}
+	for _, before := range docs {
+		after, err := before.Ref.Get(ctx)
+		if err != nil || !before.UpdateTime.Equal(after.UpdateTime) {
+			t.Fatal("malformed sync rewrote private evidence", err)
+		}
+	}
+	assertHidden()
+	malformed = false
+	sync(http.StatusOK)
 	putDocument(t, ctx, b.Client.Collection("users").Doc("bob").Collection("scheduleProjections").Doc("other"), published[0])
 	for i := 0; i < 2; i++ {
 		w := call(http.MethodDelete, "/api/v1/calendar/connection")

@@ -79,7 +79,7 @@ func TestReadFeaturesUseOnlyPrimaryEventsEndpoint(t *testing.T) {
 					if calls == 2 && request.URL.Query().Get("syncToken") != "cursor" {
 						t.Fatal("incremental sync lost")
 					}
-					body = map[string]any{"items": []any{}, "nextSyncToken": "cursor"}
+					body = map[string]any{"timeZone": "UTC", "items": []any{}, "nextSyncToken": "cursor"}
 				default:
 					t.Fatal("read feature requested an endpoint outside primary events")
 				}

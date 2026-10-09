@@ -112,10 +112,11 @@ events; duplicate `items` keys, trailing JSON, repeated/cyclic page tokens and
 oversized cursors are rejected. Empty pages still consume page/byte budgets.
 Context cancellation is preserved and every opened response body is closed.
 
-Failures return fixed safe errors, never accumulated events or a next sync token.
+Budget/parser failures return fixed safe errors, never accumulated events or a next sync token.
 Sync retains the last complete cache/cursor, records the existing retry/backoff
 state and hides stale public availability through its existing failure gate.
-The owner-only endpoint returns a generic error without partial private details.
+The owner-only endpoint returns a generic error without partial private details;
+both success and failure responses set `Cache-Control: no-store`.
 Limits count per read, including delta deletions; a full-sync fallback starts a
 new bounded read within the existing overall sync timeout. Persistent overflow
 requires a future larger-volume design, not repeated successful truncation.

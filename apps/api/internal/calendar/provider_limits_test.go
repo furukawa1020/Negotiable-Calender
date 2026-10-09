@@ -20,7 +20,7 @@ func limitPage(token string) string {
 
 func TestCalendarReadsRejectUnboundedOrIncompleteResponses(t *testing.T) {
 	for _, private := range []bool{false, true} {
-		for _, scenario := range []string{"page-loop", "page-cycle", "pages", "page-bytes", "total-bytes", "raw-items", "cursor-size", "trailing-json", "late-page-bytes"} {
+		for _, scenario := range []string{"page-loop", "page-cycle", "pages", "page-bytes", "total-bytes", "raw-items", "cumulative-items", "cursor-size", "trailing-json", "late-page-bytes"} {
 			t.Run(fmt.Sprintf("private=%v/%s", private, scenario), func(t *testing.T) {
 				calls := 0
 				client := &http.Client{Transport: limitTransport(func(r *http.Request) (*http.Response, error) {
@@ -67,6 +67,17 @@ func TestCalendarReadsRejectUnboundedOrIncompleteResponses(t *testing.T) {
 						}
 						item := `{"id":"cancelled","status":"cancelled"}`
 						body = `{"timeZone":"UTC","items":[` + strings.TrimSuffix(strings.Repeat(item+",", count), ",") + `],"nextSyncToken":"end"}`
+					case "cumulative-items":
+						count := 6000
+						if private {
+							count = 600
+						}
+						item := `{"id":"cancelled","status":"cancelled"}`
+						next := ""
+						if calls == 1 {
+							next = "second"
+						}
+						body = `{"timeZone":"UTC","items":[` + strings.TrimSuffix(strings.Repeat(item+",", count), ",") + fmt.Sprintf(`],"nextPageToken":%q,"nextSyncToken":"end"}`, next)
 					case "cursor-size":
 						if calls == 1 {
 							body = limitPage(strings.Repeat("x", 16*1024+1))

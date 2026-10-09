@@ -93,6 +93,33 @@ cursors, raw Google responses, event titles, attendees, locations, and
 descriptions are never returned or logged.
 
 
+## Bounded complete reads (#211)
+
+Both sync and owner-only event reads reject incomplete results instead of silently
+truncating them. These are application safety limits, not Google quotas:
+
+| Budget | Busy sync | Owner-only event view |
+| --- | --- | --- |
+| Pages per read | 20 | 20 |
+| JSON bytes per page | 2 MiB | 2 MiB |
+| Total JSON bytes | 16 MiB | 8 MiB |
+| Raw event items, including cancelled/skipped entries | 10,000 | 1,000 |
+| Pagination/provider cursor size | 16 KiB | 16 KiB |
+
+Actual response bytes are capped before JSON decoding, even when Content-Length
+is absent or inaccurate. Raw item counts are checked before allocating typed
+events; duplicate `items` keys, trailing JSON, repeated/cyclic page tokens and
+oversized cursors are rejected. Empty pages still consume page/byte budgets.
+Context cancellation is preserved and every opened response body is closed.
+
+Failures return fixed safe errors, never accumulated events or a next sync token.
+Sync retains the last complete cache/cursor, records the existing retry/backoff
+state and hides stale public availability through its existing failure gate.
+The owner-only endpoint returns a generic error without partial private details.
+Limits count per read, including delta deletions; a full-sync fallback starts a
+new bounded read within the existing overall sync timeout. Persistent overflow
+requires a future larger-volume design, not repeated successful truncation.
+
 ## Manager private calendar view
 
 Authenticated managers can load day, week, or month ranges from

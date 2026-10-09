@@ -161,7 +161,13 @@ func (provider *GoogleProvider) ListBusy(ctx context.Context, accessToken string
 }
 
 func (provider *GoogleProvider) ListChanges(ctx context.Context, accessToken, syncToken string, from, to time.Time) (ChangeSet, error) {
+	if len(syncToken) > 2*calendarCursorBytes {
+		return ChangeSet{}, errCalendarReadLimit
+	}
 	cursor := decodeGoogleBusyCursor(syncToken)
+	if len(cursor.Token) > calendarCursorBytes {
+		return ChangeSet{}, errCalendarReadLimit
+	}
 	query := url.Values{
 		"singleEvents": {"true"}, "showDeleted": {"true"}, "maxResults": {"2500"},
 		"fields": {"timeZone,items(id,start,end,transparency,status),nextPageToken,nextSyncToken"},
@@ -176,8 +182,12 @@ func (provider *GoogleProvider) ListChanges(ctx context.Context, accessToken, sy
 
 	nextPage := ""
 	calendarZone := ""
+	budget := newCalendarReadBudget(false)
 	result := ChangeSet{Full: full, Upserts: []BusySpan{}, DeletedProviderEventIDs: []string{}}
 	for {
+		if err := budget.beginPage(ctx, nextPage); err != nil {
+			return ChangeSet{}, err
+		}
 		if nextPage != "" {
 			query.Set("pageToken", nextPage)
 		}
@@ -212,10 +222,12 @@ func (provider *GoogleProvider) ListChanges(ctx context.Context, accessToken, sy
 				Start, End               googleEventTime
 			} `json:"items"`
 		}
-		err = json.NewDecoder(response.Body).Decode(&body)
-		response.Body.Close()
+		err = budget.decode(ctx, response, &body)
 		if err != nil {
-			return ChangeSet{}, fmt.Errorf("decode calendar events: %w", err)
+			return ChangeSet{}, err
+		}
+		if err := budget.account(len(body.Items), body.NextPageToken, body.NextSyncToken); err != nil {
+			return ChangeSet{}, err
 		}
 		location, err := calendarLocation(body.TimeZone)
 		if err != nil {
@@ -272,8 +284,12 @@ func (provider *GoogleProvider) ListPrivateEvents(ctx context.Context, accessTok
 		"fields": {"items(id,summary,description,location,attendees(displayName,email,self),start,end,status,htmlLink,hangoutLink),nextPageToken"},
 	}
 	nextPage := ""
+	budget := newCalendarReadBudget(true)
 	result := []PrivateEventView{}
 	for {
+		if err := budget.beginPage(ctx, nextPage); err != nil {
+			return nil, err
+		}
 		if nextPage != "" {
 			query.Set("pageToken", nextPage)
 		}
@@ -310,10 +326,12 @@ func (provider *GoogleProvider) ListPrivateEvents(ctx context.Context, accessTok
 				}
 			} `json:"items"`
 		}
-		err = json.NewDecoder(response.Body).Decode(&body)
-		response.Body.Close()
+		err = budget.decode(ctx, response, &body)
 		if err != nil {
-			return nil, fmt.Errorf("decode private calendar events: %w", err)
+			return nil, err
+		}
+		if err := budget.account(len(body.Items), body.NextPageToken); err != nil {
+			return nil, err
 		}
 		for _, item := range body.Items {
 			if item.Status == "cancelled" || item.ID == "" {
@@ -350,9 +368,6 @@ func (provider *GoogleProvider) ListPrivateEvents(ctx context.Context, accessTok
 				value.StartAt, value.EndAt = &start, &end
 			}
 			result = append(result, value)
-			if len(result) > 1000 {
-				return nil, fmt.Errorf("private calendar event limit exceeded")
-			}
 		}
 		if body.NextPageToken == "" {
 			return result, nil

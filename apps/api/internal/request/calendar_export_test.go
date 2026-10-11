@@ -42,6 +42,15 @@ func TestCalendarExportStablePrivateAndEscaped(t *testing.T) {
 
 func TestCalendarExportRejectsUnconfirmedOrInvalidMeeting(t *testing.T) {
 	for _, mutate := range []func(*CoordinationRequest){
+		func(v *CoordinationRequest) { v.Options = append(v.Options, v.Options[0]) },
+		func(v *CoordinationRequest) {
+			other := v.Options[0]
+			other.Type = OptionAsync
+			v.Options = append(v.Options, other)
+		},
+		func(v *CoordinationRequest) { v.Options[0].RequestID = "other" },
+		func(v *CoordinationRequest) { v.OrganizationID = "" },
+		func(v *CoordinationRequest) { v.OrganizationID = "   " },
 		func(v *CoordinationRequest) { v.Status = Suggested }, func(v *CoordinationRequest) { v.Status = Cancelled },
 		func(v *CoordinationRequest) { v.AcceptedOptionID = "other" }, func(v *CoordinationRequest) { v.Options[0].Type = OptionAsync },
 		func(v *CoordinationRequest) { v.Options[0].EndAt = v.Options[0].StartAt }, func(v *CoordinationRequest) { v.Options[0].StartAt = nil },
@@ -51,5 +60,47 @@ func TestCalendarExportRejectsUnconfirmedOrInvalidMeeting(t *testing.T) {
 		if _, err := CalendarExport(value); err == nil {
 			t.Fatal("invalid export accepted")
 		}
+	}
+}
+
+func TestCalendarExportUsesOnlyCurrentConfirmedMeetingAcrossReschedule(t *testing.T) {
+	now := time.Date(2026, 9, 21, 0, 0, 0, 0, time.UTC)
+	v := rescheduleFixture(now)
+	v.OrganizationID = "org"
+	before, err := CalendarExport(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := RescheduleCommand{Action: "propose", ProposalID: "new-proposal", ExpectedOptionID: v.AcceptedOptionID, StartAt: now.Add(2 * time.Hour)}
+	if err := ApplyReschedule(&v, "alice", command, now); err != nil {
+		t.Fatal(err)
+	}
+	pending, err := CalendarExport(v)
+	if err != nil || pending != before {
+		t.Fatal("pending proposal replaced confirmed export", err)
+	}
+	command.Action = "accept"
+	if err := ApplyReschedule(&v, "bob", command, now); err != nil {
+		t.Fatal(err)
+	}
+	after, err := CalendarExport(v)
+	if err != nil || !strings.Contains(after, "DTSTART:20260921T020000Z") || strings.Contains(after, "DTSTART:20260921T010000Z") {
+		t.Fatal("old selection exported", err)
+	}
+	uid := func(ics string) string {
+		for _, line := range strings.Split(ics, "\r\n") {
+			if strings.HasPrefix(line, "UID:") {
+				return line
+			}
+		}
+		return ""
+	}
+	if uid(before) == "" || uid(before) != uid(after) {
+		t.Fatal("reschedule changed meeting identity")
+	}
+	// This fixture is intentionally historical: exporting is not a new approval.
+	again, err := CalendarExport(v)
+	if err != nil || again != after {
+		t.Fatal("historical export not stable", err)
 	}
 }

@@ -10,6 +10,16 @@ session middleware and restricted to the requester/target. Only an accepted,
 valid meeting option exports. Missing/unauthorized requests return 404; an
 unconfirmed or invalid selection returns 409. Responses are no-store.
 
+The returned request must match the URL resource, and Firestore participant reads
+must match the document ID. Mismatches return 404 without a calendar attachment.
+Export uses the same immutable meeting-evidence check as confirmation: exactly
+one selected candidate, owned by this request, with a valid meeting range. Missing
+workspace identity and ambiguous/duplicate selected IDs fail closed with 409.
+These checks do not require the meeting to still be in the future or the source
+calendar to be freshly synchronized: reading a historical confirmation is not a
+new booking. A pending reschedule continues to export the original confirmation;
+after acceptance, export uses the new confirmed time with the same stable UID.
+
 The ICS includes only the coordination title and confirmed time, never source
 calendar details, attendees, tokens or provider identifiers. It uses a stable
 hashed UID, UTC timestamps, private classification, text escaping and UTF-8-safe

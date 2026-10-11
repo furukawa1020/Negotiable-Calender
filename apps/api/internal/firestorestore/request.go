@@ -105,7 +105,7 @@ func (store *Request) GetForUser(ctx context.Context, requestID, userID string) 
 	if err := doc.DataTo(&value); err != nil {
 		return value, fmt.Errorf("decode coordination request: %w", err)
 	}
-	if value.RequesterUserID != userID && value.TargetUserID != userID {
+	if value.ID != doc.Ref.ID || (value.RequesterUserID != userID && value.TargetUserID != userID) {
 		return coordinationrequest.CoordinationRequest{}, coordinationrequest.ErrNotFound
 	}
 	if value.Options == nil {

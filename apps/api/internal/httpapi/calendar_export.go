@@ -23,7 +23,7 @@ func (api *API) exportConfirmedCalendar(response http.ResponseWriter, request *h
 		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to load request"})
 		return
 	}
-	if userID != value.RequesterUserID && userID != value.TargetUserID {
+	if value.ID != request.PathValue("requestId") || (userID != value.RequesterUserID && userID != value.TargetUserID) {
 		writeJSON(response, http.StatusNotFound, map[string]string{"error": "request not found"})
 		return
 	}

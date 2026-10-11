@@ -8,17 +8,13 @@ import (
 
 // CalendarExport contains only the coordination request, never source calendar details.
 func CalendarExport(value CoordinationRequest) (string, error) {
-	if value.Status != Accepted || value.AcceptedOptionID == "" || value.ID == "" || value.UpdatedAt.IsZero() {
+	if value.Status != Accepted || value.AcceptedOptionID == "" || value.ID == "" || strings.TrimSpace(value.OrganizationID) == "" || value.UpdatedAt.IsZero() {
 		return "", fmt.Errorf("confirmed meeting required")
 	}
-	var selected *Option
-	for i := range value.Options {
-		if value.Options[i].ID == value.AcceptedOptionID {
-			selected = &value.Options[i]
-			break
-		}
-	}
-	if selected == nil || selected.RequestID != value.ID || selected.Type != OptionMeeting || selected.Validate() != nil {
+	// Export is a read of immutable evidence, not another approval: preserve
+	// historical meetings but never choose the first of ambiguous selections.
+	selected, err := meetingEvidence(value, value.AcceptedOptionID)
+	if err != nil {
 		return "", fmt.Errorf("confirmed meeting required")
 	}
 	uid := sha256.Sum256([]byte(value.OrganizationID + ":" + value.ID))

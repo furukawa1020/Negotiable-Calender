@@ -16,8 +16,9 @@ var ErrResolutionConflict = errors.New("request_resolution_conflict")
 var ErrResolutionExpired = errors.New("request_resolution_expired")
 
 type ResolutionCommand struct {
-	Status  Status
-	Message string
+	Status           Status
+	Message          string
+	ExpectedOptionID string
 }
 
 // ResolutionStore commits terminal state, counterpart notification and audit

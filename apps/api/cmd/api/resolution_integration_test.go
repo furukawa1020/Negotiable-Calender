@@ -70,6 +70,11 @@ func testPostgresResolution(t *testing.T, ctx context.Context, db *sql.DB, store
 					t.Fatal("partial completion effects")
 				}
 			}
+			// In this shared fixture, the deliberately still-accepted future meeting
+			// must not reserve time for unrelated confirmation tests that follow.
+			if _, err := db.ExecContext(ctx, "DELETE FROM coordination_requests WHERE id=$1", v.ID); err != nil {
+				t.Fatal(err)
+			}
 		})
 	}
 	for _, state := range []coord.Status{coord.Async, coord.Declined, coord.Cancelled, coord.Completed} {

@@ -76,3 +76,16 @@ func TestCompletionRejectsUnsafeCommands(t *testing.T) {
 		})
 	}
 }
+
+func TestCompletionAtEndBoundaryAndCorruptReplay(t *testing.T) {
+	now := time.Now().UTC()
+	v := rescheduleFixture(now.Add(-3 * time.Hour))
+	cmd := ResolutionCommand{Status: Completed, ExpectedOptionID: v.AcceptedOptionID}
+	if _, err := PrepareResolution(&v, cmd, *v.Options[0].EndAt); err != nil {
+		t.Fatal("end boundary rejected", err)
+	}
+	v.Options = append(v.Options, v.Options[0])
+	if _, err := PrepareResolution(&v, cmd, now); !errors.Is(err, ErrResolutionConflict) {
+		t.Fatal("corrupt completion replay accepted", err)
+	}
+}

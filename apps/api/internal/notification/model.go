@@ -12,6 +12,7 @@ const (
 	RequestAsync     Type = "request_async"
 	RequestDelegated Type = "request_delegated"
 	RequestCancelled Type = "request_cancelled"
+	RequestCompleted Type = "request_completed"
 )
 
 type Notification struct {

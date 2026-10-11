@@ -34,6 +34,22 @@ Displayed times use the device timezone; exported UTC values preserve the instan
 
 ## Remaining core milestones
 
+Ended accepted meetings can now be explicitly marked `completed` by either
+participant via `POST /api/v1/requests/{id}/complete` with `optionId`. The current
+workspace/membership and deletion fences are checked even on retries. The server
+requires the exact selected meeting evidence, an end time no later than server
+time, and no unresolved reschedule proposal. Same-selection retries preserve the
+first completion time and do not repeat effects. Firestore and PostgreSQL commit
+state, counterpart notification and audit together; any failure rolls back all.
+
+The UI offers a confirmation action for ended meetings (reload after the meeting
+ends if the page was already open). Completion preserves the selected option and
+historical ICS export; it removes the request from accepted reservation scans.
+It records a participant's action, not independently verified attendance. No
+background completion/backfill, external calendar change or added scope occurs.
+The client validates the response's request and selected option, uses the existing
+20-second command deadline, and ignores responses after account/workspace changes.
+
 - Confirmed-meeting cancellation, atomic app notification/audit and reservation
   release are implemented in [confirmed cancellation](confirmed-cancellation.md).
   [Safe rescheduling](meeting-reschedule.md) now retains the original reservation

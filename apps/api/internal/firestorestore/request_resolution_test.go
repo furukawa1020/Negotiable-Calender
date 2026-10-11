@@ -9,7 +9,7 @@ import (
 )
 
 func TestAtomicResolutionReplay(t *testing.T) {
-	for _, state := range []coord.Status{coord.Async, coord.Declined, coord.Cancelled} {
+	for _, state := range []coord.Status{coord.Async, coord.Declined, coord.Cancelled, coord.Completed} {
 		t.Run(string(state), func(t *testing.T) {
 			b, ctx := emulatorBackend(t)
 			now := time.Now().UTC().Truncate(time.Microsecond)
@@ -18,11 +18,19 @@ func TestAtomicResolutionReplay(t *testing.T) {
 				putDocument(t, ctx, b.Client.Collection("organizations").Doc(value.OrganizationID).Collection("members").Doc(user), map[string]any{"Role": "MANAGER"})
 			}
 			store := b.Request()
+			if state == coord.Completed {
+				start, end := now.Add(-2*time.Hour), now.Add(-time.Hour)
+				value.Options[0].StartAt, value.Options[0].EndAt = &start, &end
+				value.Status, value.AcceptedOptionID = coord.Accepted, value.Options[0].ID
+			}
 			if err := store.Create(ctx, value); err != nil {
 				t.Fatal(err)
 			}
 			actor := "bob"
 			cmd := coord.ResolutionCommand{Status: state}
+			if state == coord.Completed {
+				cmd.ExpectedOptionID = value.AcceptedOptionID
+			}
 			if state == coord.Async {
 				cmd.Message = "private answer"
 			}

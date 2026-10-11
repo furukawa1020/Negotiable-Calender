@@ -8,6 +8,31 @@ const request = { id: 'r', status: 'accepted', acceptedOptionId: 'chosen', optio
 ] }
 
 describe('ConfirmedMeeting', () => {
+  it('confirms completion explicitly, preserves history and allows failed commands to retry', async () => {
+    const value = { ...request, options: [{ id: 'chosen', type: 'meeting', startAt: '2020-01-01T00:00:00Z', endAt: '2020-01-01T01:00:00Z' }] }
+    const complete = vi.fn().mockRejectedValueOnce(new Error('conflict')).mockResolvedValue(undefined)
+    const { rerender } = render(<ConfirmedMeeting request={value} onDownload={vi.fn()} onComplete={complete} />)
+    fireEvent.click(screen.getByRole('button', { name: '会議を完了にする' }))
+    expect(complete).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: '会議の完了を確定する' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('再試行')
+    fireEvent.click(screen.getByRole('button', { name: '会議の完了を確定する' }))
+    await waitFor(() => expect(complete).toHaveBeenCalledTimes(2))
+    expect(complete).toHaveBeenLastCalledWith('r', 'chosen')
+    rerender(<ConfirmedMeeting request={{ ...value, status: 'completed' }} onDownload={vi.fn()} onComplete={complete} />)
+    expect(screen.getByText('完了した会議の日時')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'カレンダーに登録（ICS）' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '会議を完了にする' })).not.toBeInTheDocument()
+  })
+  it('never offers completion for future, ambiguous or pending-reschedule meetings', () => {
+    const future = { ...request, options: [{ id: 'chosen', type: 'meeting', startAt: '2099-01-01T00:00:00Z', endAt: '2099-01-01T01:00:00Z' }] }
+    const { rerender } = render(<ConfirmedMeeting request={future} onDownload={vi.fn()} onComplete={vi.fn()} />)
+    expect(screen.queryByRole('button', { name: '会議を完了にする' })).not.toBeInTheDocument()
+    rerender(<ConfirmedMeeting request={{ ...request, rescheduleProposal: { status: 'proposed' } }} onDownload={vi.fn()} onComplete={vi.fn()} />)
+    expect(screen.queryByRole('button', { name: '会議を完了にする' })).not.toBeInTheDocument()
+    rerender(<ConfirmedMeeting request={{ ...request, options: [request.options[1], request.options[1]] }} onDownload={vi.fn()} onComplete={vi.fn()} />)
+    expect(screen.queryByRole('button')).not.toBeInTheDocument()
+  })
   it('requires explicit confirmation, keeps errors retryable, and hides exports after cancellation', async () => {
     const future = new Date(Date.now() + 86400000).toISOString()
     const later = new Date(Date.now() + 90000000).toISOString()

@@ -3,6 +3,7 @@ package request
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"time"
 )
@@ -21,8 +22,9 @@ func (store *PostgresStore) ResolveRequest(ctx context.Context, id, actor, organ
 	defer tx.Rollback()
 	var value CoordinationRequest
 	var accepted, message sql.NullString
-	err = tx.QueryRowContext(ctx, `SELECT id,organization_id,requester_user_id,target_user_id,status,accepted_option_id,async_message,deadline_at,updated_at FROM coordination_requests WHERE id=$1 FOR UPDATE`, id).
-		Scan(&value.ID, &value.OrganizationID, &value.RequesterUserID, &value.TargetUserID, &value.Status, &accepted, &message, &value.DeadlineAt, &value.UpdatedAt)
+	var proposal []byte
+	err = tx.QueryRowContext(ctx, `SELECT id,organization_id,requester_user_id,target_user_id,status,accepted_option_id,async_message,deadline_at,updated_at,reschedule_proposal FROM coordination_requests WHERE id=$1 FOR UPDATE`, id).
+		Scan(&value.ID, &value.OrganizationID, &value.RequesterUserID, &value.TargetUserID, &value.Status, &accepted, &message, &value.DeadlineAt, &value.UpdatedAt, &proposal)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, ErrNotFound
 	}
@@ -35,6 +37,15 @@ func (store *PostgresStore) ResolveRequest(ctx context.Context, id, actor, organ
 	}
 	if err := guardCreationMembers(ctx, tx, value); err != nil {
 		return false, err
+	}
+	if command.Status == Completed {
+		if err := json.Unmarshal(proposal, &value.RescheduleProposal); err != nil {
+			return false, err
+		}
+		value.Options, err = listOptions(ctx, tx, value.ID)
+		if err != nil {
+			return false, err
+		}
 	}
 	replayed, err = PrepareResolution(&value, command, time.Now().UTC())
 	if err != nil {

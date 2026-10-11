@@ -16,8 +16,9 @@ var ErrResolutionConflict = errors.New("request_resolution_conflict")
 var ErrResolutionExpired = errors.New("request_resolution_expired")
 
 type ResolutionCommand struct {
-	Status  Status
-	Message string
+	Status           Status
+	Message          string
+	ExpectedOptionID string
 }
 
 // ResolutionStore commits terminal state, counterpart notification and audit
@@ -30,7 +31,11 @@ func AuthorizeResolution(value CoordinationRequest, actor, organization string, 
 	if actor == "" || organization == "" || organization != value.OrganizationID {
 		return ErrNotFound
 	}
-	if command.Status == Cancelled {
+	if command.Status == Completed {
+		if actor != value.RequesterUserID && actor != value.TargetUserID {
+			return ErrNotFound
+		}
+	} else if command.Status == Cancelled {
 		if actor != value.RequesterUserID {
 			return ErrNotFound
 		}
@@ -43,6 +48,12 @@ func AuthorizeResolution(value CoordinationRequest, actor, organization string, 
 // PrepareResolution is deterministic; storage must serialize on the request and
 // verify live memberships/account fences before either first commit or replay.
 func PrepareResolution(value *CoordinationRequest, command ResolutionCommand, now time.Time) (bool, error) {
+	if command.Status == Completed {
+		return prepareCompletion(value, command, now)
+	}
+	if command.ExpectedOptionID != "" {
+		return false, ErrResolutionConflict
+	}
 	command.Message = strings.TrimSpace(command.Message)
 	if command.Status != Async && command.Status != Declined && command.Status != Cancelled {
 		return false, ErrResolutionConflict
@@ -89,6 +100,28 @@ func ResolutionEffects(value CoordinationRequest, actor string) (notification.No
 	if value.Status == Cancelled {
 		recipient, kind, action, message = value.TargetUserID, notification.RequestCancelled, audit.RequestCancelled, "調整依頼が取り下げられました。"
 	}
+	if value.Status == Completed {
+		id = fmt.Sprintf("complete-request-%x", sha256.Sum256([]byte(value.ID)))
+		if actor == value.RequesterUserID {
+			recipient = value.TargetUserID
+		}
+		kind, action, message = notification.RequestCompleted, audit.RequestCompleted, "確定会議が完了として記録されました。"
+	}
 	return notification.Notification{ID: id, UserID: recipient, Type: kind, RequestID: value.ID, Message: message, CreatedAt: value.UpdatedAt},
 		audit.Event{ID: id, OrganizationID: value.OrganizationID, ActorUserID: actor, Action: action, ResourceType: "request", ResourceID: value.ID, CreatedAt: value.UpdatedAt}
+}
+
+func prepareCompletion(value *CoordinationRequest, command ResolutionCommand, now time.Time) (bool, error) {
+	if now.IsZero() || command.Message != "" || command.ExpectedOptionID == "" || command.ExpectedOptionID != value.AcceptedOptionID || (value.Status != Accepted && value.Status != Completed) {
+		return false, ErrResolutionConflict
+	}
+	selected, err := meetingEvidence(*value, command.ExpectedOptionID)
+	if err != nil || selected.EndAt.After(now) || (value.RescheduleProposal != nil && value.RescheduleProposal.Status == "proposed") {
+		return false, ErrResolutionConflict
+	}
+	if value.Status == Completed {
+		return true, nil
+	}
+	value.Status, value.UpdatedAt = Completed, now.UTC()
+	return false, nil
 }

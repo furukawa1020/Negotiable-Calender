@@ -11,14 +11,93 @@ import (
 
 func testPostgresResolution(t *testing.T, ctx context.Context, db *sql.DB, store *coord.PostgresStore, fixture func(string, string, string, time.Time) coord.CoordinationRequest, now time.Time) {
 	t.Helper()
-	for _, state := range []coord.Status{coord.Async, coord.Declined, coord.Cancelled} {
+	for _, scenario := range []string{"notification", "audit", "early", "stale", "proposal", "membership"} {
+		t.Run("completion-rollback-"+scenario, func(t *testing.T) {
+			at := now.Add(-2 * time.Hour)
+			if scenario == "early" {
+				at = now.Add(time.Hour)
+			}
+			v := fixture("complete-rollback-"+scenario, "alice", "bob", at)
+			if scenario == "membership" {
+				v.TargetUserID = "carol"
+			}
+			if err := store.Create(ctx, v); err != nil {
+				t.Fatal(err)
+			}
+			v.Status, v.AcceptedOptionID = coord.Accepted, v.Options[0].ID
+			if _, err := db.ExecContext(ctx, "UPDATE coordination_requests SET status=$1,accepted_option_id=$2 WHERE id=$3", v.Status, v.AcceptedOptionID, v.ID); err != nil {
+				t.Fatal(err)
+			}
+			if scenario == "proposal" {
+				if _, err := db.ExecContext(ctx, `UPDATE coordination_requests SET reschedule_proposal='{"status":"proposed"}'::jsonb WHERE id=$1`, v.ID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			completed := v
+			completed.Status = coord.Completed
+			note, event := coord.ResolutionEffects(completed, "alice")
+			if scenario == "notification" {
+				if _, err := db.ExecContext(ctx, `INSERT INTO notifications(id,user_id,type,request_id,message,created_at) VALUES($1,$2,$3,$4,$5,$6)`, note.ID, note.UserID, note.Type, note.RequestID, note.Message, now); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if scenario == "audit" {
+				if _, err := db.ExecContext(ctx, `INSERT INTO audit_logs(id,organization_id,actor_user_id,action,resource_type,resource_id,created_at) VALUES($1,$2,$3,$4,$5,$6,$7)`, event.ID, event.OrganizationID, event.ActorUserID, event.Action, event.ResourceType, event.ResourceID, now); err != nil {
+					t.Fatal(err)
+				}
+			}
+			cmd := coord.ResolutionCommand{Status: coord.Completed, ExpectedOptionID: v.AcceptedOptionID}
+			if scenario == "stale" {
+				cmd.ExpectedOptionID = "other"
+			}
+			if _, err := store.ResolveRequest(ctx, v.ID, "alice", "org", cmd); err == nil {
+				t.Fatal("unsafe completion committed")
+			}
+			got, err := store.GetForUser(ctx, v.ID, "alice")
+			if err != nil || got.Status != coord.Accepted || got.AcceptedOptionID != v.AcceptedOptionID || !got.UpdatedAt.Equal(v.UpdatedAt) {
+				t.Fatal("failure mutated request", err)
+			}
+			for _, table := range []string{"notifications", "audit_logs"} {
+				var count int
+				if err := db.QueryRowContext(ctx, "SELECT count(*) FROM "+table+" WHERE id=$1", note.ID).Scan(&count); err != nil {
+					t.Fatal(err)
+				}
+				want := 0
+				if (scenario == "notification" && table == "notifications") || (scenario == "audit" && table == "audit_logs") {
+					want = 1
+				}
+				if count != want {
+					t.Fatal("partial completion effects")
+				}
+			}
+			// In this shared fixture, the deliberately still-accepted future meeting
+			// must not reserve time for unrelated confirmation tests that follow.
+			if _, err := db.ExecContext(ctx, "DELETE FROM coordination_requests WHERE id=$1", v.ID); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+	for _, state := range []coord.Status{coord.Async, coord.Declined, coord.Cancelled, coord.Completed} {
 		t.Run("resolution-"+string(state), func(t *testing.T) {
 			value := fixture("resolve-"+string(state), "alice", "bob", now.Add(20*time.Hour))
+			if state == coord.Completed {
+				start, end := now.Add(-2*time.Hour), now.Add(-time.Hour)
+				value.Options[0].StartAt, value.Options[0].EndAt = &start, &end
+			}
 			if err := store.Create(ctx, value); err != nil {
 				t.Fatal(err)
 			}
+			if state == coord.Completed {
+				value.AcceptedOptionID = value.Options[0].ID
+				if _, err := db.ExecContext(ctx, "UPDATE coordination_requests SET status=$1,accepted_option_id=$2 WHERE id=$3", coord.Accepted, value.AcceptedOptionID, value.ID); err != nil {
+					t.Fatal(err)
+				}
+			}
 			actor := "bob"
 			cmd := coord.ResolutionCommand{Status: state}
+			if state == coord.Completed {
+				cmd.ExpectedOptionID = value.AcceptedOptionID
+			}
 			if state == coord.Cancelled {
 				actor = "alice"
 			}

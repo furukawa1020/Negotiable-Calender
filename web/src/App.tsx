@@ -10,7 +10,7 @@ import { RequestComposer } from './RequestComposer'
 import { RequestHandoff } from './RequestHandoff'
 import { CounterproposalForm, CounterproposalAgreement } from './Counterproposal'
 import { useRequestResolution } from './useRequestResolution'
-import { fetchBookingResult, readCancellation } from './bookingTransport'
+import { fetchBookingResult, readCancellation, readCompletion } from './bookingTransport'
 import { readRescheduleSnapshot, matchesRescheduleOutcome } from './bookingResponse'
 import type { CoordinationRequest } from './bookingResponse'
 import { RescheduleMeeting } from './RescheduleMeeting'
@@ -784,6 +784,24 @@ function App() {
     } catch (error) { if (isCurrent()) throw error }
   }
 
+  const completeConfirmedMeeting = async (requestID: string, optionID: string) => {
+    const isCurrent = captureRequestLifetime()
+    if (!isCurrent()) return
+    try {
+      const acknowledged = await fetchBookingResult(`${apiURL}/api/v1/requests/${encodeURIComponent(requestID)}/complete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Demo-User-ID': currentView === 'sent' ? requesterUserID : activeUserID, 'X-Organization-ID': activeOrganizationID },
+        body: JSON.stringify({ optionId: optionID }),
+      }, response => readCompletion(response, requestID, optionID), isCurrent)
+      if (!acknowledged || !isCurrent()) return
+      supersedeRequestReads()
+      const update = (current: CoordinationRequest[]) => current.map(item => item.id === requestID ? { ...item, status: 'completed', acceptedOptionId: optionID } : item)
+      setInboxRequests(update)
+      setSentRequests(update)
+      setNotice('会議を完了として記録し、相手に通知しました。外部カレンダーの予定は変更していません。')
+    } catch (error) { if (isCurrent()) throw error }
+  }
+
   const respondAsync = async (event: FormEvent<HTMLFormElement>, requestID: string) => {
     event.preventDefault()
     const isCurrent = captureRequestLifetime()
@@ -1406,7 +1424,7 @@ function App() {
                         return response.json()
                       }}
                     /> : null}
-                    <ConfirmedMeeting request={item} onDownload={downloadConfirmedMeeting} onCancel={cancelConfirmedMeeting} />
+                    <ConfirmedMeeting request={item} onDownload={downloadConfirmedMeeting} onCancel={cancelConfirmedMeeting} onComplete={completeConfirmedMeeting} />
                     <RescheduleMeeting request={item} actor={activeUserID} onChange={rescheduleMeeting} />
                     {item.options.map((option) => (
                       <div className="option-row" key={option.id}>
@@ -1469,7 +1487,7 @@ function App() {
                       <p>{item.targetUserId} 宛 · {item.durationMinutes}分 · 期限 {formatDateTime(item.deadlineAt)}</p>
                     </div>
                     <div className="option-list">
-                      <ConfirmedMeeting request={item} onDownload={downloadConfirmedMeeting} onCancel={cancelConfirmedMeeting} />
+                      <ConfirmedMeeting request={item} onDownload={downloadConfirmedMeeting} onCancel={cancelConfirmedMeeting} onComplete={completeConfirmedMeeting} />
                       <RescheduleMeeting request={item} actor={requesterUserID} onChange={rescheduleMeeting} />
                       <strong>{item.options.length}件の調整候補</strong>
                       <CounterproposalAgreement key={`${activeOrganizationID}:${requesterUserID}:${item.id}`}

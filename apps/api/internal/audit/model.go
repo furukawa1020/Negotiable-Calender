@@ -16,6 +16,7 @@ const (
 	RequestAsync        Action = "request_async"
 	RequestDelegated    Action = "request_delegated"
 	RequestCancelled    Action = "request_cancelled"
+	RequestCompleted    Action = "request_completed"
 	InvitationCreated   Action = "invitation_created"
 	InvitationAccepted  Action = "invitation_accepted"
 	WorkspaceSwitched   Action = "workspace_switched"

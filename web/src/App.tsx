@@ -46,7 +46,7 @@ const initialProjections = [
 const apiURL = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:8080' : window.location.origin)
 const apiFetch = (input: RequestInfo | URL, init?: RequestInit) => fetch(input, { ...init, credentials: 'include' })
 
-const requestStatusLabel = (status: string) => ({ pending: '未回答', suggested: '候補を確認中', accepted: '日時確定', declined: '辞退', delegated: '委譲済み', async: '非同期で回答', cancelled: 'キャンセル済み', expired: '期限切れ' }[status] ?? status)
+const requestStatusLabel = (status: string) => ({ pending: '未回答', suggested: '候補を確認中', accepted: '日時確定', completed: '完了', declined: '辞退', delegated: '委譲済み', async: '非同期で回答', cancelled: 'キャンセル済み', expired: '期限切れ' }[status] ?? status)
 const priorityLabel = (priority: string) => ({ normal: '通常', high: '重要', urgent: '緊急' }[priority] ?? priority)
 
 function NavigationIcon({ view }: { view: string }) {
@@ -798,7 +798,7 @@ function App() {
       const update = (current: CoordinationRequest[]) => current.map(item => item.id === requestID ? { ...item, status: 'completed', acceptedOptionId: optionID } : item)
       setInboxRequests(update)
       setSentRequests(update)
-      setNotice('会議を完了として記録し、相手に通知しました。外部カレンダーの予定は変更していません。')
+      setNotice('会議の完了を確認しました。外部カレンダーの予定は変更していません。')
     } catch (error) { if (isCurrent()) throw error }
   }
 

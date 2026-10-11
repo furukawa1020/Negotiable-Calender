@@ -45,3 +45,9 @@ export async function readCancellation(response: Response, requestID: string): P
   }
   return true
 }
+
+export async function readCompletion(response: Response, requestID: string, optionID: string): Promise<true> {
+  const value = await response.json()
+  if (!value || value.id !== requestID || value.status !== 'completed' || value.acceptedOptionId !== optionID) throw new Error('completion outcome unknown')
+  return true
+}

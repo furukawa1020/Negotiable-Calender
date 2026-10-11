@@ -22,6 +22,9 @@ func (store *Request) ResolveRequest(ctx context.Context, id, actor, organizatio
 		if err := doc.DataTo(&value); err != nil {
 			return err
 		}
+		if value.ID != doc.Ref.ID {
+			return coordinationrequest.ErrNotFound
+		}
 		if err := coordinationrequest.AuthorizeResolution(value, actor, organization, command); err != nil {
 			return err
 		}

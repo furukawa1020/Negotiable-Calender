@@ -69,6 +69,34 @@ async function changeScope(kind: Boundary, rejected = false) {
 }
 
 describe('Booking operations respect account and workspace lifetime', () => {
+  it.each(['依頼', '送信済み'])('completes ended meetings from %s and retains confirmed history', async view => {
+    const h = setup()
+    h.value.rescheduleProposal.status = 'withdrawn'
+    h.value.options[0].startAt = '2020-01-01T00:00:00Z'
+    h.value.options[0].endAt = '2020-01-01T01:00:00Z'
+    h.routes.set('POST /api/v1/requests/booking/complete', async () => Response.json({ id: 'booking', status: 'completed', acceptedOptionId: 'old' }))
+    await openRequests(view)
+    fireEvent.click(screen.getByRole('button', { name: '会議を完了にする' }))
+    fireEvent.click(screen.getByRole('button', { name: '会議の完了を確定する' }))
+    await screen.findByText('完了した会議の日時')
+    expect(screen.getByRole('button', { name: 'カレンダーに登録（ICS）' })).toBeEnabled()
+    expect(h.fetchMock).toHaveBeenCalledWith(expect.stringContaining('/booking/complete'), expect.objectContaining({ method: 'POST', body: JSON.stringify({ optionId: 'old' }), headers: { 'Content-Type': 'application/json', 'X-Demo-User-ID': 'owner', 'X-Organization-ID': 'org' } }))
+  })
+  it.each(['logout', 'switch'] as const)('ignores completion decoded after %s', async kind => {
+    const h = setup()
+    h.value.rescheduleProposal.status = 'withdrawn'
+    h.value.options[0].startAt = '2020-01-01T00:00:00Z'
+    h.value.options[0].endAt = '2020-01-01T01:00:00Z'
+    const pending = deferred<Response>()
+    h.routes.set('POST /api/v1/requests/booking/complete', () => pending.promise)
+    await openRequests()
+    fireEvent.click(screen.getByRole('button', { name: '会議を完了にする' }))
+    fireEvent.click(screen.getByRole('button', { name: '会議の完了を確定する' }))
+    await changeScope(kind)
+    await act(async () => pending.resolve(Response.json({ id: 'booking', status: 'completed', acceptedOptionId: 'old' })))
+    expect(screen.getByRole('status')).toHaveTextContent(notices[kind])
+    expect(screen.queryByText('完了した会議の日時')).not.toBeInTheDocument()
+  })
   afterEach(() => {
     vi.useRealTimers()
     vi.restoreAllMocks()

@@ -1,8 +1,10 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"errors"
 	coordinationrequest "github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/request"
+	"io"
 	"net/http"
 	"strings"
 )
@@ -41,6 +43,26 @@ func (api *API) resolveRequest(response http.ResponseWriter, request *http.Reque
 	if replayed {
 		response.Header().Set("Idempotency-Replayed", "true")
 	}
-	writeJSON(response, http.StatusOK, map[string]any{"id": id, "status": command.Status, "asyncMessage": command.Message, "acceptedOptionId": ""})
+	writeJSON(response, http.StatusOK, map[string]any{"id": id, "status": command.Status, "asyncMessage": command.Message, "acceptedOptionId": command.ExpectedOptionID})
 	return true
+}
+
+func (api *API) completeConfirmedMeeting(response http.ResponseWriter, request *http.Request) {
+	response.Header().Set("Cache-Control", "no-store")
+	if request.Header.Get("X-Demo-User-ID") == "" || request.Header.Get("X-Organization-ID") == "" {
+		writeJSON(response, http.StatusUnauthorized, map[string]string{"error": "request identity is required"})
+		return
+	}
+	var input struct {
+		OptionID string `json:"optionId"`
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(response, request.Body, 8<<10))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&input); err != nil || strings.TrimSpace(input.OptionID) == "" || len(input.OptionID) > 256 || decoder.Decode(&struct{}{}) != io.EOF {
+		writeJSON(response, http.StatusBadRequest, map[string]string{"error": "confirmed optionId is required"})
+		return
+	}
+	if !api.resolveRequest(response, request, coordinationrequest.ResolutionCommand{Status: coordinationrequest.Completed, ExpectedOptionID: input.OptionID}) {
+		writeJSON(response, http.StatusServiceUnavailable, map[string]string{"error": "meeting completion unavailable"})
+	}
 }

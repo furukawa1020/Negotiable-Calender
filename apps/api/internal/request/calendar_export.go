@@ -8,7 +8,7 @@ import (
 
 // CalendarExport contains only the coordination request, never source calendar details.
 func CalendarExport(value CoordinationRequest) (string, error) {
-	if value.Status != Accepted || value.AcceptedOptionID == "" || value.ID == "" || strings.TrimSpace(value.OrganizationID) == "" || value.UpdatedAt.IsZero() {
+	if (value.Status != Accepted && value.Status != Completed) || value.AcceptedOptionID == "" || value.ID == "" || strings.TrimSpace(value.OrganizationID) == "" || value.UpdatedAt.IsZero() {
 		return "", fmt.Errorf("confirmed meeting required")
 	}
 	// Export is a read of immutable evidence, not another approval: preserve

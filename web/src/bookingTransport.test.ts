@@ -1,7 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { fetchBookingResult, readCancellation } from './bookingTransport'
+import { fetchBookingResult, readCancellation, readCompletion } from './bookingTransport'
 
 describe('booking transport deadline', () => {
+  it('binds completion acknowledgement to the request and selected meeting', async () => {
+    for (const value of [null, {}, { id: 'r', status: 'completed', acceptedOptionId: 'other' }, { id: 'other', status: 'completed', acceptedOptionId: 'o' }, { id: 'r', status: 'accepted', acceptedOptionId: 'o' }]) {
+      await expect(readCompletion(Response.json(value), 'r', 'o')).rejects.toThrow()
+    }
+    await expect(readCompletion(Response.json({ id: 'r', status: 'completed', acceptedOptionId: 'o' }), 'r', 'o')).resolves.toBe(true)
+  })
   afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks() })
 
   it('keeps credentials and identity headers, decodes once, and clears the deadline', async () => {

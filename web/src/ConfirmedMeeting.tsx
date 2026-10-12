@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
+import { useMeetingClock } from './useMeetingClock'
 
 type Props = {
   request: { id: string; status: string; acceptedOptionId?: string; rescheduleProposal?: { status: string }; options: Array<{ id: string; type: string; startAt?: string; endAt?: string }> }
@@ -13,32 +14,6 @@ export function ConfirmedMeeting({ request, onDownload, onCancel, onComplete }: 
   // also isolates late local async state from a different meeting/version.
   const identity = JSON.stringify([request.id, request.status, selected, request.rescheduleProposal])
   return <MeetingActions key={identity} request={request} onDownload={onDownload} onCancel={onCancel} onComplete={onComplete} />
-}
-
-function useMeetingClock(start: number, end: number, active: boolean) {
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    if (!active || !Number.isFinite(start) || !Number.isFinite(end) || end <= start) return
-    let timer: ReturnType<typeof setTimeout> | undefined
-    const refresh = () => {
-      clearTimeout(timer)
-      const current = Date.now()
-      setNow(current)
-      const next = [start, end].find(boundary => boundary > current)
-      // Browser timers overflow beyond ~24.8 days. Re-evaluate wall time at each
-      // boundary (and on resume); no API polling or automatic meeting mutation.
-      if (next !== undefined) timer = setTimeout(refresh, Math.min(next - current, 2_147_483_647))
-    }
-    refresh()
-    window.addEventListener('focus', refresh)
-    document.addEventListener('visibilitychange', refresh)
-    return () => {
-      clearTimeout(timer)
-      window.removeEventListener('focus', refresh)
-      document.removeEventListener('visibilitychange', refresh)
-    }
-  }, [start, end, active])
-  return now
 }
 
 function MeetingActions({ request, onDownload, onCancel, onComplete }: Props) {

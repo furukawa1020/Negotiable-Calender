@@ -170,9 +170,9 @@ describe('Booking operations respect account and workspace lifetime', () => {
     await act(async () => { retry.resolve(Response.json(value)) })
     expect(screen.getByRole('status')).toHaveTextContent('候補を承認しました。')
     expect(screen.getByRole('button', { name: 'カレンダーに登録（ICS）' })).toBeEnabled()
-    // The accepted meeting owns a single start/end boundary timer, not a leaked
-    // transport deadline. Unmount must dispose it too.
-    expect(vi.getTimerCount()).toBe(1)
+    // Confirmation and rescheduling each own a boundary timer, not leaked
+    // transport deadlines. Unmount must dispose both.
+    expect(vi.getTimerCount()).toBe(2)
     h.view.unmount()
     expect(vi.getTimerCount()).toBe(0)
   })

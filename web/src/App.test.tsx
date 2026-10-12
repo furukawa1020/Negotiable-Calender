@@ -215,6 +215,7 @@ describe('App', () => {
 
   it('creates a coordination request from the dialog', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
+      id: 'created', organizationId: 'demo-org', requesterUserId: 'demo-member', targetUserId: 'demo-manager',
       status: 'suggested',
       options: [{ type: 'meeting' }, { type: 'async' }],
     }), { status: 201 }))

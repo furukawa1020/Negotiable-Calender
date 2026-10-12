@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 type Props = {
   request: { id: string; status: string; acceptedOptionId?: string; rescheduleProposal?: { status: string }; options: Array<{ id: string; type: string; startAt?: string; endAt?: string }> }
@@ -8,14 +8,48 @@ type Props = {
 }
 
 export function ConfirmedMeeting({ request, onDownload, onCancel, onComplete }: Props) {
+  const selected = request.options.filter((item) => item.id === request.acceptedOptionId)
+  // A confirmation belongs to the exact evidence the participant saw. Remount
+  // also isolates late local async state from a different meeting/version.
+  const identity = JSON.stringify([request.id, request.status, selected, request.rescheduleProposal])
+  return <MeetingActions key={identity} request={request} onDownload={onDownload} onCancel={onCancel} onComplete={onComplete} />
+}
+
+function useMeetingClock(start: number, end: number, active: boolean) {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (!active || !Number.isFinite(start) || !Number.isFinite(end) || end <= start) return
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const refresh = () => {
+      clearTimeout(timer)
+      const current = Date.now()
+      setNow(current)
+      const next = [start, end].find(boundary => boundary > current)
+      // Browser timers overflow beyond ~24.8 days. Re-evaluate wall time at each
+      // boundary (and on resume); no API polling or automatic meeting mutation.
+      if (next !== undefined) timer = setTimeout(refresh, Math.min(next - current, 2_147_483_647))
+    }
+    refresh()
+    window.addEventListener('focus', refresh)
+    document.addEventListener('visibilitychange', refresh)
+    return () => {
+      clearTimeout(timer)
+      window.removeEventListener('focus', refresh)
+      document.removeEventListener('visibilitychange', refresh)
+    }
+  }, [start, end, active])
+  return now
+}
+
+function MeetingActions({ request, onDownload, onCancel, onComplete }: Props) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [confirming, setConfirming] = useState(false)
   const [completing, setCompleting] = useState(false)
-  const [now] = useState(() => Date.now())
-  if (request.status !== 'accepted' && request.status !== 'completed') return null
   const selected = request.options.filter((item) => item.id === request.acceptedOptionId)
   const option = selected.length === 1 && selected[0].type === 'meeting' ? selected[0] : undefined
+  const now = useMeetingClock(Date.parse(option?.startAt ?? ''), Date.parse(option?.endAt ?? ''), request.status === 'accepted' && !!(onCancel || onComplete))
+  if (request.status !== 'accepted' && request.status !== 'completed') return null
   if (!option?.startAt || !option.endAt || !Number.isFinite(Date.parse(option.startAt)) || !Number.isFinite(Date.parse(option.endAt)) || Date.parse(option.endAt) <= Date.parse(option.startAt)) {
     return <p>確定日時を確認できません。依頼を更新してください。</p>
   }
@@ -25,8 +59,13 @@ export function ConfirmedMeeting({ request, onDownload, onCancel, onComplete }: 
     setError('')
     try { await onDownload(request.id) } catch { setError('取得できませんでした。依頼を更新して再試行してください。') } finally { setBusy(false) }
   }
-  const cancel = async () => {
+  const cancel = async (commandTime: number) => {
     if (!onCancel) return
+    if (Date.parse(option.startAt!) <= commandTime) {
+      setConfirming(false)
+      setError('開始時刻を過ぎたため取り消せません。依頼を更新してください。')
+      return
+    }
     setBusy(true)
     setError('')
     try {
@@ -36,8 +75,13 @@ export function ConfirmedMeeting({ request, onDownload, onCancel, onComplete }: 
       setError('取消を確認できませんでした。依頼を更新し、最新状態を確認して再試行してください。')
     } finally { setBusy(false) }
   }
-  const complete = async () => {
+  const complete = async (commandTime: number) => {
     if (!onComplete) return
+    if (Date.parse(option.endAt!) > commandTime || request.rescheduleProposal?.status === 'proposed') {
+      setCompleting(false)
+      setError('終了日時・変更提案・最新状態を確認してください。')
+      return
+    }
     setBusy(true)
     setError('')
     try { await onComplete(request.id, option.id); setCompleting(false) }
@@ -51,12 +95,12 @@ export function ConfirmedMeeting({ request, onDownload, onCancel, onComplete }: 
     <p>日時は端末のタイムゾーンで表示しています。ダウンロードしたICSをお使いのカレンダーに取り込んでください。Googleへの自動登録・招待送信は行いません。</p>
     {request.status === 'accepted' && onCancel && Date.parse(option.startAt) > now ? confirming ? <div>
       <p>この確定会議を取り消しますか？ 相手に通知し、予約枠を解放します。Googleなど外部カレンダーに取り込み済みの予定は自動削除されません。</p>
-      <button type="button" disabled={busy} onClick={cancel}>会議の取消を確定する</button>
+      <button type="button" disabled={busy} onClick={() => cancel(Date.now())}>会議の取消を確定する</button>
       <button type="button" disabled={busy} onClick={() => setConfirming(false)}>戻る</button>
     </div> : <button type="button" disabled={busy} onClick={() => setConfirming(true)}>確定会議を取り消す</button> : null}
     {request.status === 'accepted' && onComplete && Date.parse(option.endAt) <= now && request.rescheduleProposal?.status !== 'proposed' ? completing ? <div>
       <p>この会議を完了として記録しますか？ 相手に通知し、確定日時は履歴に残します。外部カレンダーの予定は変更しません。</p>
-      <button type="button" disabled={busy} onClick={complete}>会議の完了を確定する</button>
+      <button type="button" disabled={busy} onClick={() => complete(Date.now())}>会議の完了を確定する</button>
       <button type="button" disabled={busy} onClick={() => setCompleting(false)}>戻る</button>
     </div> : <button type="button" disabled={busy} onClick={() => setCompleting(true)}>会議を完了にする</button> : null}
     {error ? <p role="alert">{error}</p> : null}

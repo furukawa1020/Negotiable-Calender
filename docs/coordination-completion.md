@@ -42,8 +42,10 @@ time, and no unresolved reschedule proposal. Same-selection retries preserve the
 first completion time and do not repeat effects. Firestore and PostgreSQL commit
 state, counterpart notification and audit together; any failure rolls back all.
 
-The UI offers a confirmation action for ended meetings (reload after the meeting
-ends if the page was already open). Completion preserves the selected option and
+The UI updates cancellation/completion actions at meeting start/end and on tab
+resume, without API polling. Confirmation is bound to the exact displayed meeting
+and is reset after selection, time, status or proposal changes. The server remains
+authoritative for time and permissions. Completion preserves the selected option and
 historical ICS export; it removes the request from accepted reservation scans.
 It records a participant's action, not independently verified attendance. No
 background completion/backfill, external calendar change or added scope occurs.

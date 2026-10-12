@@ -4,7 +4,9 @@ import { RequestComposer } from './RequestComposer'
 
 const people = [{ id: 'alice', displayName: '自分' }, { id: 'bob', displayName: '依頼先B' }]
 const props = { apiURL: 'http://localhost:8080', organizationID: 'org-1', requesterID: 'alice', initialTargetID: 'bob', demo: false, onClose: vi.fn(), onCreated: vi.fn() }
-const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status })
+const json = (value: unknown, status = 200) => new Response(JSON.stringify(
+  status < 300 && value && typeof value === 'object' && 'options' in value
+    ? { id: 'created', organizationId: 'org-1', requesterUserId: 'alice', targetUserId: 'bob', status: 'suggested', ...value } : value), { status })
 
 async function fill() {
   await waitFor(() => expect(screen.getByLabelText('依頼先')).toBeEnabled())

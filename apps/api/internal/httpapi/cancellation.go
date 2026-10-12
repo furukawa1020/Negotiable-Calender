@@ -41,9 +41,13 @@ func (api *API) cancelConfirmedMeeting(response http.ResponseWriter, request *ht
 	case errors.Is(err, coordinationrequest.ErrCreationForbidden):
 		writeJSON(response, http.StatusForbidden, map[string]string{"error": "current membership required", "code": "membership_required"})
 	case errors.Is(err, coordinationrequest.ErrCancellationInvalid), errors.Is(err, coordinationrequest.ErrBookingConflict):
-		writeJSON(response, http.StatusConflict, map[string]string{"error": "meeting cannot be cancelled; refresh and retry", "code": err.Error()})
+		code := coordinationrequest.ErrCancellationInvalid.Error()
+		if errors.Is(err, coordinationrequest.ErrBookingConflict) {
+			code = coordinationrequest.ErrBookingConflict.Error()
+		}
+		writeJSON(response, http.StatusConflict, map[string]string{"error": "meeting cannot be cancelled; refresh and retry", "code": code})
 	default:
-		api.logger.Error("cancel confirmed meeting", "error", err)
+		api.logger.Error("cancel confirmed meeting", "failure_code", safeFailureCode(err))
 		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to cancel meeting"})
 	}
 }

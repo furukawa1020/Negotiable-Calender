@@ -60,6 +60,6 @@ func (api *API) rescheduleMeeting(response http.ResponseWriter, request *http.Re
 			return
 		}
 	}
-	api.logger.Error("reschedule meeting", "error", err)
+	api.logger.Error("reschedule meeting", "failure_code", safeFailureCode(err))
 	writeJSON(response, 500, map[string]string{"error": "unable to reschedule meeting"})
 }

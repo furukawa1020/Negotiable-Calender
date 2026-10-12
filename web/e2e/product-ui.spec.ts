@@ -46,7 +46,7 @@ test('authenticated organization recipient is carried into reliable request subm
     if (path.endsWith('/requests') && request.method() === 'POST') {
       commands.push({ body: request.postDataJSON(), key: request.headers()['idempotency-key'] })
       if (commands.length === 1) return route.abort('failed')
-      return route.fulfill({ status: 200, json: { options: [{ id: 'generated-option' }] } })
+      return route.fulfill({ status: 200, json: { id: 'created', organizationId: 'org-1', requesterUserId: 'alice', targetUserId: 'bob', status: 'suggested', options: [{ id: 'generated-option' }] } })
     }
     return route.fulfill({ status: 200, json })
   })

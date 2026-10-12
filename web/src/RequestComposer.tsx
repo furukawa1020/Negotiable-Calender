@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
+import { fetchBookingResult } from './bookingTransport'
+
+class CreationFailure extends Error {}
+const unknownOutcome = '送信結果を確認できません。同じ内容で再送すると重複を防げます。内容を変える前に送信済みを確認してください。'
 
 type Recipient = { id: string; displayName: string }
 type Props = {
@@ -44,13 +48,15 @@ export function RequestComposer({ apiURL, organizationID, requesterID, initialTa
     let cancelled = false
     void (async () => {
       try {
-        const response = await fetch(apiURL + '/api/v1/people?organizationId=' + encodeURIComponent(organizationID), {
-          credentials: 'include', signal: controller.signal,
+        const result = await fetchBookingResult(apiURL + '/api/v1/people?organizationId=' + encodeURIComponent(organizationID), {
+          credentials: 'include',
           headers: { 'X-Demo-User-ID': requesterID, 'X-Organization-ID': organizationID },
-        })
-        if (!response.ok) throw new Error('directory unavailable')
-        const result = await response.json() as { people: Recipient[] }
-        if (!Array.isArray(result.people)) throw new Error('invalid directory')
+        }, async response => {
+          const value = await response.json() as { people: Recipient[] }
+          if (!Array.isArray(value?.people) || value.people.some(person => !person || typeof person.id !== 'string' || !person.id || typeof person.displayName !== 'string')) throw new Error('invalid directory')
+          return value
+        }, () => !cancelled, { signal: controller.signal })
+        if (!result) return
         if (!cancelled) {
           const available = result.people.filter(person => person.id !== requesterID)
           setRecipients(available)
@@ -84,32 +90,34 @@ export function RequestComposer({ apiURL, organizationID, requesterID, initialTa
     setError('')
     const controller = new AbortController()
     submission.current = controller
-    const timer = setTimeout(() => controller.abort(), 20_000)
     try {
-      const response = await fetch(apiURL + '/api/v1/requests', {
-        method: 'POST', credentials: 'include', signal: controller.signal,
+      const created = await fetchBookingResult(apiURL + '/api/v1/requests', {
+        method: 'POST', credentials: 'include',
         headers: { 'Content-Type': 'application/json', 'Idempotency-Key': attempt.current.key, 'X-Demo-User-ID': requesterID, 'X-Organization-ID': organizationID },
         body: attempt.current.payload,
-      })
-      if (!response.ok) {
+      }, async response => {
+        const value = await response.json()
+        if (!value || typeof value.id !== 'string' || !value.id.trim() || value.organizationId !== organizationID || value.requesterUserId !== requesterID
+          || (value.delegatedFromUserId || value.targetUserId) !== target
+          || !['pending', 'suggested', 'accepted', 'declined', 'delegated', 'cancelled', 'expired', 'completed', 'async'].includes(value.status)
+          || !Array.isArray(value.options)) throw new Error('invalid creation acknowledgement')
+        return value as { options: unknown[] }
+      }, () => alive.current, { signal: controller.signal, readError: async response => {
         if (response.status === 409) {
           const failure = await response.json().catch(() => ({})) as { code?: string; error?: string }
-          if (failure?.code === 'creation_expired') throw new Error('保存前に期限または候補の開始時刻を過ぎました。期限を確認して再送してください。')
-          if (failure?.code === 'availability_changed') throw new Error('カレンダーの空き状況を確認できません。カレンダーを同期・更新して、同じ内容で再送してください。')
-          if (failure?.error === 'idempotency_key_conflict') throw new Error('送信キーと内容が一致しません。送信済みの依頼を確認してください。')
-          throw new Error('候補の空き状況を確認できませんでした。送信済みの依頼を確認し、同じ内容で再送してください。')
+          if (failure?.code === 'creation_expired') throw new CreationFailure('保存前に期限または候補の開始時刻を過ぎました。期限を確認して再送してください。')
+          if (failure?.code === 'availability_changed') throw new CreationFailure('カレンダーの空き状況を確認できません。カレンダーを同期・更新して、同じ内容で再送してください。')
+          if (failure?.error === 'idempotency_key_conflict') throw new CreationFailure('送信キーと内容が一致しません。送信済みの依頼を確認してください。')
+          throw new CreationFailure('候補の空き状況を確認できませんでした。送信済みの依頼を確認し、同じ内容で再送してください。')
         }
-        if (response.status === 401 || response.status === 403) throw new Error('送信できません。ログイン状態と、双方が同じ組織に所属していることを確認してください。')
-        if (response.status === 422 || response.status === 400) throw new Error('入力内容を確認してください。自己依頼や期限切れの依頼は送信できません。')
-        throw new Error('送信結果を確認できません。同じ内容で再送すると重複を防げます。内容を変える前に送信済みを確認してください。')
-      }
-      const created = await response.json() as { options?: unknown[] }
-      if (alive.current) onCreated(Array.isArray(created.options) ? created.options.length : 0)
+        if (response.status === 401 || response.status === 403) throw new CreationFailure('送信できません。ログイン状態と、双方が同じ組織に所属していることを確認してください。')
+        if (response.status === 422 || response.status === 400) throw new CreationFailure('入力内容を確認してください。自己依頼や期限切れの依頼は送信できません。')
+        throw new CreationFailure(unknownOutcome)
+      } })
+      if (created && alive.current) onCreated(created.options.length)
     } catch (failure) {
-      if (alive.current) setError(failure instanceof Error && !['TypeError', 'AbortError'].includes(failure.name)
-        ? failure.message : '送信結果を確認できません。同じ内容で再送すると重複を防げます。内容を変える前に送信済みを確認してください。')
+      if (alive.current) setError(failure instanceof CreationFailure ? failure.message : unknownOutcome)
     } finally {
-      clearTimeout(timer)
       sending.current = false
       if (alive.current) setSaving(false)
     }

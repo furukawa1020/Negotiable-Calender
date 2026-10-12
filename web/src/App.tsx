@@ -267,6 +267,8 @@ function App() {
   const requestLifecycle = useRef(0)
   const inboxLoad = useRef(0)
   const sentLoad = useRef(0)
+  const notificationLoad = useRef(0)
+  const auditLoad = useRef(0)
   const [workspaces, setWorkspaces] = useState<Workspace[]>([])
   const [invitationToken, setInvitationToken] = useState('')
   const [invitationPreview, setInvitationPreview] = useState<InvitationPreview | null>(null)
@@ -297,6 +299,14 @@ function App() {
   const resetRequestScope = useCallback(() => {
     // Invalidate synchronously, before React cleans up the old request rows.
     requestLifecycle.current++
+    notificationLoad.current++
+    auditLoad.current++
+    setNotifications([])
+    setNotificationsOpen(false)
+    setNotificationsLoading(false)
+    setAuditLogs([])
+    setAuditLoading(false)
+    setAuditError('')
     setInboxRequests([])
     setSentRequests([])
     setInboxLoading(false)
@@ -643,57 +653,72 @@ function App() {
   }).format(new Date(value))
 
   const openNotifications = async () => {
+    const lifetime = captureRequestLifetime()
+    const generation = ++notificationLoad.current
+    const isCurrent = () => lifetime() && generation === notificationLoad.current
     const nextOpen = !notificationsOpen
     setNotificationsOpen(nextOpen)
     setAccountOpen(false)
-    if (!nextOpen) return
+    if (!nextOpen) { setNotificationsLoading(false); return }
     setNotificationsLoading(true)
     try {
-      const response = await apiFetch(`${apiURL}/api/v1/notifications`, {
+      const payload = await fetchBookingResult(`${apiURL}/api/v1/notifications`, {
         headers: { 'X-Demo-User-ID': activeUserID },
-      })
-      if (!response.ok) throw new Error('notifications failed')
-      const payload = await response.json() as { notifications: AppNotification[] }
+      }, async response => {
+        const value = await response.json() as { notifications: AppNotification[] }
+        if (!Array.isArray(value?.notifications)) throw new Error('invalid notifications')
+        return value
+      }, isCurrent)
+      if (!payload || !isCurrent()) return
       setNotifications(payload.notifications)
     } catch {
-      setNotice('通知を取得できませんでした。')
+      if (isCurrent()) setNotice('通知を取得できませんでした。')
     } finally {
-      setNotificationsLoading(false)
+      if (isCurrent()) setNotificationsLoading(false)
     }
   }
 
   const markNotificationRead = async (id: string) => {
+    const isCurrent = captureRequestLifetime()
     try {
-      const response = await apiFetch(`${apiURL}/api/v1/notifications/${id}/read`, {
+      const result = await fetchBookingResult(`${apiURL}/api/v1/notifications/${encodeURIComponent(id)}/read`, {
         method: 'POST', headers: { 'X-Demo-User-ID': activeUserID },
-      })
-      if (!response.ok) throw new Error('read failed')
+      }, async () => true, isCurrent)
+      if (!result || !isCurrent()) return
+      notificationLoad.current++
+      setNotificationsLoading(false)
       setNotifications((current) => current.map((item) => item.id === id
         ? { ...item, readAt: new Date().toISOString() }
         : item))
     } catch {
-      setNotice('通知を既読にできませんでした。')
+      if (isCurrent()) setNotice('通知を既読にできませんでした。')
     }
   }
 
   const openAudit = async () => {
+    const lifetime = captureRequestLifetime()
+    const generation = ++auditLoad.current
+    const isCurrent = () => lifetime() && generation === auditLoad.current
     setCurrentView('audit')
     setAuditLoading(true)
     setAuditError('')
     try {
-      const response = await apiFetch(`${apiURL}/api/v1/audit-logs`, {
+      const payload = await fetchBookingResult(`${apiURL}/api/v1/audit-logs`, {
         headers: {
           'X-Demo-User-ID': activeUserID,
           'X-Organization-ID': activeOrganizationID,
         },
-      })
-      if (!response.ok) throw new Error('audit failed')
-      const payload = await response.json() as { auditLogs: AuditEvent[] }
+      }, async response => {
+        const value = await response.json() as { auditLogs: AuditEvent[] }
+        if (!Array.isArray(value?.auditLogs)) throw new Error('invalid audit')
+        return value
+      }, isCurrent)
+      if (!payload || !isCurrent()) return
       setAuditLogs(payload.auditLogs)
     } catch {
-      setAuditError('監査ログを取得できませんでした。')
+      if (isCurrent()) setAuditError('監査ログを取得できませんでした。')
     } finally {
-      setAuditLoading(false)
+      if (isCurrent()) setAuditLoading(false)
     }
   }
 

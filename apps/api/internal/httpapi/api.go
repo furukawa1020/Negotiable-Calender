@@ -106,13 +106,13 @@ func (api *API) exportUserData(response http.ResponseWriter, request *http.Reque
 
 	requests, err := api.requests.ListForUser(request.Context(), userID)
 	if err != nil {
-		api.logger.Error("export coordination requests", "error", err)
+		api.logger.Error("export coordination requests", "failure_code", safeFailureCode(err))
 		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to export user data"})
 		return
 	}
 	projections, err := api.projections.ListForUser(request.Context(), userID)
 	if err != nil {
-		api.logger.Error("export projections", "error", err)
+		api.logger.Error("export projections", "failure_code", safeFailureCode(err))
 		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to export user data"})
 		return
 	}
@@ -122,7 +122,7 @@ func (api *API) exportUserData(response http.ResponseWriter, request *http.Reque
 	if err == nil {
 		sharingPolicy = &value
 	} else if !errors.Is(err, policy.ErrNotFound) {
-		api.logger.Error("export sharing policy", "error", err)
+		api.logger.Error("export sharing policy", "failure_code", safeFailureCode(err))
 		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to export user data"})
 		return
 	}
@@ -153,7 +153,7 @@ func (api *API) listAuditLogs(response http.ResponseWriter, request *http.Reques
 	}
 	values, err := api.audits.List(request.Context(), organizationID)
 	if err != nil {
-		api.logger.Error("list audit logs", "error", err)
+		api.logger.Error("list audit logs", "failure_code", safeFailureCode(err))
 		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to load audit logs"})
 		return
 	}
@@ -176,7 +176,7 @@ func (api *API) requireSelf(response http.ResponseWriter, request *http.Request,
 func (api *API) requireMembership(response http.ResponseWriter, request *http.Request, organizationID, userID string) bool {
 	member, err := api.organizations.IsMember(request.Context(), organizationID, userID)
 	if err != nil {
-		api.logger.Error("check organization membership", "error", err)
+		api.logger.Error("check organization membership", "failure_code", safeFailureCode(err))
 		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to authorize request"})
 		return false
 	}
@@ -196,7 +196,7 @@ func (api *API) recordAudit(ctx context.Context, actorUserID string, action audi
 		ResourceType: "request", ResourceID: requestID, CreatedAt: time.Now().UTC(),
 	})
 	if err != nil {
-		api.logger.Error("create audit event", "action", action, "error", err)
+		api.logger.Error("create audit event", "action", action, "failure_code", safeFailureCode(err))
 	}
 }
 
@@ -212,7 +212,7 @@ func (api *API) listNotifications(response http.ResponseWriter, request *http.Re
 	}
 	values, err := api.notifications.List(request.Context(), userID)
 	if err != nil {
-		api.logger.Error("list notifications", "error", err)
+		api.logger.Error("list notifications", "failure_code", safeFailureCode(err))
 		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to load notifications"})
 		return
 	}
@@ -231,7 +231,7 @@ func (api *API) readNotification(response http.ResponseWriter, request *http.Req
 	}
 	updated, err := api.notifications.MarkRead(request.Context(), request.PathValue("notificationId"), userID, time.Now().UTC())
 	if err != nil {
-		api.logger.Error("mark notification read", "error", err)
+		api.logger.Error("mark notification read", "failure_code", safeFailureCode(err))
 		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to update notification"})
 		return
 	}
@@ -251,7 +251,7 @@ func (api *API) notify(ctx context.Context, userID string, kind notification.Typ
 		RequestID: requestID, Message: message, CreatedAt: time.Now().UTC(),
 	})
 	if err != nil {
-		api.logger.Error("create in-app notification", "type", kind, "error", err)
+		api.logger.Error("create in-app notification", "type", kind, "failure_code", safeFailureCode(err))
 	}
 }
 
@@ -286,7 +286,7 @@ func (api *API) delegateCoordinationRequest(response http.ResponseWriter, reques
 		return
 	}
 	if err != nil {
-		api.logger.Error("delegate coordination request", "error", err)
+		api.logger.Error("delegate coordination request", "failure_code", safeFailureCode(err))
 		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to delegate request"})
 		return
 	}
@@ -339,7 +339,7 @@ func (api *API) suggestCoordinationRequest(response http.ResponseWriter, request
 		return
 	}
 	if err != nil {
-		api.logger.Error("suggest coordination option", "error", err)
+		api.logger.Error("suggest coordination option", "failure_code", safeFailureCode(err))
 		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to suggest option"})
 		return
 	}
@@ -409,7 +409,7 @@ func (api *API) asyncCoordinationRequest(response http.ResponseWriter, request *
 		return
 	}
 	if err != nil {
-		api.logger.Error("load coordination request for async response", "error", err)
+		api.logger.Error("load coordination request for async response", "failure_code", safeFailureCode(err))
 		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to update request"})
 		return
 	}
@@ -421,7 +421,7 @@ func (api *API) asyncCoordinationRequest(response http.ResponseWriter, request *
 		writeJSON(response, http.StatusConflict, map[string]string{"error": "request cannot be updated"})
 		return
 	} else if err != nil {
-		api.logger.Error("respond asynchronously to coordination request", "error", err)
+		api.logger.Error("respond asynchronously to coordination request", "failure_code", safeFailureCode(err))
 		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to update request"})
 		return
 	}
@@ -443,7 +443,7 @@ func (api *API) respondToCoordinationRequest(response http.ResponseWriter, reque
 		return
 	}
 	if err != nil {
-		api.logger.Error("load coordination request for response", "error", err)
+		api.logger.Error("load coordination request for response", "failure_code", safeFailureCode(err))
 		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to update request"})
 		return
 	}
@@ -477,7 +477,7 @@ func (api *API) respondToCoordinationRequest(response http.ResponseWriter, reque
 		return
 	}
 	if err != nil {
-		api.logger.Error("respond to coordination request", "error", err)
+		api.logger.Error("respond to coordination request", "failure_code", safeFailureCode(err))
 		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to update request"})
 		return
 	}
@@ -516,7 +516,7 @@ func (api *API) listCoordinationRequests(response http.ResponseWriter, request *
 		return
 	}
 	if err != nil {
-		api.logger.Error("list coordination requests", "error", err)
+		api.logger.Error("list coordination requests", "failure_code", safeFailureCode(err))
 		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to load requests"})
 		return
 	}
@@ -544,7 +544,7 @@ func (api *API) getCoordinationRequest(response http.ResponseWriter, request *ht
 		return
 	}
 	if err != nil {
-		api.logger.Error("get coordination request", "error", err)
+		api.logger.Error("get coordination request", "failure_code", safeFailureCode(err))
 		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to load request"})
 		return
 	}
@@ -567,7 +567,7 @@ func (api *API) cancelCoordinationRequest(response http.ResponseWriter, request 
 		return
 	}
 	if err != nil {
-		api.logger.Error("load coordination request before cancellation", "error", err)
+		api.logger.Error("load coordination request before cancellation", "failure_code", safeFailureCode(err))
 		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to cancel request"})
 		return
 	}
@@ -579,7 +579,7 @@ func (api *API) cancelCoordinationRequest(response http.ResponseWriter, request 
 		writeJSON(response, http.StatusConflict, map[string]string{"error": "request is no longer cancellable"})
 		return
 	} else if err != nil {
-		api.logger.Error("cancel coordination request", "error", err)
+		api.logger.Error("cancel coordination request", "failure_code", safeFailureCode(err))
 		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to cancel request"})
 		return
 	}
@@ -664,7 +664,7 @@ func (api *API) createCoordinationRequest(response http.ResponseWriter, request 
 	}
 	publicProjections, err := api.projections.List(request.Context(), value.TargetUserID, now, value.DeadlineAt)
 	if err != nil {
-		api.logger.Error("load projections for request candidates", "error", err)
+		api.logger.Error("load projections for request candidates", "failure_code", safeFailureCode(err))
 		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to generate request options"})
 		return
 	}
@@ -704,7 +704,7 @@ func (api *API) createCoordinationRequest(response http.ResponseWriter, request 
 		return
 	}
 	if err := api.requests.Create(request.Context(), value); err != nil {
-		api.logger.Error("create coordination request", "error", err)
+		api.logger.Error("create coordination request", "failure_code", safeFailureCode(err))
 		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to create request"})
 		return
 	}
@@ -733,7 +733,7 @@ func (api *API) listPeople(response http.ResponseWriter, request *http.Request) 
 	}
 	people, err := api.organizations.ListPeople(request.Context(), organizationID)
 	if err != nil {
-		api.logger.Error("list organization people", "error", err)
+		api.logger.Error("list organization people", "failure_code", safeFailureCode(err))
 		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to load people"})
 		return
 	}
@@ -785,7 +785,7 @@ func (api *API) getPublicProjection(response http.ResponseWriter, request *http.
 	}
 	view, err := api.projections.GetView(request.Context(), request.PathValue("userId"), timezone, from, to)
 	if err != nil {
-		api.logger.Error("get public projection", "error", err)
+		api.logger.Error("get public projection", "failure_code", safeFailureCode(err))
 		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to load projection"})
 		return
 	}
@@ -805,7 +805,7 @@ func (api *API) listManualOverrides(response http.ResponseWriter, request *http.
 	}
 	values, err := api.policies.ListActiveOverrides(request.Context(), request.PathValue("userId"), time.Now().UTC())
 	if err != nil {
-		api.logger.Error("list manual overrides", "error", err)
+		api.logger.Error("list manual overrides", "failure_code", safeFailureCode(err))
 		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to load manual overrides"})
 		return
 	}
@@ -837,7 +837,7 @@ func (api *API) createManualOverride(response http.ResponseWriter, request *http
 		return
 	}
 	if err := api.policies.CreateOverride(request.Context(), value); err != nil {
-		api.logger.Error("create manual override", "error", err)
+		api.logger.Error("create manual override", "failure_code", safeFailureCode(err))
 		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to create manual override"})
 		return
 	}
@@ -895,7 +895,7 @@ func (api *API) getSharingPolicy(response http.ResponseWriter, request *http.Req
 		return
 	}
 	if err != nil {
-		api.logger.Error("get sharing policy", "error", err)
+		api.logger.Error("get sharing policy", "failure_code", safeFailureCode(err))
 		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to load sharing policy"})
 		return
 	}
@@ -925,7 +925,7 @@ func (api *API) putSharingPolicy(response http.ResponseWriter, request *http.Req
 	if errors.Is(err, policy.ErrNotFound) {
 		value = policy.SharingPolicy{ID: newID("policy"), UserID: userID, CreatedAt: now}
 	} else if err != nil {
-		api.logger.Error("load sharing policy before update", "error", err)
+		api.logger.Error("load sharing policy before update", "failure_code", safeFailureCode(err))
 		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to update sharing policy"})
 		return
 	}
@@ -945,7 +945,7 @@ func (api *API) putSharingPolicy(response http.ResponseWriter, request *http.Req
 		return
 	}
 	if err := api.policies.Upsert(request.Context(), value); err != nil {
-		api.logger.Error("update sharing policy", "error", err)
+		api.logger.Error("update sharing policy", "failure_code", safeFailureCode(err))
 		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to update sharing policy"})
 		return
 	}

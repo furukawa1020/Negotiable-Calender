@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // Application safety limit, not a Google token-size guarantee.
@@ -47,7 +48,7 @@ func decodeGoogleToken(ctx context.Context, response *http.Response) (TokenSet, 
 		if err != nil {
 			return TokenSet{}, errGoogleTokenResponse
 		}
-		name := strings.ToLower(key.(string))
+		name := foldTokenKey(key.(string))
 		if seen[name] {
 			return TokenSet{}, errGoogleTokenResponse
 		}
@@ -85,4 +86,19 @@ func usableBearerToken(value string) bool {
 		}
 	}
 	return true
+}
+
+// encoding/json matches struct fields with Unicode simple folding, not just
+// ASCII lowercasing (for example long-s). Use the same equivalence classes so
+// alternate key spellings cannot overwrite a credential after the preflight.
+func foldTokenKey(value string) string {
+	return strings.Map(func(r rune) rune {
+		least := r
+		for next := unicode.SimpleFold(r); next != r; next = unicode.SimpleFold(next) {
+			if next < least {
+				least = next
+			}
+		}
+		return least
+	}, value)
 }

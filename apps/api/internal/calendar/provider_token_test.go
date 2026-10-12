@@ -27,6 +27,7 @@ func TestGoogleTokenRejectsMalformedSuccessWithoutCredentials(t *testing.T) {
 		`{"access_token":"private-secret","expires_in":3600} {}`,
 		`{"access_token":"private-secret","access_token":"other","expires_in":3600}`,
 		`{"access_token":"private-secret","ACCESS_TOKEN":"other","expires_in":3600}`,
+		`{"access_token":"private-secret","acce\u017fs_token":"other","expires_in":3600}`,
 		`{"access_token":"private-secret","expires_in":3600,"scope":{},"private-secret":false}`,
 		`{"access_token":"private-secret","expires_in":3600,"token_type":"MAC"}`,
 		`{"access_token":"private-secret\r\n","expires_in":3600}`,

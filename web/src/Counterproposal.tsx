@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
+import { fetchBookingResult } from './bookingTransport'
+
+class ProposalFailure extends Error {}
 
 export type MeetingOffer = { id: string; requestId?: string; type: 'meeting' | 'async' | 'delegate' | 'decline'; startAt?: string; endAt?: string; proposedByUserId?: string }
 type Identity = { apiURL: string; organizationID: string; actor: string; requestID: string; disabled: boolean }
@@ -32,26 +35,26 @@ export function CounterproposalForm(props: Identity & { durationMinutes: number;
     }
     const pending = begin(); if (!pending) return
     setBusy(true); setError('')
-    const timeout = setTimeout(() => pending.abort(), 20_000)
     try {
-      const response = await fetch(`${props.apiURL}/api/v1/requests/${encodeURIComponent(props.requestID)}/suggest`, {
-        method: 'POST', credentials: 'include', headers: headers(props), signal: pending.signal,
+      const option = await fetchBookingResult(`${props.apiURL}/api/v1/requests/${encodeURIComponent(props.requestID)}/suggest`, {
+        method: 'POST', credentials: 'include', headers: headers(props),
         body: JSON.stringify({ startAt: startAt.toISOString(), endAt: endAt.toISOString() }),
-      })
-      if (!response.ok) {
+      }, async response => {
+        const option = await response.json() as MeetingOffer
+        if (!option || !option.id || option.requestId !== props.requestID || option.type !== 'meeting' || option.proposedByUserId !== props.actor || Date.parse(option.startAt ?? '') !== startAt.getTime() || Date.parse(option.endAt ?? '') !== endAt.getTime()) throw new Error('invalid acknowledgement')
+        return option
+      }, isActive, { signal: pending.signal, readError: async response => {
         if ([400, 401, 403, 404, 409, 422].includes(response.status)) {
           const data = await response.json() as { code?: string }
-          if (isActive()) setError(data.code === 'proposal_limit' ? '候補は10件までです。既存の候補から調整するか、依頼を作り直してください。' : '提案できません。期限・所要時間・担当・所属を確認し、一覧を更新してください。')
-          return
+          throw new ProposalFailure(data?.code === 'proposal_limit' ? '候補は10件までです。既存の候補から調整するか、依頼を作り直してください。' : '提案できません。期限・所要時間・担当・所属を確認し、一覧を更新してください。')
         }
         throw new Error('unknown')
-      }
-      const option = await response.json() as MeetingOffer
-      if (!option.id || option.requestId !== props.requestID || option.type !== 'meeting' || option.proposedByUserId !== props.actor || Date.parse(option.startAt ?? '') !== startAt.getTime() || Date.parse(option.endAt ?? '') !== endAt.getTime()) throw new Error('invalid acknowledgement')
-      if (isActive()) { props.onProposed(option); setUnknown(false); setStart(''); setEnd('') }
-    } catch {
+      } })
+      if (option && isActive()) { props.onProposed(option); setUnknown(false); setStart(''); setEnd('') }
+    } catch (failure) {
+      if (failure instanceof ProposalFailure) { if (isActive()) setError(failure.message); return }
       if (isActive()) { setUnknown(true); setError('提案結果を確認できません。同じ日時で再試行できます。日時を変える前に一覧を更新してください。') }
-    } finally { clearTimeout(timeout); finish(pending); if (isActive()) setBusy(false) }
+    } finally { finish(pending); if (isActive()) setBusy(false) }
   }
   return <form className="suggest-form" onSubmit={submit}>
     <p className="field-help">相手に別の時間を提案します。相手が承認するまで予約は確定しません。所要時間は{props.durationMinutes}分です。</p>
@@ -72,24 +75,24 @@ export function CounterproposalAgreement(props: Identity & { targetID: string; s
     if (props.disabled || (uncertainOption && uncertainOption !== optionID)) return
     const pending = begin(); if (!pending) return
     setBusy(true); setError('')
-    const timeout = setTimeout(() => pending.abort(), 20_000)
     try {
-      const response = await fetch(`${props.apiURL}/api/v1/requests/${encodeURIComponent(props.requestID)}/accept`, {
-        method: 'POST', credentials: 'include', headers: headers(props), signal: pending.signal, body: JSON.stringify({ optionId: optionID }),
-      })
-      if (!response.ok) {
+      const confirmed = await fetchBookingResult(`${props.apiURL}/api/v1/requests/${encodeURIComponent(props.requestID)}/accept`, {
+        method: 'POST', credentials: 'include', headers: headers(props), body: JSON.stringify({ optionId: optionID }),
+      }, async response => {
+        const result = await response.json() as { id: string; status: string; acceptedOptionId: string }
+        if (!result || result.id !== props.requestID || result.status !== 'accepted' || result.acceptedOptionId !== optionID) throw new Error('invalid acknowledgement')
+        return true
+      }, isActive, { signal: pending.signal, readError: async response => {
         if ([400, 401, 403, 404, 409, 422].includes(response.status)) {
-          if (isActive()) setError('確定できません。空き状況・期限・担当が変わっている可能性があります。一覧を更新し、別の候補を相談してください。')
-          return
+          throw new ProposalFailure('確定できません。空き状況・期限・担当が変わっている可能性があります。一覧を更新し、別の候補を相談してください。')
         }
         throw new Error('unknown')
-      }
-      const result = await response.json() as { id: string; status: string; acceptedOptionId: string }
-      if (result.id !== props.requestID || result.status !== 'accepted' || result.acceptedOptionId !== optionID) throw new Error('invalid acknowledgement')
-      if (isActive()) props.onConfirmed(optionID)
-    } catch {
+      } })
+      if (confirmed && isActive()) props.onConfirmed(optionID)
+    } catch (failure) {
+      if (failure instanceof ProposalFailure) { if (isActive()) setError(failure.message); return }
       if (isActive()) { setUncertainOption(optionID); setError('承認結果を確認できません。同じ提案への再試行は重複しません。別の候補を選ぶ前に一覧を更新してください。') }
-    } finally { clearTimeout(timeout); finish(pending); if (isActive()) setBusy(false) }
+    } finally { finish(pending); if (isActive()) setBusy(false) }
   }
   if (props.status !== 'suggested' || offers.length === 0) return null
   const format = new Intl.DateTimeFormat('ja-JP', { dateStyle: 'medium', timeStyle: 'short' })

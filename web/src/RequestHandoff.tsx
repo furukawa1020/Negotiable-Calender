@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
+import { fetchBookingResult } from './bookingTransport'
+
+class HandoffFailure extends Error {}
 
 type Person = { id: string; displayName: string }
 type Props = { apiURL: string; organizationID: string; actor: string; requestID: string; requesterID: string; disabled: boolean; onDone: (name: string) => void }
@@ -22,21 +25,21 @@ export function RequestHandoff({ apiURL, organizationID, actor, requestID, reque
     if (lock.current) return
     lock.current = true; setOpen(true); setLoading(true); setError('')
     const controller = new AbortController(); controllers.current.add(controller)
-    const timeout = setTimeout(() => controller.abort(), 20_000)
     try {
-      const response = await fetch(`${apiURL}/api/v1/people?organizationId=${encodeURIComponent(organizationID)}`, {
-        credentials: 'include', signal: controller.signal, headers: { 'X-Demo-User-ID': actor, 'X-Organization-ID': organizationID },
-      })
-      if (!response.ok) throw new Error('directory unavailable')
-      const data = await response.json() as { people: Person[] }
-      if (!Array.isArray(data.people)) throw new Error('invalid directory')
-      if (alive.current) {
+      const data = await fetchBookingResult(`${apiURL}/api/v1/people?organizationId=${encodeURIComponent(organizationID)}`, {
+        headers: { 'X-Demo-User-ID': actor, 'X-Organization-ID': organizationID },
+      }, async response => {
+        const data = await response.json() as { people: Person[] }
+        if (!Array.isArray(data?.people) || data.people.some(person => !person || typeof person.id !== 'string' || !person.id || typeof person.displayName !== 'string')) throw new Error('invalid directory')
+        return data
+      }, () => alive.current, { signal: controller.signal })
+      if (data && alive.current) {
         const available = data.people.filter(person => person.id !== actor && person.id !== requesterID)
         setPeople(available); setTarget(current => available.some(person => person.id === current) ? current : '')
       }
     } catch {
       if (alive.current) { setPeople([]); setTarget(''); setError('引継ぎ先を取得できません。再読み込みしてください。') }
-    } finally { clearTimeout(timeout); controllers.current.delete(controller); lock.current = false; if (alive.current) setLoading(false) }
+    } finally { controllers.current.delete(controller); lock.current = false; if (alive.current) setLoading(false) }
   }
 
   const submit = async (event: FormEvent) => {
@@ -44,33 +47,32 @@ export function RequestHandoff({ apiURL, organizationID, actor, requestID, reque
     if (disabled || lock.current || !people.some(person => person.id === target)) return
     lock.current = true; setSaving(true); setError('')
     const controller = new AbortController(); controllers.current.add(controller)
-    const timeout = setTimeout(() => controller.abort(), 20_000)
     try {
-      const response = await fetch(`${apiURL}/api/v1/requests/${encodeURIComponent(requestID)}/delegate`, {
-        method: 'POST', credentials: 'include', signal: controller.signal,
+      const result = await fetchBookingResult(`${apiURL}/api/v1/requests/${encodeURIComponent(requestID)}/delegate`, {
+        method: 'POST', credentials: 'include',
         headers: { 'Content-Type': 'application/json', 'X-Demo-User-ID': actor, 'X-Organization-ID': organizationID },
         body: JSON.stringify({ delegateUserId: target }),
-      })
-      if (!response.ok) {
+      }, async response => {
+        const result = await response.json() as { id: string; handedOff: boolean; delegatedUserId: string }
+        if (!result || result.id !== requestID || result.handedOff !== true || result.delegatedUserId !== target) throw new Error('unknown outcome')
+        return true
+      }, () => alive.current, { signal: controller.signal, readError: async response => {
         if (response.status === 409) {
           const failure: unknown = await response.json().catch(() => null)
           if (failure && typeof failure === 'object' && 'code' in failure && failure.code === 'availability_changed') {
-            if (alive.current) setError('参加者のカレンダーの空き状況を確認できません。各自のカレンダーを同期・更新後、同じ相手への引継ぎを再試行してください。')
-            return
+            throw new HandoffFailure('参加者のカレンダーの空き状況を確認できません。各自のカレンダーを同期・更新後、同じ相手への引継ぎを再試行してください。')
           }
         }
         if ([400, 401, 403, 404, 409].includes(response.status)) {
-          if (alive.current) setError('引継ぎできません。期限・所属・最新の担当を一覧で確認してください。引継ぎは1回までです。')
-          return
+          throw new HandoffFailure('引継ぎできません。期限・所属・最新の担当を一覧で確認してください。引継ぎは1回までです。')
         }
         throw new Error('unknown outcome')
-      }
-      const result = await response.json() as { id: string; handedOff: boolean; delegatedUserId: string }
-      if (result.id !== requestID || !result.handedOff || result.delegatedUserId !== target) throw new Error('unknown outcome')
-      if (alive.current) onDone(people.find(person => person.id === target)!.displayName)
-    } catch {
+      } })
+      if (result && alive.current) onDone(people.find(person => person.id === target)!.displayName)
+    } catch (failure) {
+      if (failure instanceof HandoffFailure) { if (alive.current) setError(failure.message); return }
       if (alive.current) { setUnknown(true); setError(uncertain) }
-    } finally { clearTimeout(timeout); controllers.current.delete(controller); lock.current = false; if (alive.current) setSaving(false) }
+    } finally { controllers.current.delete(controller); lock.current = false; if (alive.current) setSaving(false) }
   }
 
   if (!open) return <button type="button" disabled={disabled} onClick={() => void load()}>担当を引き継ぐ</button>

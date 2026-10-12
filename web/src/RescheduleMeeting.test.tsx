@@ -3,7 +3,11 @@ import { describe, expect, it, vi } from 'vitest'
 import { RescheduleMeeting } from './RescheduleMeeting'
 
 const at = (hours: number) => new Date(Date.now() + hours * 3600000).toISOString()
-const fixture = () => ({ id: 'r', status: 'accepted', acceptedOptionId: 'original', durationMinutes: 30, deadlineAt: at(24), options: [{ id: 'original', type: 'meeting', startAt: at(1), endAt: at(1.5) }, { id: 'proposal-new', type: 'meeting', startAt: at(2), endAt: at(2.5) }] })
+const fixture = () => {
+  const base = Date.now()
+  const time = (hours: number) => new Date(base + hours * 3600000).toISOString()
+  return { id: 'r', status: 'accepted', acceptedOptionId: 'original', durationMinutes: 30, deadlineAt: time(24), options: [{ id: 'original', type: 'meeting', startAt: time(1), endAt: time(1.5) }, { id: 'proposal-new', type: 'meeting', startAt: time(2), endAt: time(2.5) }] }
+}
 const proposal = { id: 'proposal-new', proposerUserId: 'alice', expectedOptionId: 'original', status: 'proposed' }
 
 describe('RescheduleMeeting', () => {

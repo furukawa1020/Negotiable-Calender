@@ -59,9 +59,9 @@ function MeetingActions({ request, onDownload, onCancel, onComplete }: Props) {
     setError('')
     try { await onDownload(request.id) } catch { setError('取得できませんでした。依頼を更新して再試行してください。') } finally { setBusy(false) }
   }
-  const cancel = async () => {
+  const cancel = async (commandTime: number) => {
     if (!onCancel) return
-    if (Date.parse(option.startAt!) <= Date.now()) {
+    if (Date.parse(option.startAt!) <= commandTime) {
       setConfirming(false)
       setError('開始時刻を過ぎたため取り消せません。依頼を更新してください。')
       return
@@ -75,9 +75,9 @@ function MeetingActions({ request, onDownload, onCancel, onComplete }: Props) {
       setError('取消を確認できませんでした。依頼を更新し、最新状態を確認して再試行してください。')
     } finally { setBusy(false) }
   }
-  const complete = async () => {
+  const complete = async (commandTime: number) => {
     if (!onComplete) return
-    if (Date.parse(option.endAt!) > Date.now() || request.rescheduleProposal?.status === 'proposed') {
+    if (Date.parse(option.endAt!) > commandTime || request.rescheduleProposal?.status === 'proposed') {
       setCompleting(false)
       setError('終了日時・変更提案・最新状態を確認してください。')
       return
@@ -95,12 +95,12 @@ function MeetingActions({ request, onDownload, onCancel, onComplete }: Props) {
     <p>日時は端末のタイムゾーンで表示しています。ダウンロードしたICSをお使いのカレンダーに取り込んでください。Googleへの自動登録・招待送信は行いません。</p>
     {request.status === 'accepted' && onCancel && Date.parse(option.startAt) > now ? confirming ? <div>
       <p>この確定会議を取り消しますか？ 相手に通知し、予約枠を解放します。Googleなど外部カレンダーに取り込み済みの予定は自動削除されません。</p>
-      <button type="button" disabled={busy} onClick={cancel}>会議の取消を確定する</button>
+      <button type="button" disabled={busy} onClick={() => cancel(Date.now())}>会議の取消を確定する</button>
       <button type="button" disabled={busy} onClick={() => setConfirming(false)}>戻る</button>
     </div> : <button type="button" disabled={busy} onClick={() => setConfirming(true)}>確定会議を取り消す</button> : null}
     {request.status === 'accepted' && onComplete && Date.parse(option.endAt) <= now && request.rescheduleProposal?.status !== 'proposed' ? completing ? <div>
       <p>この会議を完了として記録しますか？ 相手に通知し、確定日時は履歴に残します。外部カレンダーの予定は変更しません。</p>
-      <button type="button" disabled={busy} onClick={complete}>会議の完了を確定する</button>
+      <button type="button" disabled={busy} onClick={() => complete(Date.now())}>会議の完了を確定する</button>
       <button type="button" disabled={busy} onClick={() => setCompleting(false)}>戻る</button>
     </div> : <button type="button" disabled={busy} onClick={() => setCompleting(true)}>会議を完了にする</button> : null}
     {error ? <p role="alert">{error}</p> : null}

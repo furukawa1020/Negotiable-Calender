@@ -123,6 +123,16 @@ requires a future larger-volume design, not repeated successful truncation.
 
 ## Manager private calendar view
 
+Successful Google token exchanges/refreshes are also bounded to 64 KiB of actual
+response bytes (an application safeguard). They require a single JSON object,
+unique case-insensitive keys, a usable access token, and a positive `expires_in`
+that cannot overflow the duration. Optional scope/refresh-token fields remain
+compatible with refresh responses; an explicit non-Bearer type is rejected.
+See Google's [token response documentation](https://developers.google.com/identity/protocols/oauth2/web-server).
+Invalid responses return fixed errors without JSON/credential material, preserve
+cancellation, and cannot reach event reads or advance sync evidence. Existing
+retry/backoff applies; malformed success alone does not revoke consent.
+
 Authenticated managers can load day, week, or month ranges from
 `GET /api/v1/me/private-events?from=...&to=...`. The route has no user ID
 parameter: the server derives the owner exclusively from the verified session.

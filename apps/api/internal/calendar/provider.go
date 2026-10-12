@@ -2,7 +2,6 @@ package calendar
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -113,19 +112,7 @@ func (provider *GoogleProvider) token(ctx context.Context, form url.Values) (Tok
 	if response.StatusCode != http.StatusOK {
 		return TokenSet{}, googleFailure(ctx, response, true, "calendar token")
 	}
-	var body struct {
-		AccessToken  string `json:"access_token"`
-		RefreshToken string `json:"refresh_token"`
-		Scope        string `json:"scope"`
-		ExpiresIn    int    `json:"expires_in"`
-	}
-	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
-		return TokenSet{}, fmt.Errorf("decode calendar token: %w", err)
-	}
-	if body.AccessToken == "" {
-		return TokenSet{}, fmt.Errorf("calendar token response missing access token")
-	}
-	return TokenSet{AccessToken: body.AccessToken, RefreshToken: body.RefreshToken, Scopes: strings.Fields(body.Scope), ExpiresAt: time.Now().UTC().Add(time.Duration(body.ExpiresIn) * time.Second)}, nil
+	return decodeGoogleToken(ctx, response)
 }
 
 func revokeURL(configured string) string {

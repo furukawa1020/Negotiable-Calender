@@ -231,7 +231,7 @@ func TestPlanningSourceFenceAndDeletedAccounts(t *testing.T) {
 	}
 }
 
-func TestPlanningPreservesCorruptBookingAndStaleProjectionEvidence(t *testing.T) {
+func TestPlanningPreservesStaleProjectionAndRejectsCorruptBookingEvidence(t *testing.T) {
 	b, ctx := emulatorBackend(t)
 	from, to := seedPlanning(t, b, ctx)
 	p := publicationFixtures(time.Now().UTC(), "p", 1)[0]
@@ -239,13 +239,110 @@ func TestPlanningPreservesCorruptBookingAndStaleProjectionEvidence(t *testing.T)
 	p.EndAt = to
 	p.ExpiresAt = time.Now().UTC().Add(-time.Minute)
 	putDocument(t, ctx, b.Client.Collection("users").Doc("alice").Collection("scheduleProjections").Doc(p.ID), p)
-	putDocument(t, ctx, b.Client.Collection("coordinationRequests").Doc("corrupt"), request.CoordinationRequest{ID: "corrupt", TargetUserID: "alice", Status: request.Accepted})
 	segments, bookings, err := b.Request().LoadPlanningSources(ctx, "alice", "bob", from, to)
-	if err != nil || len(segments) != 1 || len(bookings) != 1 {
+	if err != nil || len(segments) != 1 || len(bookings) != 0 {
 		t.Fatalf("evidence filtered out: %v", err)
 	}
 	meeting := confirmationRequest("candidate", "bob", "alice", time.Now().UTC(), from).Options[0]
-	if request.ValidateMeetingAvailability("alice", meeting, segments, time.Now().UTC()) == nil || !request.ConflictsWithMeeting(meeting, bookings[0]) {
+	if request.ValidateMeetingAvailability("alice", meeting, segments, time.Now().UTC()) == nil {
 		t.Fatal("stale/corrupt data incorrectly became availability")
+	}
+	putDocument(t, ctx, b.Client.Collection("coordinationRequests").Doc("corrupt"), request.CoordinationRequest{ID: "corrupt", TargetUserID: "alice", Status: request.Accepted})
+	segments, bookings, err = b.Request().LoadPlanningSources(ctx, "alice", "bob", from, to)
+	if err == nil || segments != nil || bookings != nil {
+		t.Fatal("corrupt evidence did not discard all planning sources")
+	}
+}
+
+func TestPlanningBookingSnapshotDeduplicatesAndMinimizesPrivateData(t *testing.T) {
+	b, ctx := emulatorBackend(t)
+	from, to := seedPlanning(t, b, ctx)
+	now := time.Now().UTC()
+	for _, pair := range [][2]string{{"bob", "alice"}, {"elsewhere", "bob"}} {
+		v := confirmationRequest("booking-"+pair[0], pair[0], pair[1], now, from)
+		v.Status, v.AcceptedOptionID = request.Accepted, v.Options[0].ID
+		v.Title = "private title must not be fetched"
+		putDocument(t, ctx, b.Client.Collection("coordinationRequests").Doc(v.ID), v)
+	}
+	trace := &planningReadTrace{afterQuery: func(query int) error {
+		if query != 2 {
+			return nil
+		}
+		// Change a booking not read until the second participant. The preview
+		// must still see its original interval from the first query's snapshot.
+		v := confirmationRequest("booking-elsewhere", "elsewhere", "bob", now, from.Add(8*time.Hour))
+		v.Status, v.AcceptedOptionID = request.Accepted, v.Options[0].ID
+		_, err := b.Client.Collection("coordinationRequests").Doc(v.ID).Set(ctx, v)
+		return err
+	}}
+	segments, bookings, err := planningReader(t, ctx, trace).LoadPlanningSources(ctx, "alice", "bob", from, to)
+	if err != nil || len(segments) != 1 || len(bookings) != 2 {
+		t.Fatalf("incomplete snapshot: %v", err)
+	}
+	for _, booking := range bookings {
+		if booking.Title != "" || !booking.Options[0].StartAt.Equal(from) {
+			t.Fatal("private text or mixed-time snapshot")
+		}
+	}
+	if !reflect.DeepEqual(trace.limits, []int32{257, 65, 65, 65, 65}) || trace.documents != 4 {
+		t.Fatal("read limits or dedup changed")
+	}
+	for i, q := range trace.queries {
+		if trace.budgets[i] <= 0 || trace.budgets[i] > request.ReservationReadTimeout {
+			t.Fatal("unbounded planning deadline")
+		}
+		if i == 0 {
+			continue
+		}
+		fields := q.GetSelect().GetFields()
+		if len(fields) != 6 {
+			t.Fatal("reservation field selection missing")
+		}
+		for _, f := range fields {
+			switch f.GetFieldPath() {
+			case "ID", "Status", "RequesterUserID", "TargetUserID", "AcceptedOptionID", "Options":
+			default:
+				t.Fatal("unnecessary private field fetched")
+			}
+		}
+	}
+}
+
+func TestPlanningRejectsMismatchedAndAmbiguousEvidence(t *testing.T) {
+	for _, scenario := range []string{"request-id", "projection-id", "missing-option", "option-owner", "duplicate-option", "invalid-time", "unknown-type", "cancelled"} {
+		t.Run(scenario, func(t *testing.T) {
+			b, ctx := emulatorBackend(t)
+			from, to := seedPlanning(t, b, ctx)
+			v := confirmationRequest("unsafe", "bob", "alice", time.Now().UTC(), from)
+			v.Status, v.AcceptedOptionID = request.Accepted, v.Options[0].ID
+			switch scenario {
+			case "request-id":
+				v.ID = "different"
+			case "projection-id":
+				p := publicationFixtures(time.Now().UTC(), "p", 1)[0]
+				p.StartAt, p.EndAt, p.ID = from, to, "different"
+				putDocument(t, ctx, b.Client.Collection("users").Doc("alice").Collection("scheduleProjections").Doc("p-0000"), p)
+			case "missing-option":
+				v.Options = nil
+			case "option-owner":
+				v.Options[0].RequestID = "different"
+			case "duplicate-option":
+				v.Options = append(v.Options, v.Options[0])
+			case "invalid-time":
+				v.Options[0].EndAt = v.Options[0].StartAt
+			case "unknown-type":
+				v.Options[0].Type = "unknown"
+			}
+			putDocument(t, ctx, b.Client.Collection("coordinationRequests").Doc("unsafe"), v)
+			if scenario == "cancelled" {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithCancel(ctx)
+				cancel()
+			}
+			segments, bookings, err := b.Request().LoadPlanningSources(ctx, "alice", "bob", from, to)
+			if err == nil || segments != nil || bookings != nil {
+				t.Fatal("unsafe partial planning sources returned")
+			}
+		})
 	}
 }

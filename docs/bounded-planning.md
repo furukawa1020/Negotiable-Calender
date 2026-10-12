@@ -1,5 +1,15 @@
 # Bounded planning reads (#131)
 
+Booking evidence is now read from one read-only Firestore snapshot across all
+four participant/role queries, deduplicated by verified document ID. Only ID,
+status, participant IDs, selected option ID and options are fetched; request
+titles/messages are excluded. Missing, ambiguous or foreign selected options and
+document-ID mismatches discard the entire result, as do projection-ID mismatches.
+The store applies a 10-second total deadline even without a caller deadline.
+Existing before/after account and publication fences remain in place. The booking
+snapshot does not reserve a slot or make the separately fenced projections part
+of the same transaction: final approval still performs authoritative checks.
+
 This protects `GET /api/v1/requests/{id}/planning-preview`, not all application endpoints or total project spend. No paid AI service, billing setting, IAM permission, Firestore write, or new retained data is introduced.
 
 ## Admission

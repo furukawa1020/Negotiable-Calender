@@ -2,6 +2,7 @@ import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } fro
 import SharingPolicyEditor from './SharingPolicyEditor'
 import { ConfirmedMeeting } from './ConfirmedMeeting'
 import { CalendarSyncStatus } from './CalendarSyncStatus'
+import { readCalendarSync } from './calendarSyncResponse'
 import { CalendarConsent, CalendarConnectionHelp } from './CalendarConsent'
 import { PolicyLinks } from './PolicyLinks'
 import { calendarConsentNotice } from './calendarConsentNotice'
@@ -269,6 +270,7 @@ function App() {
   const [calendarSyncMode, setCalendarSyncMode] = useState('off')
   const [calendarBusy, setCalendarBusy] = useState(false)
   const calendarLifecycle = useRef(0)
+  const calendarSyncAttempt = useRef(0)
   const accountLifecycle = useRef(0)
   const accountActive = useRef(false)
   const requestLifecycle = useRef(0)
@@ -1050,15 +1052,17 @@ function App() {
   }
 
   const syncCalendar = async () => {
+    const accountCurrent = captureAccountLifetime()
+    if (!accountCurrent() || !calendarConnection || calendarBusy) return
     const lifecycle = calendarLifecycle.current
-    const isCurrent = () => lifecycle === calendarLifecycle.current
+    const attempt = ++calendarSyncAttempt.current
+    const isCurrent = () => accountCurrent() && lifecycle === calendarLifecycle.current && attempt === calendarSyncAttempt.current
     setCalendarBusy(true)
     try {
-      const response = await apiFetch(`${apiURL}/api/v1/calendar/sync`, { method: 'POST' })
-      if (!response.ok) throw new Error('sync failed')
-      const payload = await response.json() as { busySpanCount: number; lastSyncedAt: string }
-      if (!isCurrent()) return
-      setCalendarConnection((current) => current ? { ...current, lastSyncedAt: payload.lastSyncedAt, reconnectRequired: false, lastErrorCode: '', sourceFresh: true } : current)
+      const payload = await fetchBookingResult(`${apiURL}/api/v1/calendar/sync`, { method: 'POST' }, readCalendarSync, isCurrent)
+      if (!payload || !isCurrent()) return
+      const age = Date.now() - Date.parse(payload.lastSyncedAt)
+      setCalendarConnection((current) => current ? { ...current, lastSyncedAt: payload.lastSyncedAt, reconnectRequired: false, lastErrorCode: '', sourceFresh: age >= 0 && age < 30 * 60_000 } : current)
       setNotice(`Google Calendarから${payload.busySpanCount}件のbusy時間を同期しました。予定名は保存していません。`)
       try {
         const from = new Date(visibleDate)
@@ -1070,19 +1074,16 @@ function App() {
           from: from.toISOString(),
           to: to.toISOString(),
         })
-        const projectionResponse = await apiFetch(`${apiURL}/api/v1/people/${activeUserID}/projection?${query}`, {
+        const rows = await fetchBookingResult(`${apiURL}/api/v1/people/${encodeURIComponent(activeUserID)}/projection?${query}`, {
           headers: { 'X-Demo-User-ID': activeUserID, 'X-Organization-ID': activeOrganizationID },
-        })
-        if (projectionResponse.ok) {
-          const view = await projectionResponse.json() as PublicProjection
-          if (isCurrent()) setProjections(mapPublicSegments(view))
-        }
+        }, async response => mapPublicSegments(await response.json() as PublicProjection), isCurrent)
+        if (rows && isCurrent()) setProjections(rows)
       } catch {
         if (isCurrent()) setNotice(`Google Calendarから${payload.busySpanCount}件を同期しましたが、表示の再読込に失敗しました。`)
       }
     } catch {
       if (!isCurrent()) return
-      setNotice('Calendarを同期できませんでした。再接続が必要な場合があります。')
+      setNotice('Calendarの同期結果を確認できませんでした。処理済みの可能性もあるため、接続状態を確認してから再試行してください。')
       setCalendarConnection((current) => current ? { ...current, sourceFresh: false } : current)
     } finally {
       if (isCurrent()) setCalendarBusy(false)

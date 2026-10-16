@@ -275,6 +275,7 @@ function App() {
   const sentLoad = useRef(0)
   const notificationLoad = useRef(0)
   const auditLoad = useRef(0)
+  const peopleLoad = useRef(0)
   const [workspaces, setWorkspaces] = useState<Workspace[]>([])
   const [invitationToken, setInvitationToken] = useState('')
   const [invitationPreview, setInvitationPreview] = useState<InvitationPreview | null>(null)
@@ -307,6 +308,10 @@ function App() {
     requestLifecycle.current++
     notificationLoad.current++
     auditLoad.current++
+    peopleLoad.current++
+    setPeople([])
+    setPeopleLoading(false)
+    setPeopleError('')
     policyOperation.current++
     setPolicyReady(false)
     setPolicyLoading(false)
@@ -558,33 +563,39 @@ function App() {
   }
 
   const openPeopleView = async () => {
+    const scopeCurrent = captureRequestLifetime()
+    if (!scopeCurrent()) return
+    const load = ++peopleLoad.current
+    const isCurrent = () => scopeCurrent() && load === peopleLoad.current
     setCurrentView('people')
     setPeopleLoading(true)
     setPeopleError('')
+    setPeople([])
     try {
-      const response = await apiFetch(`${apiURL}/api/v1/people?organizationId=${activeOrganizationID}`, {
+      const directory = await fetchBookingResult(`${apiURL}/api/v1/people?organizationId=${encodeURIComponent(activeOrganizationID)}`, {
         headers: { 'X-Demo-User-ID': activeUserID, 'X-Organization-ID': activeOrganizationID },
-      })
-      if (!response.ok) {
-        throw new Error('people failed')
-      }
-      const directory = await response.json() as { people: Array<Omit<PersonCard, 'segments'>> }
+      }, async response => {
+        const value = await response.json() as { people: Array<Omit<PersonCard, 'segments'>> }
+        if (!value || !Array.isArray(value.people) || !value.people.every(person => person
+          && typeof person.id === 'string' && person.id.trim() && typeof person.displayName === 'string'
+          && typeof person.timezone === 'string' && typeof person.role === 'string')
+          || new Set(value.people.map(person => person.id)).size !== value.people.length) throw new Error('invalid directory')
+        return value
+      }, isCurrent)
+      if (!directory || !isCurrent()) return
       const cards = await Promise.all(directory.people.map(async (person) => {
-        const projectionResponse = await apiFetch(
-          `${apiURL}/api/v1/people/${person.id}/projection?timezone=${encodeURIComponent(person.timezone)}`,
+        const view = await fetchBookingResult(
+          `${apiURL}/api/v1/people/${encodeURIComponent(person.id)}/projection?timezone=${encodeURIComponent(person.timezone)}`,
           { headers: { 'X-Demo-User-ID': activeUserID, 'X-Organization-ID': activeOrganizationID } },
+          async response => mapPublicSegments(await response.json() as PublicProjection), isCurrent,
         )
-        if (!projectionResponse.ok) {
-          throw new Error('projection failed')
-        }
-        const view = await projectionResponse.json() as PublicProjection
-        return { ...person, segments: mapPublicSegments(view) }
+        return { ...person, segments: view ?? [] }
       }))
-      setPeople(cards)
+      if (isCurrent()) setPeople(cards)
     } catch {
-      setPeopleError('組織の公開状態を取得できませんでした。')
+      if (isCurrent()) setPeopleError('組織の公開状態を取得できませんでした。')
     } finally {
-      setPeopleLoading(false)
+      if (isCurrent()) setPeopleLoading(false)
     }
   }
 

@@ -17,7 +17,9 @@ import { RescheduleMeeting } from './RescheduleMeeting'
 import { LocalPlanning } from './LocalPlanningPanel'
 import { PlanningRateLimitError } from './localPlanning'
 import type { RescheduleCommand } from './RescheduleMeeting'
-import { sharingPolicyError, type SharingPolicyDraft } from './sharingPolicy'
+import { parseSharingPolicy, sharingPolicyError, type SharingPolicyDraft } from './sharingPolicy'
+
+class MissingSharingPolicy extends Error {}
 
 const defaultSharingPolicy: SharingPolicyDraft = {
   default: {
@@ -255,6 +257,9 @@ function App() {
   const [deletingAccount, setDeletingAccount] = useState(false)
   const [policyLoading, setPolicyLoading] = useState(false)
   const [policySaving, setPolicySaving] = useState(false)
+  const [policyReady, setPolicyReady] = useState(false)
+  const [policyError, setPolicyError] = useState('')
+  const policyOperation = useRef(0)
   const [sharingPolicy, setSharingPolicy] = useState<SharingPolicyDraft>(defaultSharingPolicy)
   const [authUser, setAuthUser] = useState<AuthUser | null>(null)
   const [demoMode, setDemoMode] = useState(import.meta.env.DEV)
@@ -301,6 +306,13 @@ function App() {
     requestLifecycle.current++
     notificationLoad.current++
     auditLoad.current++
+    policyOperation.current++
+    setPolicyReady(false)
+    setPolicyLoading(false)
+    setPolicySaving(false)
+    setPolicyError('')
+    setSharingPolicy(defaultSharingPolicy)
+    setActiveDialog(current => current === 'rules' ? '' : current)
     setNotifications([])
     setNotificationsOpen(false)
     setNotificationsLoading(false)
@@ -934,59 +946,72 @@ function App() {
   }
 
   const openSharingRules = async () => {
+    const scopeCurrent = captureRequestLifetime()
+    if (!scopeCurrent()) return
+    const operation = ++policyOperation.current
+    const isCurrent = () => scopeCurrent() && operation === policyOperation.current
     setActiveDialog('rules')
     setPolicyLoading(true)
+    setPolicyReady(false)
+    setPolicyError('')
     try {
-      const response = await apiFetch(`${apiURL}/api/v1/users/${activeUserID}/sharing-policy`, {
+      const value = await fetchBookingResult(`${apiURL}/api/v1/users/${encodeURIComponent(activeUserID)}/sharing-policy`, {
         headers: { 'X-Demo-User-ID': activeUserID },
+      }, async response => parseSharingPolicy(await response.json()), isCurrent, {
+        readError: async response => { throw response.status === 404 ? new MissingSharingPolicy() : new Error('policy read failed') },
       })
-      if (response.status === 404) {
+      if (!value || !isCurrent()) return
+      setSharingPolicy(value)
+      setPolicyReady(true)
+    } catch (error) {
+      if (!isCurrent()) return
+      if (error instanceof MissingSharingPolicy) {
         setSharingPolicy(defaultSharingPolicy)
-        return
+        setPolicyReady(true)
+      } else {
+        setPolicyError('共有ルールを取得できませんでした。再読み込みしてから編集してください。')
       }
-      if (!response.ok) throw new Error('policy load failed')
-      const value = await response.json() as SharingPolicyDraft
-      setSharingPolicy({
-        default: value.default ?? defaultSharingPolicy.default,
-        workingHours: value.workingHours?.length ? value.workingHours : defaultSharingPolicy.workingHours,
-        rules: (value.rules ?? []).map(({ conditionType, condition, state, priority, enabled }) => ({
-          conditionType, condition, state, priority, enabled,
-        })),
-      })
-    } catch {
-      setNotice('共有ルールを取得できませんでした。')
     } finally {
-      setPolicyLoading(false)
+      if (isCurrent()) setPolicyLoading(false)
     }
   }
 
+  const closeSharingRules = () => {
+    policyOperation.current++
+    setPolicyLoading(false)
+    setPolicySaving(false)
+    setPolicyReady(false)
+    setActiveDialog('')
+  }
+
   const saveSharingRules = async () => {
+    const scopeCurrent = captureRequestLifetime()
+    if (!scopeCurrent() || !policyReady || policyLoading || policySaving) return
     if (policyDraftError) {
       setNotice(policyDraftError)
       return
     }
     setPolicySaving(true)
+    setPolicyError('')
+    const operation = ++policyOperation.current
+    const isCurrent = () => scopeCurrent() && operation === policyOperation.current
     try {
-      const response = await apiFetch(`${apiURL}/api/v1/users/${activeUserID}/sharing-policy`, {
+      const value = await fetchBookingResult(`${apiURL}/api/v1/users/${encodeURIComponent(activeUserID)}/sharing-policy`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', 'X-Demo-User-ID': activeUserID },
         body: JSON.stringify(sharingPolicy),
-      })
-      if (!response.ok) throw new Error('policy save failed')
-      const value = await response.json() as SharingPolicyDraft
-      setSharingPolicy({
-        default: value.default,
-        workingHours: value.workingHours,
-        rules: value.rules.map(({ conditionType, condition, state, priority, enabled }) => ({
-          conditionType, condition, state, priority, enabled,
-        })),
-      })
+      }, async response => parseSharingPolicy(await response.json()), isCurrent)
+      if (!value || !isCurrent()) return
+      setSharingPolicy(value)
       setActiveDialog('')
       setNotice('共有ルールを保存しました。')
     } catch {
-      setNotice('共有ルールを保存できませんでした。入力内容を確認してください。')
+      if (isCurrent()) {
+        setPolicyReady(false)
+        setPolicyError('保存結果を確認できませんでした。再読み込みして現在の設定を確認してください。')
+      }
     } finally {
-      setPolicySaving(false)
+      if (isCurrent()) setPolicySaving(false)
     }
   }
 
@@ -1575,14 +1600,16 @@ function App() {
               <div>
                 <h2 id="rules-title">共有ルール</h2>
               </div>
-              <button className="close-button" type="button" aria-label="閉じる" onClick={() => setActiveDialog('')}>×</button>
+              <button className="close-button" type="button" aria-label="閉じる" onClick={closeSharingRules}>×</button>
             </div>
             <p className="modal-copy">勤務時間と条件を指定し、組織に表示する相談可否・割り込み可否を設定します。</p>
             {policyLoading ? <p role="status">共有ルールを読み込んでいます…</p> : null}
-            <SharingPolicyEditor value={sharingPolicy} onChange={setSharingPolicy} disabled={policyLoading || policySaving} />
+            {policyError ? <p role="alert">{policyError}</p> : null}
+            {!policyReady && !policyLoading ? <button type="button" onClick={() => void openSharingRules()}>共有ルールを再読み込み</button> : null}
+            <SharingPolicyEditor value={sharingPolicy} onChange={setSharingPolicy} disabled={!policyReady || policyLoading || policySaving} />
             <div className="policy-save-actions">
-              <button className="secondary-button" type="button" disabled={policySaving} onClick={() => setActiveDialog('')}>キャンセル</button>
-              <button className="primary-button" type="button" onClick={saveSharingRules} disabled={policyLoading || policySaving || Boolean(policyDraftError)}>{policySaving ? '保存中…' : '保存して公開状態を更新'}</button>
+              <button className="secondary-button" type="button" disabled={policySaving} onClick={closeSharingRules}>キャンセル</button>
+              <button className="primary-button" type="button" onClick={saveSharingRules} disabled={!policyReady || policyLoading || policySaving || Boolean(policyDraftError)}>{policySaving ? '保存中…' : '保存して公開状態を更新'}</button>
             </div>
           </section>
         </div>

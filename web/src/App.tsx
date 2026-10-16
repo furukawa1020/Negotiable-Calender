@@ -5,6 +5,7 @@ import { CalendarSyncStatus } from './CalendarSyncStatus'
 import { CalendarConsent, CalendarConnectionHelp } from './CalendarConsent'
 import { PolicyLinks } from './PolicyLinks'
 import { calendarConsentNotice } from './calendarConsentNotice'
+import { moveCalendarAnchor } from './calendarNavigation'
 import { AccountAvatar } from './AccountAvatar'
 import { RequestComposer } from './RequestComposer'
 import { RequestHandoff } from './RequestHandoff'
@@ -448,12 +449,7 @@ function App() {
   }, [authUser, calendarConnection, currentView, visibleRange])
 
   const moveCalendar = (direction: -1 | 1) => {
-    setCalendarAnchor((current) => {
-      const next = new Date(current)
-      if (calendarView === 'month') next.setMonth(next.getMonth() + direction)
-      else next.setDate(next.getDate() + direction * (calendarView === 'week' ? 7 : 1))
-      return next
-    })
+    setCalendarAnchor((current) => moveCalendarAnchor(current, calendarView, direction))
     setSelectedPrivateEventID('')
   }
 

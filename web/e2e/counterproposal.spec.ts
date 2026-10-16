@@ -5,7 +5,7 @@ test('target proposes, requester agrees, and both can export the confirmed meeti
   let actor = 'bob', proposals = 0, approvals = 0
   const original = { id: 'generated', type: 'meeting', startAt: '2099-01-01T01:00:00.000Z', endAt: '2099-01-01T01:30:00.000Z', proposedByUserId: '' }
   const offer = { ...original, id: 'offer', requestId: 'r', startAt: '2099-01-02T01:00:00.000Z', endAt: '2099-01-02T01:30:00.000Z', proposedByUserId: 'bob' }
-  const value = { id: 'r', requesterUserId: 'alice', targetUserId: 'bob', title: '別時間の合意確認', durationMinutes: 30, deadlineAt: '2099-01-03T00:00:00Z', priority: 'normal', status: 'suggested', acceptedOptionId: '', options: [original] }
+  const value = { id: 'r', requesterUserId: 'alice', targetUserId: 'bob', title: '別時間の合意確認', type: 'meeting', createdAt: '2026-10-01T00:00:00Z', durationMinutes: 30, deadlineAt: '2099-01-03T00:00:00Z', priority: 'normal', status: 'suggested', acceptedOptionId: '', options: [original] }
   await page.route('**/api/v1/**', async route => {
     const request = route.request(), url = new URL(request.url()), path = url.pathname
     let json: object = {}

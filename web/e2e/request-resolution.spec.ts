@@ -8,7 +8,7 @@ for (const action of ['async', 'decline', 'cancel'] as const) {
     const value = {
       id: 'resolution-fixture', requesterUserId: 'alice', targetUserId: 'bob', title: '資料の確認',
       type: 'review', durationMinutes: 15, deadlineAt: '2099-10-02T08:00:00Z', priority: 'normal',
-      status: 'suggested', asyncMessage: '', options: [],
+      status: 'suggested', createdAt: '2026-10-01T00:00:00Z', asyncMessage: '', options: [],
     }
     const submissions: (string | null)[] = []
     await page.route('**/api/v1/**', async route => {

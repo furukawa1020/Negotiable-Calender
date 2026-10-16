@@ -12,6 +12,7 @@ import { RequestHandoff } from './RequestHandoff'
 import { CounterproposalForm, CounterproposalAgreement } from './Counterproposal'
 import { useRequestResolution } from './useRequestResolution'
 import { fetchBookingResult, readCancellation, readCompletion } from './bookingTransport'
+import { readRequestList } from './requestList'
 import { readRescheduleSnapshot, matchesRescheduleOutcome } from './bookingResponse'
 import type { CoordinationRequest } from './bookingResponse'
 import { RescheduleMeeting } from './RescheduleMeeting'
@@ -608,16 +609,11 @@ function App() {
     setInboxLoading(true)
     setInboxError('')
     try {
-      const response = await apiFetch(`${apiURL}/api/v1/requests`, {
+      const requests = await fetchBookingResult(`${apiURL}/api/v1/requests`, {
         headers: { 'X-Demo-User-ID': activeUserID, 'X-Organization-ID': activeOrganizationID },
-      })
-      if (!isCurrent()) return
-      if (!response.ok) {
-        throw new Error('inbox failed')
-      }
-      const payload = await response.json() as { requests: CoordinationRequest[] }
-      if (!isCurrent()) return
-      setInboxRequests(payload.requests)
+      }, readRequestList, isCurrent)
+      if (!requests || !isCurrent()) return
+      setInboxRequests(requests)
       setInboxLoaded(true)
     } catch {
       if (isCurrent()) setInboxError('依頼を取得できませんでした。')
@@ -635,14 +631,11 @@ function App() {
     setSentLoading(true)
     setSentError('')
     try {
-      const response = await apiFetch(`${apiURL}/api/v1/requests?scope=sent`, {
+      const requests = await fetchBookingResult(`${apiURL}/api/v1/requests?scope=sent`, {
         headers: { 'X-Demo-User-ID': requesterUserID, 'X-Organization-ID': activeOrganizationID },
-      })
-      if (!isCurrent()) return
-      if (!response.ok) throw new Error('sent requests failed')
-      const payload = await response.json() as { requests: CoordinationRequest[] }
-      if (!isCurrent()) return
-      setSentRequests(payload.requests)
+      }, readRequestList, isCurrent)
+      if (!requests || !isCurrent()) return
+      setSentRequests(requests)
       setSentLoaded(true)
     } catch {
       if (isCurrent()) setSentError('送信済み依頼を取得できませんでした。')

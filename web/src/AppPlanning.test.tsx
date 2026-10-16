@@ -8,7 +8,7 @@ it.each([['owner', 'suggested', true], ['other', 'suggested', false], ['owner', 
   window.history.replaceState({}, '', '/?auth=success')
   vi.stubGlobal('LanguageModel', undefined)
   const at = (milliseconds: number) => new Date(Date.now() + milliseconds).toISOString()
-  const request = { id: 'request-1', requesterUserId: 'requester', targetUserId, title: 'Planning integration', durationMinutes: 30, deadlineAt: at(86400000), priority: 'normal', status, options: [{ id: 'option-1', type: 'meeting', startAt: at(3600000), endAt: at(5400000) }] }
+  const request = { id: 'request-1', requesterUserId: 'requester', targetUserId, title: 'Planning integration', type: 'meeting', createdAt: at(0), durationMinutes: 30, deadlineAt: at(86400000), priority: 'normal', status, options: [{ id: 'option-1', type: 'meeting', startAt: at(3600000), endAt: at(5400000) }] }
   const preview = { revision: 'a'.repeat(64), expiresAt: at(60000), candidates: [{ id: 'c1', startAt: request.options[0].startAt, endAt: request.options[0].endAt }] }
   const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
     const url = String(input)

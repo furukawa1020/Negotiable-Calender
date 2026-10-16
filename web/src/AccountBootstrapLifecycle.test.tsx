@@ -79,7 +79,7 @@ describe('Account bootstrap teardown boundaries', () => {
     fireEvent.click(screen.getByRole('button', { name: '完全に削除する' }))
     if (status === 204) expect(await screen.findByText('アカウントと保存データを削除しました。')).toBeInTheDocument()
     else expect(await screen.findByText(/共有Workspaceの最後のOWNERです/)).toBeInTheDocument()
-    await act(async () => { release?.({ busySpanCount: 99, lastSyncedAt: '2026-09-25T00:00:00Z' }) })
+    await act(async () => { release?.({ synced: true, busySpanCount: 99, lastSyncedAt: '2026-09-25T00:00:00Z' }) })
     if (status === 204) {
       expect(screen.getByRole('status')).toHaveTextContent('アカウントと保存データを削除しました。')
       expect(screen.queryByText(/99件/)).not.toBeInTheDocument()

@@ -335,7 +335,7 @@ describe('App', () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
       requests: [{
-        id: 'request-1', requesterUserId: 'demo-member', title: '新API設計レビュー',
+        id: 'request-1', requesterUserId: 'demo-member', targetUserId: 'demo-manager', title: '新API設計レビュー',
         type: 'review', durationMinutes: 15, deadlineAt: '2026-08-27T08:00:00Z',
         priority: 'high', status: 'suggested', createdAt: '2026-08-27T00:00:00Z',
         options: [{
@@ -501,7 +501,7 @@ describe('App', () => {
     vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(new Response(JSON.stringify({
         requests: [{
-          id: 'request-2', requesterUserId: 'requester-1', title: '承認フロー確認',
+          id: 'request-2', requesterUserId: 'requester-1', targetUserId: 'demo-manager', title: '承認フロー確認',
           type: 'approval', durationMinutes: 5, deadlineAt: '2026-08-29T08:00:00Z',
           priority: 'normal', status: 'suggested', createdAt: '2026-08-28T00:00:00Z',
           options: [{ id: 'option-1', type: 'async' }],

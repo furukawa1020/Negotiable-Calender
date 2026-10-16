@@ -4,7 +4,7 @@ test('original owner hands off, new owner answers, requester sees the result', a
   await page.setViewportSize({ width: 390, height: 1000 })
   let actor = 'bob'
   let handoffs = 0
-  const value = { id: 'r', requesterUserId: 'alice', targetUserId: 'bob', delegatedFromUserId: '', title: '引継ぎ動作の確認', durationMinutes: 15, deadlineAt: '2099-01-01T00:00:00Z', priority: 'normal', status: 'suggested', asyncMessage: '', options: [] }
+  const value = { id: 'r', requesterUserId: 'alice', targetUserId: 'bob', delegatedFromUserId: '', title: '引継ぎ動作の確認', type: 'review', createdAt: '2026-10-01T00:00:00Z', durationMinutes: 15, deadlineAt: '2099-01-01T00:00:00Z', priority: 'normal', status: 'suggested', asyncMessage: '', options: [] }
   await page.route('**/api/v1/**', async route => {
     const request = route.request(); const url = new URL(request.url()); const path = url.pathname
     let json: object = {}

@@ -10,7 +10,7 @@ async function fixtureAPI(page: Page) {
     if (path.endsWith('/auth/session')) return route.fulfill({ status: 401, json: { error: 'unauthenticated' } })
     if (path.endsWith('/requests')) json = { requests: [{
       id: 'request-1', requesterUserId: 'sample-member', targetUserId: 'demo-manager',
-      title: '設計レビューの相談', durationMinutes: 15, deadlineAt: '2026-10-02T08:00:00Z',
+      title: '設計レビューの相談', type: 'review', createdAt: '2026-10-01T00:00:00Z', durationMinutes: 15, deadlineAt: '2026-10-02T08:00:00Z',
       priority: 'high', status: 'suggested', options: [option],
     }] }
     if (path.endsWith('/people')) json = { people: [{ id: 'sample-manager', displayName: 'サンプル管理者', role: 'MANAGER', timezone: 'Asia/Tokyo' }] }

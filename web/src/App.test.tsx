@@ -293,7 +293,7 @@ describe('App', () => {
   })
 
   it('persists a manual override and reflects it in the projection', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{}', { status: 201 }))
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => Response.json({ id: 'override', userId: 'demo-manager', ...JSON.parse(String(init?.body)) }, { status: 201 }))
     render(<App />)
     fireEvent.click(screen.getByRole('button', { name: '状態を上書き' }))
     expect(screen.getByRole('dialog', { name: '公開状態を上書き' })).toBeInTheDocument()

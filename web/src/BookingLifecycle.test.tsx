@@ -500,7 +500,7 @@ describe('Booking operations respect account and workspace lifetime', () => {
     const h = setup()
     const pending = deferred<Response>()
     h.routes.set('GET /api/v1/requests/booking/calendar.ics', () => pending.promise)
-    h.routes.set(kind === 'switch' ? 'POST /api/v1/workspaces/switch' : kind === 'logout' ? 'POST /api/v1/auth/logout' : 'DELETE /api/v1/me/account', async () => new Response(null, { status: kind === 'delete' ? 409 : 503 }))
+    h.routes.set(kind === 'switch' ? 'POST /api/v1/workspaces/switch' : kind === 'logout' ? 'POST /api/v1/auth/logout' : 'DELETE /api/v1/me/account', async () => new Response(null, { status: kind === 'switch' ? 403 : kind === 'delete' ? 409 : 503 }))
     await openRequests()
     fireEvent.click(screen.getByRole('button', { name: 'カレンダーに登録（ICS）' }))
     await changeScope(kind, true)
@@ -564,17 +564,33 @@ describe('Booking operations respect account and workspace lifetime', () => {
     expect(h.create).not.toHaveBeenCalled()
   })
 
-  it('preserves a current reschedule when workspace switching fails', async () => {
+  it('preserves a current reschedule when workspace switching is explicitly rejected', async () => {
     const h = setup()
     const pending = deferred<Response>()
     h.routes.set('POST /api/v1/requests/booking/reschedule', () => pending.promise)
-    h.routes.set('POST /api/v1/workspaces/switch', async () => new Response(null, { status: 503 }))
+    h.routes.set('POST /api/v1/workspaces/switch', async () => new Response(null, { status: 403 }))
     await openRequests()
     fireEvent.click(screen.getByRole('button', { name: 'この日時への変更を承認' }))
     await changeScope('switch', true)
     await act(async () => { pending.resolve(Response.json({ ...h.value, acceptedOptionId: 'proposal-new', rescheduleProposal: { ...h.value.rescheduleProposal, status: 'accepted' } })) })
     expect(screen.getByRole('status')).toHaveTextContent('日時変更を確定しました。')
     expect(screen.getByText('Private booking')).toBeInTheDocument()
+  })
+
+  it.each(['ICS', 'reschedule'])('fences late %s when the workspace switch outcome is unknown', async kind => {
+    const h = setup(), pending = deferred<Response>()
+    h.routes.set(kind === 'ICS' ? 'GET /api/v1/requests/booking/calendar.ics' : 'POST /api/v1/requests/booking/reschedule', () => pending.promise)
+    h.routes.set('POST /api/v1/workspaces/switch', async () => new Response(null, { status: 503 }))
+    await openRequests()
+    fireEvent.click(screen.getByRole('button', { name: kind === 'ICS' ? 'カレンダーに登録（ICS）' : 'この日時への変更を承認' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Ownerのアカウントメニュー' }))
+    fireEvent.change(await screen.findByRole('combobox', { name: 'Workspace' }), { target: { value: 'team' } })
+    await screen.findByRole('heading', { name: 'Workspaceの確認が必要です' })
+    await act(async () => { pending.resolve(kind === 'ICS' ? new Response('synthetic ICS') : Response.json({ ...h.value, acceptedOptionId: 'proposal-new', rescheduleProposal: { ...h.value.rescheduleProposal, status: 'accepted' } })) })
+    expect(h.create).not.toHaveBeenCalled()
+    expect(screen.queryByText('Private booking')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'ページを再読み込みして確認' })).toBeInTheDocument()
+    expect(screen.queryByText('日時変更を確定しました。')).not.toBeInTheDocument()
   })
 
   it('invalidates pending ICS when an accepted invitation switches the workspace', async () => {

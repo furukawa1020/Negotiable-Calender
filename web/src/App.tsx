@@ -14,6 +14,7 @@ import { CounterproposalForm, CounterproposalAgreement } from './Counterproposal
 import { useRequestResolution } from './useRequestResolution'
 import { fetchBookingResult, readCancellation, readCompletion } from './bookingTransport'
 import { readRequestList } from './requestList'
+import { readInvitationURL, readWorkspace, workspaceError, WorkspaceRejected } from './workspaceResponse'
 import { readRescheduleSnapshot, matchesRescheduleOutcome } from './bookingResponse'
 import type { CoordinationRequest } from './bookingResponse'
 import { RescheduleMeeting } from './RescheduleMeeting'
@@ -286,6 +287,8 @@ function App() {
   const [inviteRole, setInviteRole] = useState('MEMBER')
   const [inviteURL, setInviteURL] = useState('')
   const [workspaceBusy, setWorkspaceBusy] = useState(false)
+  const [workspaceUncertain, setWorkspaceUncertain] = useState(false)
+  const workspaceOperation = useRef(0)
   const visibleRange = useMemo(() => calendarRange(calendarAnchor, calendarView), [calendarAnchor, calendarView])
   const visibleDate = calendarAnchor
   const dateLabel = calendarRangeLabel(visibleRange.from, visibleRange.to, calendarView)
@@ -1119,73 +1122,84 @@ function App() {
     }
   }
 
+  const captureWorkspaceOperation = () => {
+    const accountCurrent = captureAccountLifetime()
+    const operation = ++workspaceOperation.current
+    return () => accountCurrent() && operation === workspaceOperation.current
+  }
+
+  const requireWorkspaceReview = () => {
+    // The server may have changed the active session workspace even if its reply was lost.
+    // Block further workspace commands until a fresh session bootstrap verifies it.
+    accountActive.current = false
+    accountLifecycle.current++
+    calendarLifecycle.current++
+    resetRequestScope()
+    setWorkspaceUncertain(true)
+  }
+
   const createInvitation = async () => {
-    if (!authUser || !accountActive.current) return
-    const isCurrent = captureAccountLifetime()
+    if (!authUser || !accountActive.current || workspaceBusy) return
+    const isCurrent = captureWorkspaceOperation()
     setWorkspaceBusy(true)
+    setInviteURL('')
     try {
-      const response = await apiFetch(`${apiURL}/api/v1/workspaces/${activeOrganizationID}/invitations`, {
+      const inviteURL = await fetchBookingResult(`${apiURL}/api/v1/workspaces/${encodeURIComponent(activeOrganizationID)}/invitations`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ role: inviteRole }),
-      })
-      if (!response.ok) throw new Error('invite failed')
-      if (!isCurrent()) return
-      const payload = await response.json() as { inviteUrl: string }
-      if (!isCurrent()) return
-      setInviteURL(payload.inviteUrl)
-      try { await navigator.clipboard?.writeText(payload.inviteUrl) } catch { /* link remains visible for manual copy */ }
+      }, readInvitationURL, isCurrent)
+      if (!inviteURL || !isCurrent()) return
+      setInviteURL(inviteURL)
+      try { void navigator.clipboard?.writeText(inviteURL).catch(() => {}) } catch { /* manual copy stays available */ }
       if (isCurrent()) setNotice('一回限りの招待リンクを作成しました。')
-    } catch { if (isCurrent()) setNotice('招待リンクを作成できませんでした。権限を確認してください。') }
+    } catch { if (isCurrent()) setNotice('招待リンクの作成結果を確認できませんでした。作成済みの可能性があります。権限と接続状態を確認してください。') }
     finally { if (isCurrent()) setWorkspaceBusy(false) }
   }
 
   const switchWorkspace = async (organizationId: string) => {
-    if (!authUser || !accountActive.current || organizationId === activeOrganizationID) return
-    const isCurrent = captureAccountLifetime()
+    if (!authUser || !accountActive.current || workspaceBusy || organizationId === activeOrganizationID) return
+    const isCurrent = captureWorkspaceOperation()
     setWorkspaceBusy(true)
     try {
-      const response = await apiFetch(`${apiURL}/api/v1/workspaces/switch`, {
+      const workspace = await fetchBookingResult(`${apiURL}/api/v1/workspaces/switch`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ organizationId }),
-      })
-      if (!response.ok) throw new Error('switch failed')
-      if (!isCurrent()) return
-      const payload = await response.json() as { activeWorkspace: Workspace }
-      if (!isCurrent()) return
+      }, response => readWorkspace(response, organizationId), isCurrent, { readError: workspaceError })
+      if (!workspace || !isCurrent()) return
       resetRequestScope()
-      setAuthUser((current) => current ? { ...current, organizationId: payload.activeWorkspace.id, role: payload.activeWorkspace.role } : current)
+      setAuthUser((current) => current ? { ...current, organizationId: workspace.id, role: workspace.role } : current)
       setInviteURL('')
-      setNotice(`${payload.activeWorkspace.name} に切り替えました。`)
-    } catch { if (isCurrent()) setNotice('Workspaceを切り替えられませんでした。') }
+      setNotice(`${workspace.name} に切り替えました。`)
+    } catch (error) { if (isCurrent()) { if (!(error instanceof WorkspaceRejected)) requireWorkspaceReview(); else setNotice('Workspaceを切り替えられませんでした。') } }
     finally { if (isCurrent()) setWorkspaceBusy(false) }
   }
 
   const acceptInvitation = async () => {
-    if (!authUser || !accountActive.current || !invitationPreview || !invitationToken) return
-    const isCurrent = captureAccountLifetime()
+    if (!authUser || !accountActive.current || workspaceBusy || !invitationPreview || !invitationToken) return
+    const isCurrent = captureWorkspaceOperation()
     setWorkspaceBusy(true)
+    let switching = false
     try {
-      const accepted = await apiFetch(`${apiURL}/api/v1/invitations/accept`, {
+      const accepted = await fetchBookingResult(`${apiURL}/api/v1/invitations/accept`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: invitationToken }),
-      })
-      if (!accepted.ok) throw new Error('accept failed')
-      if (!isCurrent()) return
-      const switched = await apiFetch(`${apiURL}/api/v1/workspaces/switch`, {
+      }, async response => { if ((await response.json())?.accepted !== true) throw new Error('acceptance unconfirmed'); return true }, isCurrent)
+      if (!accepted || !isCurrent()) return
+      switching = true
+      const workspace = await fetchBookingResult(`${apiURL}/api/v1/workspaces/switch`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ organizationId: invitationPreview.organizationId }),
-      })
-      if (!switched.ok) throw new Error('switch failed')
-      if (!isCurrent()) return
-      const payload = await switched.json() as { activeWorkspace: Workspace }
-      if (!isCurrent()) return
+      }, response => readWorkspace(response, invitationPreview.organizationId), isCurrent, { readError: workspaceError })
+      if (!workspace || !isCurrent()) return
       resetRequestScope()
-      setAuthUser((current) => current ? { ...current, organizationId: payload.activeWorkspace.id, role: payload.activeWorkspace.role } : current)
-      setWorkspaces((current) => [...current.filter((item) => item.id !== payload.activeWorkspace.id), payload.activeWorkspace])
+      setAuthUser((current) => current ? { ...current, organizationId: workspace.id, role: workspace.role } : current)
+      setWorkspaces((current) => [...current.filter((item) => item.id !== workspace.id), workspace])
       setInvitationPreview(null)
       setInvitationToken('')
       setInviteURL('')
-      setNotice(`${payload.activeWorkspace.name} に参加しました。`)
-    } catch { if (isCurrent()) setNotice('招待を受諾できませんでした。') }
+      setNotice(`${workspace.name} に参加しました。`)
+    } catch (error) { if (isCurrent()) { if (switching && !(error instanceof WorkspaceRejected)) requireWorkspaceReview(); else setNotice('招待の受諾結果を確認できませんでした。参加済みの可能性もあるため、ページを再読み込みして確認してください。') } }
     finally { if (isCurrent()) setWorkspaceBusy(false) }
   }
+
+  if (workspaceUncertain) return <main className="signin-gate"><h1>Workspaceの確認が必要です</h1><p role="alert">切替結果を確認できませんでした。切替済みの可能性があるため、操作を停止しています。</p><button type="button" onClick={() => window.location.reload()}>ページを再読み込みして確認</button></main>
 
   if (!authUser && !demoMode) {
     return (

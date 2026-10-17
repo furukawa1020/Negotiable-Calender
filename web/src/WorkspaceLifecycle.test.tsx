@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
+import { readInvitationURL, readWorkspace } from './workspaceResponse'
 
 const session = { authenticated: true, demoMode: false, user: { userId: 'owner', organizationId: 'org', displayName: 'Owner', email: 'owner@example.com', role: 'OWNER' } }
 const workspaces = [{ id: 'org', name: 'Personal', role: 'OWNER' }, { id: 'team', name: 'Private Team', role: 'OWNER' }]
@@ -56,7 +57,54 @@ async function teardown(kind: 'logout' | 'delete') {
 }
 
 describe('Workspace mutations respect account lifetime', () => {
-  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); window.history.replaceState({}, '', '/') })
+  afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); window.history.replaceState({}, '', '/') })
+
+  it.each(['invite', 'switch', 'accept'].flatMap(kind => ['fetch', 'body'].map(phase => [kind, phase])))('bounds stalled %s %s and ignores its late result', async (kind, phase) => {
+    const h = setup(), body = deferred<object>(), pending = deferred<Response>(), response = Response.json({}); response.json = () => body.promise
+    const path = kind === 'invite' ? 'POST /api/v1/workspaces/org/invitations' : kind === 'switch' ? 'POST /api/v1/workspaces/switch' : 'POST /api/v1/invitations/accept'
+    h.routes.set(path, () => phase === 'fetch' ? pending.promise : Promise.resolve(response))
+    await openAccount(); await screen.findByRole('button', { name: '招待を受諾' })
+    vi.useFakeTimers()
+    await act(async () => {
+      if (kind === 'switch') fireEvent.change(screen.getByRole('combobox', { name: 'Workspace' }), { target: { value: 'team' } })
+      else fireEvent.click(screen.getByRole('button', { name: kind === 'invite' ? '招待リンクを作成' : '招待を受諾' }))
+    })
+    await act(async () => { await vi.advanceTimersByTimeAsync(20_000) })
+    if (kind === 'switch') {
+      expect(screen.getByRole('heading', { name: 'Workspaceの確認が必要です' })).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: '依頼を作成' })).not.toBeInTheDocument()
+    } else expect(screen.getByRole('combobox', { name: 'Workspace' })).toBeEnabled()
+    await act(async () => {
+      pending.resolve(response)
+      body.resolve(kind === 'invite' ? { inviteUrl: 'https://example.test/?invite=late' } : kind === 'accept' ? { accepted: true } : { activeWorkspace: workspaces[1] })
+    })
+    expect(h.clipboard).not.toHaveBeenCalled()
+    if (kind === 'accept') expect(h.fetchMock.mock.calls.some(([url]) => String(url).endsWith('/workspaces/switch'))).toBe(false)
+    expect(screen.queryByText('Private Team に切り替えました。')).not.toBeInTheDocument()
+  })
+
+  it('fails closed for a mismatched active workspace acknowledgement', async () => {
+    const h = setup(); h.routes.set('POST /api/v1/workspaces/switch', async () => Response.json({ activeWorkspace: workspaces[0] }))
+    await openAccount()
+    fireEvent.change(screen.getByRole('combobox', { name: 'Workspace' }), { target: { value: 'team' } })
+    expect(await screen.findByRole('heading', { name: 'Workspaceの確認が必要です' })).toBeInTheDocument()
+  })
+
+  it('does not keep workspace controls busy when clipboard never settles', async () => {
+    const h = setup(); h.clipboard.mockImplementation(() => new Promise(() => {}))
+    await openAccount(); fireEvent.click(screen.getByRole('button', { name: '招待リンクを作成' }))
+    await screen.findByRole('textbox', { name: '招待リンク' })
+    expect(screen.getByRole('combobox', { name: 'Workspace' })).toBeEnabled()
+  })
+
+  it.each(['javascript:alert(1)', 'https://user:password@example.test/?invite=x', 'https://example.test/', 'invalid'])('rejects unsafe invitation URL shape', async inviteUrl => {
+    await expect(readInvitationURL(Response.json({ inviteUrl }))).rejects.toThrow()
+  })
+
+  it('rejects unrecognized workspace role and missing label', async () => {
+    await expect(readWorkspace(Response.json({ activeWorkspace: { id: 'team', name: 'Team', role: 'ROOT' } }), 'team')).rejects.toThrow()
+    await expect(readWorkspace(Response.json({ activeWorkspace: { id: 'team', role: 'OWNER' } }), 'team')).rejects.toThrow()
+  })
 
   it.each(['logout', 'delete'] as const)('does not copy a delayed invitation link after %s', async kind => {
     const h = setup()

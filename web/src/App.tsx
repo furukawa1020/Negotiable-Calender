@@ -240,6 +240,7 @@ function App() {
   const [projections, setProjections] = useState(initialProjections)
   const [memberProjections, setMemberProjections] = useState<ProjectionRow[]>([])
   const [previewLoading, setPreviewLoading] = useState(false)
+  const previewLoad = useRef(0)
   const [currentView, setCurrentView] = useState<'calendar' | 'people' | 'inbox' | 'sent' | 'audit'>('calendar')
   const [people, setPeople] = useState<PersonCard[]>([])
   const [peopleLoading, setPeopleLoading] = useState(false)
@@ -309,6 +310,10 @@ function App() {
   const resetRequestScope = useCallback(() => {
     // Invalidate synchronously, before React cleans up the old request rows.
     requestLifecycle.current++
+    previewLoad.current++
+    setMemberPreview(false)
+    setMemberProjections([])
+    setPreviewLoading(false)
     notificationLoad.current++
     auditLoad.current++
     peopleLoad.current++
@@ -469,6 +474,7 @@ function App() {
   }, [authUser, calendarConnection, currentView, visibleRange])
 
   const moveCalendar = (direction: -1 | 1) => {
+    clearMemberPreview()
     setCalendarAnchor((current) => moveCalendarAnchor(current, calendarView, direction))
     setSelectedPrivateEventID('')
   }
@@ -524,44 +530,40 @@ function App() {
     }
   }
 
+  const clearMemberPreview = () => {
+    previewLoad.current++
+    setMemberPreview(false)
+    setMemberProjections([])
+    setPreviewLoading(false)
+  }
+
   const toggleMemberPreview = async () => {
     if (memberPreview) {
-      setMemberPreview(false)
+      clearMemberPreview()
       return
     }
-    const from = new Date(visibleDate)
-    from.setHours(0, 0, 0, 0)
-    const to = new Date(from)
-    to.setDate(to.getDate() + 1)
+    const scopeCurrent = captureRequestLifetime()
+    if (!scopeCurrent()) return
+    const load = ++previewLoad.current
+    const lifecycle = calendarLifecycle.current
+    const isCurrent = () => scopeCurrent() && load === previewLoad.current && lifecycle === calendarLifecycle.current
     setPreviewLoading(true)
     try {
       const query = new URLSearchParams({
         timezone: 'Asia/Tokyo',
-        from: from.toISOString(),
-        to: to.toISOString(),
+        from: visibleRange.from.toISOString(),
+        to: visibleRange.to.toISOString(),
       })
-      const response = await apiFetch(`${apiURL}/api/v1/people/${activeUserID}/projection?${query}`, {
+      const rows = await fetchBookingResult(`${apiURL}/api/v1/people/${encodeURIComponent(activeUserID)}/projection?${query}`, {
         headers: { 'X-Demo-User-ID': activeUserID, 'X-Organization-ID': activeOrganizationID },
-      })
-      if (!response.ok) {
-        throw new Error('preview failed')
-      }
-      const view = await response.json() as PublicProjection
-      const formatter = new Intl.DateTimeFormat('ja-JP', { hour: '2-digit', minute: '2-digit', hour12: false })
-      setMemberProjections(view.segments.map((segment) => ({
-        time: `${formatter.format(new Date(segment.startAt))} — ${formatter.format(new Date(segment.endAt))}`,
-        label: segment.availability === 'available'
-          ? '相談可能'
-          : segment.interruptibility === 'urgent_only' ? '緊急のみ' : '対応困難',
-        tone: segment.availability === 'available'
-          ? 'available'
-          : segment.availability === 'limited' ? 'urgent' : 'unavailable',
-      })))
+      }, async response => mapPublicSegments(await response.json() as PublicProjection), isCurrent)
+      if (!rows || !isCurrent()) return
+      setMemberProjections(rows)
       setMemberPreview(true)
     } catch {
-      setNotice('メンバー表示を取得できませんでした。')
+      if (isCurrent()) setNotice('メンバー表示を取得できませんでした。')
     } finally {
-      setPreviewLoading(false)
+      if (isCurrent()) setPreviewLoading(false)
     }
   }
 
@@ -1324,12 +1326,12 @@ function App() {
           <strong className="calendar-date">{dateLabel}</strong>
           <div className="date-controls">
             <button type="button" aria-label={calendarView === 'day' ? '前の日' : calendarView === 'week' ? '前の週' : '前の月'} onClick={() => moveCalendar(-1)}>←</button>
-            <button type="button" onClick={() => setCalendarAnchor(new Date())}>今日</button>
+            <button type="button" onClick={() => { clearMemberPreview(); setCalendarAnchor(new Date()) }}>今日</button>
             <button type="button" aria-label={calendarView === 'day' ? '次の日' : calendarView === 'week' ? '次の週' : '次の月'} onClick={() => moveCalendar(1)}>→</button>
           </div>
           <div className="calendar-view-controls" aria-label="表示期間">
             {(['day', 'week', 'month'] as CalendarView[]).map((view) => (
-              <button aria-pressed={calendarView === view} className={calendarView === view ? 'active' : ''} type="button" key={view} onClick={() => setCalendarView(view)}>
+              <button aria-pressed={calendarView === view} className={calendarView === view ? 'active' : ''} type="button" key={view} onClick={() => { clearMemberPreview(); setCalendarView(view) }}>
                 {view === 'day' ? '日' : view === 'week' ? '週' : '月'}
               </button>
             ))}

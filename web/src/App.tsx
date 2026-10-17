@@ -236,6 +236,7 @@ function App() {
   const [privateCalendarEvents, setPrivateCalendarEvents] = useState<PrivateCalendarEvent[]>([])
   const [privateEventsLoading, setPrivateEventsLoading] = useState(false)
   const [privateEventsError, setPrivateEventsError] = useState('')
+  const [privateReload, setPrivateReload] = useState(0)
   const [selectedPrivateEventID, setSelectedPrivateEventID] = useState('')
   const [projections, setProjections] = useState(initialProjections)
   const [memberProjections, setMemberProjections] = useState<ProjectionRow[]>([])
@@ -436,22 +437,26 @@ function App() {
     const load = async () => {
       setPrivateEventsLoading(true)
       setPrivateEventsError('')
+      setPrivateCalendarEvents([])
+      setSelectedPrivateEventID('')
+      setProjections([])
       const query = new URLSearchParams({ from: visibleRange.from.toISOString(), to: visibleRange.to.toISOString() })
       try {
-        const [privateResponse, projectionResponse] = await Promise.all([
-          apiFetch(`${apiURL}/api/v1/me/private-events?${query}`),
-          apiFetch(`${apiURL}/api/v1/people/${authUser.userId}/projection?timezone=Asia%2FTokyo&${query}`, {
+        const [events, rows] = await Promise.all([
+          fetchBookingResult(`${apiURL}/api/v1/me/private-events?${query}`, {}, async response => {
+            const value = await response.json() as PrivateCalendarResponse
+            if (!value || !Array.isArray(value.events)) throw new Error('private')
+            // Validate formatting while still inside the recoverable read boundary.
+            value.events.forEach(event => privateEventRow(event, calendarView))
+            return value.events
+          }, isCurrent, { signal: controller.signal, readError: async response => { throw new Error(response.status === 409 ? 'reconnect' : 'private') } }),
+          fetchBookingResult(`${apiURL}/api/v1/people/${encodeURIComponent(authUser.userId)}/projection?timezone=Asia%2FTokyo&${query}`, {
             headers: { 'X-Demo-User-ID': authUser.userId, 'X-Organization-ID': authUser.organizationId },
-          }),
+          }, async response => mapPublicSegments(await response.json() as PublicProjection), isCurrent, { signal: controller.signal }),
         ])
-        if (!privateResponse.ok) {
-          throw new Error(privateResponse.status === 409 ? 'reconnect' : 'private')
-        }
-        const privatePayload = await privateResponse.json() as PrivateCalendarResponse
-        if (isCurrent()) setPrivateCalendarEvents(privatePayload.events ?? [])
-        if (projectionResponse.ok) {
-          const projectionPayload = await projectionResponse.json() as PublicProjection
-          if (isCurrent()) setProjections(mapPublicSegments(projectionPayload))
+        if (events && rows && isCurrent()) {
+          setPrivateCalendarEvents(events)
+          setProjections(rows)
         }
       } catch (error) {
         if (isCurrent()) {
@@ -462,11 +467,13 @@ function App() {
         }
       } finally {
         if (isCurrent()) setPrivateEventsLoading(false)
+        controller.abort()
       }
     }
+    const controller = new AbortController()
     void load()
-    return () => { cancelled = true }
-  }, [authUser, calendarConnection, currentView, visibleRange])
+    return () => { cancelled = true; controller.abort() }
+  }, [authUser, calendarConnection, currentView, visibleRange, calendarView, privateReload])
 
   const moveCalendar = (direction: -1 | 1) => {
     setCalendarAnchor((current) => moveCalendarAnchor(current, calendarView, direction))
@@ -1353,7 +1360,7 @@ function App() {
             </div>
             <div className="private-list">
               {privateEventsLoading ? <p className="empty-state" role="status">本人用カレンダーを取得中…</p> : null}
-              {privateEventsError ? <p className="empty-state error" role="alert">{privateEventsError}</p> : null}
+              {privateEventsError ? <><p className="empty-state error" role="alert">{privateEventsError}</p><button type="button" onClick={() => setPrivateReload(value => value + 1)}>本人用カレンダーを再読み込み</button></> : null}
               {!privateEventsLoading && !privateEventsError && privateRows.length === 0 ? <p className="empty-state">この期間の予定はありません。</p> : null}
               {privateRows.map((event) => (
                 <div className="private-row" key={event.id ?? `${event.time}-${event.label}`}>

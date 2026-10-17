@@ -44,3 +44,23 @@ it('accepts empty and valid lists', async () => {
   await expect(readRequestList(Response.json({ requests: [] }))).resolves.toEqual([])
   await expect(readRequestList(Response.json({ requests: [request] }))).resolves.toEqual([request])
 })
+
+it.each([
+  { deadlineAt: 'bad-date' }, { createdAt: '' }, { durationMinutes: -1 }, { durationMinutes: 1.5 },
+  { options: [{ id: 'o', type: 'meeting', startAt: 'bad-date' }] },
+  { options: [{ id: 'o', type: 'meeting', endAt: 'bad-date' }] },
+  { options: [{ id: 'o', type: 'async', responseBy: 'bad-date' }] },
+  { options: [{ id: 'o', type: 'meeting', startAt: '2030-01-02T00:00:00Z', endAt: '2030-01-01T00:00:00Z' }] },
+  { options: [{ id: 'o', type: 'async' }, { id: 'o', type: 'decline' }] },
+])('rejects unsafe date/duration/option evidence', async patch => {
+  await expect(readRequestList(Response.json({ requests: [{ ...request, ...patch }] }))).rejects.toThrow('invalid request list')
+})
+
+it('shows a recoverable error for an invalid deadline rather than crashing render', async () => {
+  vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(Response.json({ requests: [{ ...request, deadlineAt: 'bad-date' }] })).mockResolvedValueOnce(Response.json({ requests: [request] }))
+  render(<App />)
+  fireEvent.click(screen.getByRole('button', { name: '送信済み' }))
+  await screen.findByRole('alert')
+  fireEvent.click(screen.getByRole('button', { name: '更新' }))
+  expect(await screen.findByText(request.title)).toBeInTheDocument()
+})

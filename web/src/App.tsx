@@ -1,5 +1,6 @@
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import SharingPolicyEditor from './SharingPolicyEditor'
+import { ManualOverrideForm } from './ManualOverrideForm'
 import { ConfirmedMeeting } from './ConfirmedMeeting'
 import { CalendarSyncStatus } from './CalendarSyncStatus'
 import { readCalendarSync } from './calendarSyncResponse'
@@ -242,6 +243,7 @@ function App() {
   const [projections, setProjections] = useState(initialProjections)
   const [memberProjections, setMemberProjections] = useState<ProjectionRow[]>([])
   const [previewLoading, setPreviewLoading] = useState(false)
+  const previewLoad = useRef(0)
   const [currentView, setCurrentView] = useState<'calendar' | 'people' | 'inbox' | 'sent' | 'audit'>('calendar')
   const [people, setPeople] = useState<PersonCard[]>([])
   const [peopleLoading, setPeopleLoading] = useState(false)
@@ -257,7 +259,6 @@ function App() {
   const [auditLogs, setAuditLogs] = useState<AuditEvent[]>([])
   const [auditLoading, setAuditLoading] = useState(false)
   const [auditError, setAuditError] = useState('')
-  const [overrideSaving, setOverrideSaving] = useState(false)
   const [exporting, setExporting] = useState(false)
   const [deletingAccount, setDeletingAccount] = useState(false)
   const [policyLoading, setPolicyLoading] = useState(false)
@@ -313,6 +314,10 @@ function App() {
   const resetRequestScope = useCallback(() => {
     // Invalidate synchronously, before React cleans up the old request rows.
     requestLifecycle.current++
+    previewLoad.current++
+    setMemberPreview(false)
+    setMemberProjections([])
+    setPreviewLoading(false)
     notificationLoad.current++
     auditLoad.current++
     peopleLoad.current++
@@ -479,6 +484,7 @@ function App() {
   }, [authUser, calendarConnection, currentView, visibleRange, calendarView, privateReload])
 
   const moveCalendar = (direction: -1 | 1) => {
+    clearMemberPreview()
     setCalendarAnchor((current) => moveCalendarAnchor(current, calendarView, direction))
     setSelectedPrivateEventID('')
   }
@@ -488,38 +494,7 @@ function App() {
     : demoMode ? demoPrivateEvents : []
 
 
-  const submitOverride = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    const form = new FormData(event.currentTarget)
-    const startTime = String(form.get('startTime'))
-    const endTime = String(form.get('endTime'))
-    const availability = String(form.get('availability'))
-    const [startHour, startMinute] = startTime.split(':').map(Number)
-    const [endHour, endMinute] = endTime.split(':').map(Number)
-    const startAt = new Date(visibleDate)
-    startAt.setHours(startHour, startMinute, 0, 0)
-    const endAt = new Date(visibleDate)
-    endAt.setHours(endHour, endMinute, 0, 0)
-    setOverrideSaving(true)
-    try {
-      const response = await apiFetch(`${apiURL}/api/v1/users/${activeUserID}/manual-overrides`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Demo-User-ID': activeUserID },
-        body: JSON.stringify({
-          startAt: startAt.toISOString(),
-          endAt: endAt.toISOString(),
-          expiresAt: new Date(endAt.getTime() + 24 * 60 * 60 * 1000).toISOString(),
-          state: {
-            availability,
-            interruptibility: availability === 'available' ? 'open' : 'urgent_only',
-            requestability: availability === 'available' ? 'open' : 'later',
-            reschedulability: availability === 'available' ? 'high' : 'low',
-          },
-        }),
-      })
-      if (!response.ok) {
-        throw new Error('save failed')
-      }
+  const reflectOverride = (startTime: string, endTime: string, availability: string) => {
       const label = availability === 'available' ? '相談可能（上書き）' : '緊急のみ（上書き）'
       setProjections((current) => [
         ...current,
@@ -527,51 +502,42 @@ function App() {
       ])
       setActiveDialog('')
       setNotice('公開状態を上書きしました。')
-    } catch {
-      setNotice('保存できませんでした。APIの接続を確認してください。')
-    } finally {
-      setOverrideSaving(false)
-    }
+  }
+
+  const clearMemberPreview = () => {
+    previewLoad.current++
+    setMemberPreview(false)
+    setMemberProjections([])
+    setPreviewLoading(false)
   }
 
   const toggleMemberPreview = async () => {
     if (memberPreview) {
-      setMemberPreview(false)
+      clearMemberPreview()
       return
     }
-    const from = new Date(visibleDate)
-    from.setHours(0, 0, 0, 0)
-    const to = new Date(from)
-    to.setDate(to.getDate() + 1)
+    const scopeCurrent = captureRequestLifetime()
+    if (!scopeCurrent()) return
+    const load = ++previewLoad.current
+    const lifecycle = calendarLifecycle.current
+    const isCurrent = () => scopeCurrent() && load === previewLoad.current && lifecycle === calendarLifecycle.current
     setPreviewLoading(true)
     try {
       const query = new URLSearchParams({
         timezone: 'Asia/Tokyo',
-        from: from.toISOString(),
-        to: to.toISOString(),
+        from: visibleRange.from.toISOString(),
+        to: visibleRange.to.toISOString(),
       })
-      const response = await apiFetch(`${apiURL}/api/v1/people/${activeUserID}/projection?${query}`, {
+      const rows = await fetchBookingResult(`${apiURL}/api/v1/people/${encodeURIComponent(activeUserID)}/projection?${query}`, {
         headers: { 'X-Demo-User-ID': activeUserID, 'X-Organization-ID': activeOrganizationID },
-      })
-      if (!response.ok) {
-        throw new Error('preview failed')
-      }
-      const view = await response.json() as PublicProjection
-      const formatter = new Intl.DateTimeFormat('ja-JP', { hour: '2-digit', minute: '2-digit', hour12: false })
-      setMemberProjections(view.segments.map((segment) => ({
-        time: `${formatter.format(new Date(segment.startAt))} — ${formatter.format(new Date(segment.endAt))}`,
-        label: segment.availability === 'available'
-          ? '相談可能'
-          : segment.interruptibility === 'urgent_only' ? '緊急のみ' : '対応困難',
-        tone: segment.availability === 'available'
-          ? 'available'
-          : segment.availability === 'limited' ? 'urgent' : 'unavailable',
-      })))
+      }, async response => mapPublicSegments(await response.json() as PublicProjection), isCurrent)
+      if (!rows || !isCurrent()) return
+      setMemberProjections(rows)
       setMemberPreview(true)
     } catch {
-      setNotice('メンバー表示を取得できませんでした。')
+      if (isCurrent()) setNotice('メンバー表示を取得できませんでした。')
     } finally {
-      setPreviewLoading(false)
+      if (isCurrent()) setPreviewLoading(false)
     }
   }
 
@@ -1345,12 +1311,12 @@ function App() {
           <strong className="calendar-date">{dateLabel}</strong>
           <div className="date-controls">
             <button type="button" aria-label={calendarView === 'day' ? '前の日' : calendarView === 'week' ? '前の週' : '前の月'} onClick={() => moveCalendar(-1)}>←</button>
-            <button type="button" onClick={() => setCalendarAnchor(new Date())}>今日</button>
+            <button type="button" onClick={() => { clearMemberPreview(); setCalendarAnchor(new Date()) }}>今日</button>
             <button type="button" aria-label={calendarView === 'day' ? '次の日' : calendarView === 'week' ? '次の週' : '次の月'} onClick={() => moveCalendar(1)}>→</button>
           </div>
           <div className="calendar-view-controls" aria-label="表示期間">
             {(['day', 'week', 'month'] as CalendarView[]).map((view) => (
-              <button aria-pressed={calendarView === view} className={calendarView === view ? 'active' : ''} type="button" key={view} onClick={() => setCalendarView(view)}>
+              <button aria-pressed={calendarView === view} className={calendarView === view ? 'active' : ''} type="button" key={view} onClick={() => { clearMemberPreview(); setCalendarView(view) }}>
                 {view === 'day' ? '日' : view === 'week' ? '週' : '月'}
               </button>
             ))}
@@ -1647,23 +1613,7 @@ function App() {
               <button className="close-button" type="button" aria-label="閉じる" onClick={() => setActiveDialog('')}>×</button>
             </div>
             <p className="modal-copy">指定した時間の公開状態を一時的に変更します。元のカレンダーの予定は変更しません。</p>
-            <form className="request-form" onSubmit={submitOverride}>
-              <div className="form-row">
-                <label>開始<input name="startTime" type="time" defaultValue="15:30" required /></label>
-                <label>終了<input name="endTime" type="time" defaultValue="16:00" required /></label>
-              </div>
-              <label>
-                公開状態
-                <select name="availability" defaultValue="available">
-                  <option value="available">相談可能</option>
-                  <option value="limited">緊急のみ</option>
-                </select>
-              </label>
-              <div className="modal-actions">
-                <button className="secondary-button" type="button" onClick={() => setActiveDialog('')}>キャンセル</button>
-                <button className="primary-button" type="submit" disabled={overrideSaving}>{overrideSaving ? '保存中…' : '上書きを保存'}</button>
-              </div>
-            </form>
+            <ManualOverrideForm key={`${activeUserID}:${activeOrganizationID}:${visibleDate.toISOString()}`} apiURL={apiURL} userID={activeUserID} date={visibleDate} isCurrent={captureRequestLifetime()} onClose={() => setActiveDialog('')} onSaved={reflectOverride} />
           </section>
         </div>
       ) : null}

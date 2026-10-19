@@ -31,6 +31,7 @@ func (api *API) loadWorkspaceRequest(response http.ResponseWriter, request *http
 		return fail(404, "request not found")
 	}
 	if err != nil {
+		api.logger.Error("load workspace request", "failure_code", safeFailureCode(err))
 		return fail(500, "unable to load request")
 	}
 	if value.ID != id || value.OrganizationID != org || (value.RequesterUserID != actor && value.TargetUserID != actor) {

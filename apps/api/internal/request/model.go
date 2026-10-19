@@ -2,6 +2,7 @@ package request
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"time"
 )
@@ -135,8 +136,8 @@ func (r CoordinationRequest) Validate() error {
 	if strings.TrimSpace(r.Title) == "" {
 		return fmt.Errorf("request title is required")
 	}
-	if r.DurationMinutes <= 0 {
-		return fmt.Errorf("duration must be positive")
+	if !validDurationMinutes(r.DurationMinutes) {
+		return fmt.Errorf("duration must be positive and within supported range")
 	}
 	if err := validUTC("deadline_at", r.DeadlineAt); err != nil {
 		return err
@@ -158,7 +159,12 @@ func (r CoordinationRequest) Validate() error {
 			return err
 		}
 	}
+	ids := make(map[string]bool, len(r.Options))
 	for _, option := range r.Options {
+		if option.RequestID != r.ID || ids[option.ID] {
+			return fmt.Errorf("option must belong to request and have a unique id")
+		}
+		ids[option.ID] = true
 		if err := option.Validate(); err != nil {
 			return err
 		}
@@ -188,6 +194,13 @@ func (o Option) Validate() error {
 	}
 	if !o.Type.Valid() {
 		return fmt.Errorf("invalid option type")
+	}
+	for name, value := range map[string]*time.Time{"start_at": o.StartAt, "end_at": o.EndAt, "response_by": o.ResponseBy} {
+		if value != nil {
+			if err := validUTC(name, *value); err != nil {
+				return err
+			}
+		}
 	}
 	if o.Type == OptionMeeting {
 		if o.StartAt == nil {
@@ -219,6 +232,10 @@ func validTimes(createdAt, updatedAt time.Time) error {
 		return fmt.Errorf("updated_at before created_at")
 	}
 	return nil
+}
+
+func validDurationMinutes(minutes int) bool {
+	return minutes > 0 && int64(minutes) <= math.MaxInt64/int64(time.Minute)
 }
 
 func validRange(startAt, endAt time.Time) error {

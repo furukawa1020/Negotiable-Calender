@@ -740,37 +740,9 @@ func (api *API) getPublicProjection(response http.ResponseWriter, request *http.
 	if !api.requireMembership(response, request, organizationID, actorUserID) || !api.requireMembership(response, request, organizationID, request.PathValue("userId")) {
 		return
 	}
-	timezone := request.URL.Query().Get("timezone")
-	if timezone == "" {
-		timezone = "Asia/Tokyo"
-	}
-	location, err := time.LoadLocation(timezone)
+	timezone, from, to, err := projectionRange(request.URL.Query(), time.Now())
 	if err != nil {
-		writeJSON(response, http.StatusBadRequest, map[string]string{"error": "invalid timezone"})
-		return
-	}
-	localNow := time.Now().In(location)
-	localStart := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), 0, 0, 0, 0, location)
-	from := localStart.UTC()
-	to := localStart.Add(24 * time.Hour).UTC()
-	if raw := request.URL.Query().Get("from"); raw != "" {
-		from, err = time.Parse(time.RFC3339, raw)
-		if err != nil {
-			writeJSON(response, http.StatusBadRequest, map[string]string{"error": "invalid from"})
-			return
-		}
-		from = from.UTC()
-	}
-	if raw := request.URL.Query().Get("to"); raw != "" {
-		to, err = time.Parse(time.RFC3339, raw)
-		if err != nil {
-			writeJSON(response, http.StatusBadRequest, map[string]string{"error": "invalid to"})
-			return
-		}
-		to = to.UTC()
-	}
-	if !to.After(from) {
-		writeJSON(response, http.StatusBadRequest, map[string]string{"error": "to must be after from"})
+		writeJSON(response, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 	view, err := api.projections.GetView(request.Context(), request.PathValue("userId"), timezone, from, to)

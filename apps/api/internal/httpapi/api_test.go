@@ -195,6 +195,10 @@ func (store *stubRequestStore) GetForUser(_ context.Context, _ string, userID st
 	return store.value, store.err
 }
 
+func (store *stubRequestStore) GetInOrganization(ctx context.Context, id, actor, _ string) (coordinationrequest.CoordinationRequest, error) {
+	return store.GetForUser(ctx, id, actor)
+}
+
 func (store *stubRequestStore) Cancel(_ context.Context, requestID, requesterUserID string) error {
 	store.cancelledID, store.cancelledUser = requestID, requesterUserID
 	if store.cancelErr != nil {
@@ -930,10 +934,11 @@ func TestRequestListSupportsRequesterSentScope(t *testing.T) {
 func TestRequestDetailIsLoadedForParticipant(t *testing.T) {
 	t.Parallel()
 	store := &stubRequestStore{value: coordinationrequest.CoordinationRequest{
-		ID: "request-1", RequesterUserID: "member-1", TargetUserID: "manager-1",
+		ID: "request-1", OrganizationID: "org", RequesterUserID: "member-1", TargetUserID: "manager-1",
 	}}
 	handler := New(stubDatabase{}, &stubPolicyStore{}, &stubProjectionStore{}, &stubOrganizationStore{}, store, "", testLogger())
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/requests/request-1", nil)
+	request.Header.Set("X-Organization-ID", "org")
 	request.Header.Set("X-Demo-User-ID", "manager-1")
 	response := httptest.NewRecorder()
 

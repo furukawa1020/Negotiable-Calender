@@ -34,10 +34,12 @@ func TestCalendarExportRejectsAmbiguousAndMismatchedEvidence(t *testing.T) {
 					want = 404
 				case "missing-org":
 					v.OrganizationID = ""
+					want = 404
 				}
 				h := New(nil, nil, nil, nil, &stubRequestStore{value: v}, "", slog.New(slog.NewTextHandler(io.Discard, nil)))
 				r := httptest.NewRequest(http.MethodGet, "/api/v1/requests/r/calendar.ics", nil)
 				r.Header.Set("X-Demo-User-ID", actor)
+				r.Header.Set("X-Organization-ID", "org")
 				w := httptest.NewRecorder()
 				h.ServeHTTP(w, r)
 				if w.Code != want || w.Header().Get("Cache-Control") != "no-store" || w.Header().Get("Content-Disposition") != "" || strings.Contains(w.Body.String(), "PRIVATE_TITLE") || strings.Contains(w.Body.String(), "BEGIN:VEVENT") {

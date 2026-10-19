@@ -1,7 +1,6 @@
 package httpapi
 
 import (
-	"errors"
 	"net/http"
 
 	coordinationrequest "github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/request"
@@ -9,22 +8,8 @@ import (
 
 func (api *API) exportConfirmedCalendar(response http.ResponseWriter, request *http.Request) {
 	response.Header().Set("Cache-Control", "no-store")
-	userID := request.Header.Get("X-Demo-User-ID")
-	if userID == "" {
-		writeJSON(response, http.StatusUnauthorized, map[string]string{"error": "request identity is required"})
-		return
-	}
-	value, err := api.requests.GetForUser(request.Context(), request.PathValue("requestId"), userID)
-	if errors.Is(err, coordinationrequest.ErrNotFound) {
-		writeJSON(response, http.StatusNotFound, map[string]string{"error": "request not found"})
-		return
-	}
-	if err != nil {
-		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to load request"})
-		return
-	}
-	if value.ID != request.PathValue("requestId") || (userID != value.RequesterUserID && userID != value.TargetUserID) {
-		writeJSON(response, http.StatusNotFound, map[string]string{"error": "request not found"})
+	value, ok := api.loadWorkspaceRequest(response, request)
+	if !ok {
 		return
 	}
 	contents, err := coordinationrequest.CalendarExport(value)

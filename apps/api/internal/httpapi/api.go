@@ -525,19 +525,8 @@ func (api *API) listCoordinationRequests(response http.ResponseWriter, request *
 }
 
 func (api *API) getCoordinationRequest(response http.ResponseWriter, request *http.Request) {
-	userID := request.Header.Get("X-Demo-User-ID")
-	if userID == "" {
-		writeJSON(response, http.StatusUnauthorized, map[string]string{"error": "request identity is required"})
-		return
-	}
-	value, err := api.requests.GetForUser(request.Context(), request.PathValue("requestId"), userID)
-	if errors.Is(err, coordinationrequest.ErrNotFound) {
-		writeJSON(response, http.StatusNotFound, map[string]string{"error": "coordination request not found"})
-		return
-	}
-	if err != nil {
-		api.logger.Error("get coordination request", "failure_code", safeFailureCode(err))
-		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to load request"})
+	value, ok := api.loadWorkspaceRequest(response, request)
+	if !ok {
 		return
 	}
 	writeJSON(response, http.StatusOK, value)

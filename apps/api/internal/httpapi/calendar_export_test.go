@@ -28,6 +28,7 @@ func TestCalendarExportAuthorizationAndConfirmation(t *testing.T) {
 			handler := New(nil, nil, nil, nil, store, "", slog.New(slog.NewTextHandler(io.Discard, nil)))
 			req := httptest.NewRequest(http.MethodGet, "/api/v1/requests/r/calendar.ics", nil)
 			req.Header.Set("X-Demo-User-ID", tc.user)
+			req.Header.Set("X-Organization-ID", "org")
 			response := httptest.NewRecorder()
 			handler.ServeHTTP(response, req)
 			if response.Code != tc.want {

@@ -65,10 +65,27 @@ func testPostgresWorkspaceLists(t *testing.T, ctx context.Context, db *sql.DB, s
 			}
 		}
 		global, err := store.ListForUser(ctx, "alice")
+		for _, tc := range []struct {
+			id, actor, org string
+			want           error
+		}{
+			{"list-org-z", "alice", "list-org", nil},
+			{"list-org-z", "alice", "list-other", coord.ErrNotFound},
+			{"list-org-z", "carol", "list-org", coord.ErrNotFound},
+			{"list-org-z", "bob", "list-org", coord.ErrCreationForbidden},
+		} {
+			got, err := store.GetInOrganization(ctx, tc.id, tc.actor, tc.org)
+			if !errors.Is(err, tc.want) || (err != nil && got.ID != "") || (err == nil && (got.ID != tc.id || len(got.Options) != 1)) {
+				t.Fatalf("scoped detail=%+v err=%v", got, err)
+			}
+		}
 		if err != nil || len(global) != 6 {
 			t.Fatalf("global conflict/export read changed: values=%d err=%v", len(global), err)
 		}
 		exec("DELETE FROM memberships WHERE organization_id='list-org' AND user_id='alice'")
+		if got, err := store.GetInOrganization(ctx, "list-org-z", "alice", "list-org"); !errors.Is(err, coord.ErrCreationForbidden) || got.ID != "" {
+			t.Fatal("revoked detail leaked", err)
+		}
 		for _, sent := range []bool{false, true} {
 			for _, pair := range [][2]string{{"alice", "list-org"}, {"bob", "list-other"}, {"alice", ""}, {"", "list-other"}} {
 				values, err := store.ListInOrganization(ctx, pair[0], pair[1], sent)

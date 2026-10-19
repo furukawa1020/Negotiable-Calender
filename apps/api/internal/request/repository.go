@@ -213,11 +213,24 @@ ORDER BY created_at DESC, id DESC
 }
 
 func (store *PostgresStore) GetForUser(ctx context.Context, requestID, userID string) (CoordinationRequest, error) {
+	return store.getForUser(ctx, requestID, userID, "")
+}
+
+func (store *PostgresStore) getForUser(ctx context.Context, requestID, userID, org string) (CoordinationRequest, error) {
 	tx, err := store.database.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
 	if err != nil {
 		return CoordinationRequest{}, err
 	}
 	defer tx.Rollback()
+	if org != "" {
+		var member bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM memberships WHERE organization_id=$1 AND user_id=$2)`, org, userID).Scan(&member); err != nil {
+			return CoordinationRequest{}, err
+		}
+		if !member {
+			return CoordinationRequest{}, ErrCreationForbidden
+		}
+	}
 	var value CoordinationRequest
 	var acceptedOptionID, delegatedUserID, asyncMessage, delegatedFromUserID sql.NullString
 	var proposalJSON []byte
@@ -226,8 +239,8 @@ SELECT id, organization_id, requester_user_id, target_user_id, type, title,
        duration_minutes, deadline_at, sync_preference, priority, status,
        created_at, updated_at, accepted_option_id, delegated_user_id, async_message, reschedule_proposal, delegated_from_user_id
 FROM coordination_requests
-WHERE id = $1 AND (requester_user_id = $2 OR target_user_id = $2)
-`, requestID, userID).Scan(
+WHERE id = $1 AND (requester_user_id = $2 OR target_user_id = $2) AND ($3 = '' OR organization_id = $3)
+`, requestID, userID, org).Scan(
 		&value.ID, &value.OrganizationID, &value.RequesterUserID, &value.TargetUserID,
 		&value.Type, &value.Title, &value.DurationMinutes, &value.DeadlineAt,
 		&value.SyncPreference, &value.Priority, &value.Status,

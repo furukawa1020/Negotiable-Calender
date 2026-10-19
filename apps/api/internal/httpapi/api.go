@@ -266,9 +266,7 @@ func (api *API) delegateCoordinationRequest(response http.ResponseWriter, reques
 		return
 	}
 	var input delegateCoordinationRequestInput
-	decoder := json.NewDecoder(http.MaxBytesReader(response, request.Body, 1<<20))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&input); err != nil || input.DelegateUserID == "" {
+	if err := decodeCommand(response, request, &input, 1<<20); err != nil || input.DelegateUserID == "" {
 		writeJSON(response, http.StatusBadRequest, map[string]string{"error": "delegateUserId is required"})
 		return
 	}
@@ -310,9 +308,7 @@ func (api *API) suggestCoordinationRequest(response http.ResponseWriter, request
 		return
 	}
 	var input suggestCoordinationRequestInput
-	decoder := json.NewDecoder(http.MaxBytesReader(response, request.Body, 1<<20))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&input); err != nil {
+	if err := decodeCommand(response, request, &input, 1<<20); err != nil {
 		writeJSON(response, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
 		return
 	}
@@ -359,9 +355,7 @@ func (api *API) acceptCoordinationRequest(response http.ResponseWriter, request 
 		return
 	}
 	var input acceptCoordinationRequestInput
-	decoder := json.NewDecoder(http.MaxBytesReader(response, request.Body, 1<<20))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&input); err != nil || input.OptionID == "" {
+	if err := decodeCommand(response, request, &input, 1<<20); err != nil || input.OptionID == "" {
 		writeJSON(response, http.StatusBadRequest, map[string]string{"error": "optionId is required"})
 		return
 	}
@@ -388,9 +382,7 @@ func (api *API) asyncCoordinationRequest(response http.ResponseWriter, request *
 		return
 	}
 	var input asyncCoordinationRequestInput
-	decoder := json.NewDecoder(http.MaxBytesReader(response, request.Body, 8<<10))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&input); err != nil {
+	if err := decodeCommand(response, request, &input, 8<<10); err != nil {
 		writeJSON(response, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
 		return
 	}
@@ -609,9 +601,7 @@ func (api *API) createCoordinationRequest(response http.ResponseWriter, request 
 		return
 	}
 	var input createCoordinationRequestInput
-	decoder := json.NewDecoder(http.MaxBytesReader(response, request.Body, 1<<20))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&input); err != nil {
+	if err := decodeCommand(response, request, &input, 1<<20); err != nil {
 		writeJSON(response, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
 		return
 	}
@@ -820,9 +810,7 @@ func (api *API) createManualOverride(response http.ResponseWriter, request *http
 		return
 	}
 	var input createOverrideRequest
-	decoder := json.NewDecoder(http.MaxBytesReader(response, request.Body, 1<<20))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&input); err != nil {
+	if err := decodeCommand(response, request, &input, 1<<20); err != nil {
 		writeJSON(response, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
 		return
 	}

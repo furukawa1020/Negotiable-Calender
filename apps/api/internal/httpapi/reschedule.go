@@ -9,6 +9,7 @@ import (
 )
 
 func (api *API) rescheduleMeeting(response http.ResponseWriter, request *http.Request) {
+	response.Header().Set("Cache-Control", "no-store")
 	actor := request.Header.Get("X-Demo-User-ID")
 	org := request.Header.Get("X-Organization-ID")
 	if actor == "" || org == "" {
@@ -31,12 +32,17 @@ func (api *API) rescheduleMeeting(response http.ResponseWriter, request *http.Re
 		writeJSON(response, 503, map[string]string{"error": "rescheduling unavailable"})
 		return
 	}
+	reader, ok := api.requests.(coordinationrequest.ScopedGetStore)
+	if !ok {
+		writeJSON(response, 503, map[string]string{"error": "rescheduling result verification unavailable"})
+		return
+	}
 	id := request.PathValue("requestId")
 	err := store.RescheduleInOrganization(request.Context(), id, actor, org, input)
 	if err == nil || errors.Is(err, coordinationrequest.ErrRescheduleRepeated) {
 		replayed := errors.Is(err, coordinationrequest.ErrRescheduleRepeated)
-		value, err := api.requests.GetForUser(request.Context(), id, actor)
-		if err != nil {
+		value, err := reader.GetInOrganization(request.Context(), id, actor, org)
+		if err != nil || value.ID != id || value.OrganizationID != org || (value.RequesterUserID != actor && value.TargetUserID != actor) {
 			writeJSON(response, 503, map[string]string{"error": "refresh request to confirm result"})
 			return
 		}

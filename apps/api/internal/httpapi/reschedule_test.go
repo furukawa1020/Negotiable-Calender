@@ -46,7 +46,7 @@ func TestRescheduleHTTP(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store := &scopedRescheduleStub{rescheduleStore: rescheduleStore{failure: tc.failure}}
-			store.value = coordinationrequest.CoordinationRequest{ID: "r", Status: coordinationrequest.Accepted, AcceptedOptionID: "old"}
+			store.value = coordinationrequest.CoordinationRequest{ID: "r", OrganizationID: "org", RequesterUserID: "alice", TargetUserID: "bob", Status: coordinationrequest.Accepted, AcceptedOptionID: "old"}
 			notes := &stubNotificationStore{}
 			audits := &stubAuditStore{}
 			handler := NewWithStores(nil, nil, nil, nil, store, notes, audits, "", slog.New(slog.NewTextHandler(io.Discard, nil)))

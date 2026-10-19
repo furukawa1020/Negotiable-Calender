@@ -39,6 +39,7 @@ func TestRescheduleRequiresScopedAuthorization(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store := &scopedRescheduleStub{}
+			store.value = coord.CoordinationRequest{ID: "r", OrganizationID: "org", RequesterUserID: "alice", TargetUserID: "bob"}
 			store.failure = tc.failure
 			handler := NewWithStores(nil, nil, nil, nil, store, &stubNotificationStore{}, &stubAuditStore{}, "", slog.New(slog.NewTextHandler(io.Discard, nil)))
 			req := httptest.NewRequest("POST", "/api/v1/requests/r/reschedule", strings.NewReader(`{"action":"accept","proposalId":"proposal-new","expectedOptionId":"old"}`))

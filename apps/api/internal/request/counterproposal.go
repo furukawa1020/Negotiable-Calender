@@ -46,7 +46,7 @@ func PrepareProposal(value *CoordinationRequest, actor, org string, start, end, 
 	if !value.DeadlineAt.After(now) || !start.After(now) || end.After(value.DeadlineAt) {
 		return Option{}, false, ErrCandidateExpired
 	}
-	if end.Sub(start) != time.Duration(value.DurationMinutes)*time.Minute {
+	if !validDurationMinutes(value.DurationMinutes) || end.Sub(start) != time.Duration(value.DurationMinutes)*time.Minute {
 		return Option{}, false, ErrCandidateInvalid
 	}
 	if len(value.Options) >= MaxRequestOptions {

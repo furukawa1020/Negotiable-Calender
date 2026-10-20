@@ -259,15 +259,6 @@ func (provider *GoogleProvider) ListChanges(ctx context.Context, accessToken, sy
 	}
 }
 
-func googleTime(dateTime, date string) (time.Time, error) {
-	if dateTime != "" {
-		value, err := time.Parse(time.RFC3339, dateTime)
-		return value.UTC(), err
-	}
-	value, err := time.Parse("2006-01-02", date)
-	return value.UTC(), err
-}
-
 func (provider *GoogleProvider) ListPrivateEvents(ctx context.Context, accessToken string, from, to time.Time) ([]PrivateEventView, error) {
 	query := url.Values{
 		"timeMin": {from.UTC().Format(time.RFC3339)}, "timeMax": {to.UTC().Format(time.RFC3339)},
@@ -307,10 +298,7 @@ func (provider *GoogleProvider) ListPrivateEvents(ctx context.Context, accessTok
 					Email       string `json:"email"`
 					Self        bool   `json:"self"`
 				} `json:"attendees"`
-				Start, End struct {
-					DateTime string `json:"dateTime"`
-					Date     string `json:"date"`
-				}
+				Start, End googleEventTime
 			} `json:"items"`
 		}
 		err = budget.decode(ctx, response, &body)
@@ -321,8 +309,17 @@ func (provider *GoogleProvider) ListPrivateEvents(ctx context.Context, accessTok
 			return nil, err
 		}
 		for _, item := range body.Items {
-			if item.Status == "cancelled" || item.ID == "" {
+			if item.Status == "cancelled" {
 				continue
+			}
+			if strings.TrimSpace(item.ID) == "" {
+				return nil, errCalendarEvidence
+			}
+			// UTC is used only to validate date-only syntax/order. Owner views
+			// retain the original calendar dates, not invented UTC event times.
+			start, end, err := googleBusyRange(item.Start, item.End, time.UTC)
+			if err != nil {
+				return nil, err
 			}
 			value := PrivateEventView{
 				ID: item.ID, Title: item.Summary, Description: item.Description,
@@ -347,11 +344,6 @@ func (provider *GoogleProvider) ListPrivateEvents(ctx context.Context, accessTok
 			if item.Start.Date != "" {
 				value.AllDay, value.StartDate, value.EndDate = true, item.Start.Date, item.End.Date
 			} else {
-				start, startErr := googleTime(item.Start.DateTime, "")
-				end, endErr := googleTime(item.End.DateTime, "")
-				if startErr != nil || endErr != nil || !end.After(start) {
-					continue
-				}
 				value.StartAt, value.EndAt = &start, &end
 			}
 			result = append(result, value)

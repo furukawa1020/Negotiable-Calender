@@ -73,6 +73,7 @@ func (e Engine) Generate(input GenerateInput) ([]ScheduleProjection, error) {
 	result := make([]ScheduleProjection, 0, int(end.Sub(start)/BucketSize))
 	for cursor := start; cursor.Before(end); cursor = cursor.Add(BucketSize) {
 		bucketEnd := cursor.Add(BucketSize)
+		expiresAt := input.Now.Add(e.ProjectionTTL)
 		state := input.Policy.Default
 		if !insideWorkingHours(cursor, bucketEnd, location, input.Policy.WorkingHours) {
 			state = closedState()
@@ -85,15 +86,23 @@ func (e Engine) Generate(input GenerateInput) ([]ScheduleProjection, error) {
 			}
 		}
 		for _, override := range input.ManualOverrides {
+			if !override.ExpiresAt.After(input.Now) {
+				continue
+			}
 			if overlaps(cursor, bucketEnd, override.StartAt, override.EndAt) {
 				state = override.State
+				// Rebuild before any participating override expires: the next
+				// effective state may be more restrictive than the cached one.
+				if override.ExpiresAt.Before(expiresAt) {
+					expiresAt = override.ExpiresAt
+				}
 			}
 		}
 		result = append(result, ScheduleProjection{
 			ID:     fmt.Sprintf("%s:%d", input.UserID, cursor.Unix()),
 			UserID: input.UserID, StartAt: cursor, EndAt: bucketEnd, State: state,
 			ExpectedResponseBucket: responseBucket(state), GeneratedAt: input.Now,
-			ExpiresAt: input.Now.Add(e.ProjectionTTL),
+			ExpiresAt: expiresAt,
 		})
 	}
 	return result, nil

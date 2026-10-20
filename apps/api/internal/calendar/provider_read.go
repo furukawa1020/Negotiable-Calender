@@ -88,7 +88,7 @@ func (b *calendarReadBudget) decode(ctx context.Context, response *http.Response
 	if _, err := fields.Token(); err != nil {
 		return errCalendarResponse
 	}
-	seenItems := false
+	seenKeys := make(map[string]bool)
 	for fields.More() {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -97,6 +97,13 @@ func (b *calendarReadBudget) decode(ctx context.Context, response *http.Response
 		if err != nil {
 			return errCalendarResponse
 		}
+		// Match encoding/json's case folding, including Unicode equivalents.
+		// Cursors and time zones must be as unambiguous as the items array.
+		folded := foldTokenKey(key.(string))
+		if seenKeys[folded] {
+			return errCalendarResponse
+		}
+		seenKeys[folded] = true
 		var raw json.RawMessage
 		if fields.Decode(&raw) != nil {
 			return errCalendarResponse
@@ -104,12 +111,6 @@ func (b *calendarReadBudget) decode(ctx context.Context, response *http.Response
 		if !strings.EqualFold(key.(string), "items") {
 			continue
 		}
-		// Reject duplicate keys, including casing variants: checking only the
-		// final array would let an earlier oversized array allocate first.
-		if seenItems {
-			return errCalendarResponse
-		}
-		seenItems = true
 		items := bytes.TrimSpace(raw)
 		if bytes.Equal(items, []byte("null")) {
 			continue

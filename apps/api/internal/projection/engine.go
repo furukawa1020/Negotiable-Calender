@@ -124,25 +124,32 @@ func (e Engine) Generate(input GenerateInput) ([]ScheduleProjection, error) {
 }
 
 func insideWorkingHours(startAt, endAt time.Time, location *time.Location, windows []policy.WorkingWindow) bool {
-	localStart := startAt.In(location)
-	localEnd := endAt.In(location)
-	if localStart.Weekday() != localEnd.Weekday() {
+	if !endAt.After(startAt) || endAt.Sub(startAt) > BucketSize {
 		return false
 	}
-	startMinute := localStart.Hour()*60 + localStart.Minute()
-	endMinute := localEnd.Hour()*60 + localEnd.Minute()
-	for _, window := range windows {
-		if window.Weekday != localStart.Weekday() {
-			continue
+	contains := func(instant time.Time) bool {
+		local := instant.In(location)
+		minute := local.Hour()*60 + local.Minute()
+		for _, window := range windows {
+			if window.Weekday == local.Weekday() && minute >= window.StartMinute && minute < window.EndMinute {
+				return true
+			}
 		}
-		if startMinute < window.StartMinute {
-			continue
+		return false
+	}
+	// Windows have minute precision, but the bucket is an elapsed-time,
+	// half-open interval. Inspect its interior rather than its exclusive end;
+	// midnight and DST folds/gaps must not compare unrelated wall-clock ends.
+	for cursor := startAt; cursor.Before(endAt); cursor = cursor.Add(time.Minute) {
+		next := cursor.Add(time.Minute)
+		if next.After(endAt) {
+			next = endAt
 		}
-		if endMinute <= window.EndMinute {
-			return true
+		if !contains(cursor) || !contains(next.Add(-time.Nanosecond)) {
+			return false
 		}
 	}
-	return false
+	return true
 }
 
 type ruleCondition struct {

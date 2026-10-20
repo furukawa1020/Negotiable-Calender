@@ -3,6 +3,7 @@ package projection
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -59,14 +60,28 @@ func (e Engine) Generate(input GenerateInput) ([]ScheduleProjection, error) {
 			return nil, fmt.Errorf("event user does not match projection user")
 		}
 	}
-	for _, override := range input.ManualOverrides {
+	overrides := slices.Clone(input.ManualOverrides)
+	seenOverrides := make(map[string]bool, len(overrides))
+	for _, override := range overrides {
 		if err := override.Validate(); err != nil {
 			return nil, fmt.Errorf("invalid manual override: %w", err)
 		}
 		if override.UserID != input.UserID {
 			return nil, fmt.Errorf("override user does not match projection user")
 		}
+		if seenOverrides[override.ID] {
+			return nil, fmt.Errorf("duplicate manual override id")
+		}
+		seenOverrides[override.ID] = true
 	}
+	// Apply oldest first; a stable ID tie-break makes results independent of
+	// database iteration order without changing the caller's snapshot.
+	slices.SortFunc(overrides, func(a, b policy.ManualOverride) int {
+		if order := a.CreatedAt.Compare(b.CreatedAt); order != 0 {
+			return order
+		}
+		return strings.Compare(a.ID, b.ID)
+	})
 
 	start := floorBucket(input.From)
 	end := ceilBucket(input.To)
@@ -85,7 +100,7 @@ func (e Engine) Generate(input GenerateInput) ([]ScheduleProjection, error) {
 				}
 			}
 		}
-		for _, override := range input.ManualOverrides {
+		for _, override := range overrides {
 			if !override.ExpiresAt.After(input.Now) {
 				continue
 			}

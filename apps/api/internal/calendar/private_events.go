@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/url"
 	"time"
 )
 
@@ -42,6 +43,15 @@ func (handler *Handler) privateEvents(response http.ResponseWriter, request *htt
 	if err != nil {
 		handler.logger.Error("load self calendar connection", "failure_code", "connection_load_failed")
 		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to load private calendar"})
+		return
+	}
+	if connection.UserID != userID {
+		handler.logger.Error("load self calendar connection", "failure_code", "connection_owner_mismatch")
+		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to load private calendar"})
+		return
+	}
+	if connection.ReconnectRequired {
+		writeJSON(response, http.StatusConflict, map[string]string{"error": "calendar reconnect required"})
 		return
 	}
 	refreshToken, err := handler.cipher.Decrypt(connection.RefreshTokenCipher)
@@ -87,14 +97,15 @@ func (handler *Handler) privateEvents(response http.ResponseWriter, request *htt
 }
 
 func parsePrivateEventRange(response http.ResponseWriter, request *http.Request) (time.Time, time.Time, bool) {
-	rawFrom, rawTo := request.URL.Query().Get("from"), request.URL.Query().Get("to")
-	if rawFrom == "" || rawTo == "" {
+	query, queryErr := url.ParseQuery(request.URL.RawQuery)
+	if queryErr != nil || len(query["from"]) != 1 || len(query["to"]) != 1 || query.Get("from") == "" || query.Get("to") == "" {
 		writeJSON(response, http.StatusBadRequest, map[string]string{"error": "from and to are required"})
 		return time.Time{}, time.Time{}, false
 	}
+	rawFrom, rawTo := query.Get("from"), query.Get("to")
 	from, fromErr := time.Parse(time.RFC3339, rawFrom)
 	to, toErr := time.Parse(time.RFC3339, rawTo)
-	if fromErr != nil || toErr != nil {
+	if fromErr != nil || toErr != nil || from.IsZero() || to.IsZero() {
 		writeJSON(response, http.StatusBadRequest, map[string]string{"error": "from and to must be RFC3339 timestamps"})
 		return time.Time{}, time.Time{}, false
 	}

@@ -13,6 +13,10 @@ import (
 
 const BucketSize = 15 * time.Minute
 
+// Supports the 120-day synchronization window, including leap-year calendars,
+// while bounding bucket allocation and work before generation starts.
+const MaxGenerationRange = 366 * 24 * time.Hour
+
 type GenerateInput struct {
 	UserID          string
 	Timezone        string
@@ -36,12 +40,21 @@ func (e Engine) Generate(input GenerateInput) ([]ScheduleProjection, error) {
 	if strings.TrimSpace(input.UserID) == "" {
 		return nil, fmt.Errorf("user id is required")
 	}
+	if e.ProjectionTTL <= 0 || e.ProjectionTTL > 24*time.Hour {
+		return nil, fmt.Errorf("projection TTL must be positive and at most 24 hours")
+	}
+	if input.Timezone == "" || input.Timezone == "Local" {
+		return nil, fmt.Errorf("explicit timezone is required")
+	}
 	location, err := time.LoadLocation(input.Timezone)
 	if err != nil {
 		return nil, fmt.Errorf("invalid timezone: %w", err)
 	}
 	if err := validRange(input.From, input.To); err != nil {
 		return nil, err
+	}
+	if input.To.Sub(input.From) > MaxGenerationRange {
+		return nil, fmt.Errorf("projection range cannot exceed 366 days")
 	}
 	if err := validUTC("now", input.Now); err != nil {
 		return nil, err

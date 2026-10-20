@@ -116,6 +116,8 @@ func (handler *Handler) callback(response http.ResponseWriter, request *http.Req
 		writeJSON(response, http.StatusServiceUnavailable, map[string]string{"error": "google calendar is not configured"})
 		return
 	}
+	ctx, cancel := context.WithTimeout(request.Context(), 20*time.Second)
+	defer cancel()
 	cookie, err := request.Cookie(flowCookieName)
 	state, code := request.URL.Query().Get("state"), request.URL.Query().Get("code")
 	providerError := request.URL.Query().Get("error")
@@ -123,13 +125,13 @@ func (handler *Handler) callback(response http.ResponseWriter, request *http.Req
 		writeJSON(response, 400, map[string]string{"error": "invalid calendar oauth callback"})
 		return
 	}
-	flow, err := handler.store.ConsumeFlow(request.Context(), cookie.Value, userID, hashToken(state), handler.now().UTC())
+	flow, err := handler.store.ConsumeFlow(ctx, cookie.Value, userID, hashToken(state), handler.now().UTC())
 	if errors.Is(err, ErrNotFound) {
 		writeJSON(response, 400, map[string]string{"error": "calendar oauth state is invalid or expired"})
 		return
 	}
 	if err != nil {
-		handler.logger.Error("consume calendar oauth flow", "error", err)
+		handler.logger.Error("consume calendar oauth flow", "failure_code", "flow_consume_failed")
 		writeJSON(response, 500, map[string]string{"error": "unable to connect calendar"})
 		return
 	}
@@ -142,9 +144,9 @@ func (handler *Handler) callback(response http.ResponseWriter, request *http.Req
 		handler.redirectConsentResult(response, request, result)
 		return
 	}
-	tokens, err := handler.provider.Exchange(request.Context(), code, flow.CodeVerifier)
-	if err != nil {
-		handler.logger.Warn("calendar oauth exchange rejected", "error", err)
+	tokens, err := handler.provider.Exchange(ctx, code, flow.CodeVerifier)
+	if err != nil || ctx.Err() != nil {
+		handler.logger.Warn("calendar oauth exchange rejected", "failure_code", "token_exchange_failed")
 		handler.redirectConsentResult(response, request, "exchange_failed")
 		return
 	}
@@ -154,13 +156,17 @@ func (handler *Handler) callback(response http.ResponseWriter, request *http.Req
 	}
 	encrypted, err := handler.cipher.Encrypt(tokens.RefreshToken)
 	if err != nil {
-		handler.logger.Error("encrypt calendar token", "error", err)
+		handler.logger.Error("encrypt calendar token", "failure_code", "token_encrypt_failed")
 		writeJSON(response, 500, map[string]string{"error": "unable to store calendar permission"})
 		return
 	}
 	connection := Connection{UserID: userID, RefreshTokenCipher: encrypted, GrantedScopes: tokens.Scopes, ConnectedAt: handler.now().UTC()}
-	if err := handler.store.SaveConnection(request.Context(), connection); err != nil {
-		handler.logger.Error("save calendar connection", "error", err)
+	if ctx.Err() != nil {
+		handler.redirectConsentResult(response, request, "exchange_failed")
+		return
+	}
+	if err := handler.store.SaveConnection(ctx, connection); err != nil {
+		handler.logger.Error("save calendar connection", "failure_code", "connection_save_failed")
 		writeJSON(response, 500, map[string]string{"error": "unable to store calendar permission"})
 		return
 	}

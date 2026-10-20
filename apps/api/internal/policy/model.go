@@ -11,10 +11,10 @@ import (
 )
 
 const (
-	MaxWorkingWindows = 14
-	MaxPolicyRules = 50
+	MaxWorkingWindows  = 14
+	MaxPolicyRules     = 50
 	MaxCalendarIDRunes = 200
-	MaxRulePriority = 1000
+	MaxRulePriority    = 1000
 )
 
 type WorkingWindow struct {
@@ -79,10 +79,18 @@ func (p SharingPolicy) Validate() error {
 	if len(p.Rules) > MaxPolicyRules {
 		return fmt.Errorf("too many policy rules")
 	}
+	seenRules := make(map[string]bool, len(p.Rules))
 	for _, rule := range p.Rules {
 		if err := rule.Validate(); err != nil {
 			return err
 		}
+		if rule.PolicyID != p.ID {
+			return fmt.Errorf("rule policy id does not match parent policy")
+		}
+		if seenRules[rule.ID] {
+			return fmt.Errorf("duplicate rule id")
+		}
+		seenRules[rule.ID] = true
 	}
 	return validRecordTimes(p.CreatedAt, p.UpdatedAt)
 }

@@ -72,12 +72,11 @@ func TestCalendarReadsRejectUnboundedOrIncompleteResponses(t *testing.T) {
 						if private {
 							count = 600
 						}
-						item := `{"id":"cancelled","status":"cancelled"}`
 						next := ""
 						if calls == 1 {
 							next = "second"
 						}
-						body = `{"timeZone":"UTC","items":[` + strings.TrimSuffix(strings.Repeat(item+",", count), ",") + fmt.Sprintf(`],"nextPageToken":%q,"nextSyncToken":"end"}`, next)
+						body = `{"timeZone":"UTC","items":[` + cancelledLimitItems(count, (calls-1)*count) + fmt.Sprintf(`],"nextPageToken":%q,"nextSyncToken":"end"}`, next)
 					case "cursor-size":
 						if calls == 1 {
 							body = limitPage(strings.Repeat("x", 16*1024+1))
@@ -141,8 +140,7 @@ func TestCalendarReadExactPageByteAndItemLimits(t *testing.T) {
 						if private {
 							count = 1000
 						}
-						item := `{"id":"cancelled","status":"cancelled"}`
-						body = `{"timeZone":"UTC","items":[` + strings.TrimSuffix(strings.Repeat(item+",", count), ",") + `],"nextSyncToken":"end"}`
+						body = `{"timeZone":"UTC","items":[` + cancelledLimitItems(count, 0) + `],"nextSyncToken":"end"}`
 					}
 					if boundary == "total-bytes" {
 						last := 8
@@ -170,4 +168,12 @@ func TestCalendarReadExactPageByteAndItemLimits(t *testing.T) {
 			})
 		}
 	}
+}
+
+func cancelledLimitItems(count, offset int) string {
+	items := make([]string, count)
+	for index := range items {
+		items[index] = fmt.Sprintf(`{"id":"cancelled-%d","status":"cancelled"}`, offset+index)
+	}
+	return strings.Join(items, ",")
 }

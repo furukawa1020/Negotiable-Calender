@@ -171,6 +171,7 @@ func (provider *GoogleProvider) ListChanges(ctx context.Context, accessToken, sy
 	nextPage := ""
 	calendarZone := ""
 	budget := newCalendarReadBudget(false)
+	seenEvents := make(map[string]bool)
 	result := ChangeSet{Full: full, Upserts: []BusySpan{}, DeletedProviderEventIDs: []string{}}
 	for {
 		if err := budget.beginPage(ctx, nextPage); err != nil {
@@ -229,6 +230,12 @@ func (provider *GoogleProvider) ListChanges(ctx context.Context, accessToken, sy
 			if strings.TrimSpace(item.ID) == "" {
 				return ChangeSet{}, errCalendarEvidence
 			}
+			// Identity must be unique across the complete snapshot/delta,
+			// including cancellations. Never guess which conflicting version wins.
+			if seenEvents[item.ID] {
+				return ChangeSet{}, errCalendarResponse
+			}
+			seenEvents[item.ID] = true
 			if item.Status == "cancelled" {
 				if !full {
 					result.DeletedProviderEventIDs = append(result.DeletedProviderEventIDs, item.ID)

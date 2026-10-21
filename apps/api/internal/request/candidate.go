@@ -55,6 +55,12 @@ func generateCandidates(ctx context.Context, input CandidateInput) ([]Option, er
 	if input.Now.IsZero() || input.Now.Location() != time.UTC {
 		return nil, fmt.Errorf("now must be UTC")
 	}
+	if input.Request.Status != Pending && input.Request.Status != Suggested {
+		return nil, fmt.Errorf("request is not awaiting options")
+	}
+	if input.Request.CreatedAt.After(input.Now) || !input.Request.DeadlineAt.After(input.Now) {
+		return nil, fmt.Errorf("request is outside its active time window")
+	}
 	if input.Request.SyncPreference == AsyncPreferred {
 		return []Option{asyncCandidate(input.Request, input.Now)}, nil
 	}

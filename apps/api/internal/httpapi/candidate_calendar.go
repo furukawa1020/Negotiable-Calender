@@ -11,6 +11,9 @@ import (
 )
 
 func (api *API) generateRequestCandidates(ctx context.Context, value coord.CoordinationRequest, projections []projection.ScheduleProjection, reserved []coord.ReservedRange, now time.Time) ([]coord.Option, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	input := coord.CandidateInput{Request: value, Projections: projections, Reserved: reserved, Now: now}
 	if value.SyncPreference != coord.AsyncPreferred {
 		store, ok := api.requests.(coord.RequesterCalendarStore)
@@ -19,7 +22,11 @@ func (api *API) generateRequestCandidates(ctx context.Context, value coord.Coord
 		}
 		readCtx, cancel := context.WithTimeout(ctx, coord.ReservationReadTimeout)
 		snapshot, err := store.LoadRequesterCalendar(readCtx, value.RequesterUserID)
+		readContextErr := readCtx.Err()
 		cancel()
+		if readContextErr != nil {
+			return nil, readContextErr
+		}
 		if errors.Is(err, cal.ErrSourceUnavailable) {
 			return nil, coord.ErrAvailabilityChanged
 		}

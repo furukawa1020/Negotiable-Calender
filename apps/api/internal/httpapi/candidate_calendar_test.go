@@ -17,12 +17,13 @@ import (
 
 type candidateCalendarRouteStore struct {
 	*handoffTestStore
-	snapshot       cal.CandidateAvailability
-	readErr        error
-	reads, creates int
-	user           string
-	budget         time.Duration
-	committed      bool
+	snapshot            cal.CandidateAvailability
+	readErr             error
+	reads, creates      int
+	user                string
+	budget              time.Duration
+	committed           bool
+	waitForReadDeadline bool
 }
 
 func (s *candidateCalendarRouteStore) LoadRequesterCalendar(ctx context.Context, user string) (cal.CandidateAvailability, error) {
@@ -30,6 +31,9 @@ func (s *candidateCalendarRouteStore) LoadRequesterCalendar(ctx context.Context,
 	s.user = user
 	if end, ok := ctx.Deadline(); ok {
 		s.budget = time.Until(end)
+	}
+	if s.waitForReadDeadline {
+		<-ctx.Done()
 	}
 	return s.snapshot, s.readErr
 }
@@ -58,8 +62,9 @@ type missingCandidateCalendarStore struct {
 
 func TestCandidateCalendarRoutesFilterFailClosedAndReplay(t *testing.T) {
 	for _, flow := range []string{"create", "handoff"} {
-		for _, scenario := range []string{"busy", "unavailable", "failure", "zero", "unsupported", "async"} {
+		for _, scenario := range []string{"busy", "unavailable", "failure", "zero", "unsupported", "async", "late"} {
 			t.Run(flow+"/"+scenario, func(t *testing.T) {
+				t.Parallel()
 				now := time.Now().UTC().Truncate(time.Microsecond)
 				start := now.Truncate(time.Hour).Add(2 * time.Hour)
 				end := start.Add(3 * time.Hour)
@@ -75,6 +80,8 @@ func TestCandidateCalendarRoutesFilterFailClosedAndReplay(t *testing.T) {
 				store := &candidateCalendarRouteStore{handoffTestStore: &handoffTestStore{stubRequestStore: stubRequestStore{value: v}}, snapshot: snapshot}
 				var selected coord.Store = store
 				switch scenario {
+				case "late":
+					store.waitForReadDeadline = true
 				case "unavailable":
 					store.readErr = cal.ErrSourceUnavailable
 				case "failure", "async":

@@ -9,10 +9,10 @@ import (
 
 func TestCapturedSourceIsolatedFromProducerAndConsumers(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Microsecond)
-	fresh := true
 	newSource := func() SourceState {
+		stamp, fresh := now, true
 		return SourceState{Managed: true, Snapshot: SourceSnapshot{Revision: "receipt", ObservedAt: now, From: now, To: now.Add(time.Hour)}, PublishedRevision: "receipt", Connection: &Connection{
-			UserID: "owner", SourceFresh: &fresh, LastSyncedAt: &now, SyncLeaseUntil: &now, LastAttemptAt: &now, NextAttemptAt: &now, GrantedScopes: []string{"scope"}, RefreshTokenCipher: []byte{1, 2, 3},
+			UserID: "owner", SourceFresh: &fresh, LastSyncedAt: &stamp, SyncLeaseUntil: &stamp, LastAttemptAt: &stamp, NextAttemptAt: &stamp, GrantedScopes: []string{"scope"}, RefreshTokenCipher: []byte{1, 2, 3},
 		}}
 	}
 	mutate := func(s *SourceState) {
@@ -32,7 +32,7 @@ func TestCapturedSourceIsolatedFromProducerAndConsumers(t *testing.T) {
 	}
 	source := newSource()
 	ctx := WithSourceSnapshot(context.Background(), "owner", source)
-	want := cloneSourceState(source)
+	want := newSource()
 	mutate(&source)
 	got, ok := CapturedSource(ctx, "owner")
 	if !ok || !reflect.DeepEqual(got, want) || !got.Readable(want.Snapshot.ObservedAt) {

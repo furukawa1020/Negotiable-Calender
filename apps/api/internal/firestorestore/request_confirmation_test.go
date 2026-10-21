@@ -122,6 +122,7 @@ func TestConfirmationFailsClosedOnStaleInputs(t *testing.T) {
 				want = coordinationrequest.ErrCandidateExpired
 			case "async":
 				value.Options[0].Type = coordinationrequest.OptionAsync
+				value.Options[0].StartAt, value.Options[0].EndAt = nil, nil
 				want = coordinationrequest.ErrCandidateInvalid
 			}
 			if scenario != "missing" {

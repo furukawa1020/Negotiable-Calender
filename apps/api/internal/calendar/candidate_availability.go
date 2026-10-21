@@ -21,7 +21,7 @@ func (CandidateAvailability) MarshalJSON() ([]byte, error) {
 }
 
 func NewCandidateAvailability(source SourceState, values []BusyInterval, now time.Time) (CandidateAvailability, error) {
-	if len(values) > BusyEvidenceLimit || (source.Managed && !source.Committed(now)) {
+	if len(values) > BusyEvidenceLimit || (!source.PolicyOnly() && !source.Committed(now)) {
 		return CandidateAvailability{}, ErrSourceUnavailable
 	}
 	s := CandidateAvailability{valid: true, managed: source.Managed}

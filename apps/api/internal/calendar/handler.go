@@ -9,6 +9,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -119,9 +120,17 @@ func (handler *Handler) callback(response http.ResponseWriter, request *http.Req
 	ctx, cancel := context.WithTimeout(request.Context(), 20*time.Second)
 	defer cancel()
 	cookie, err := request.Cookie(flowCookieName)
-	state, code := request.URL.Query().Get("state"), request.URL.Query().Get("code")
-	providerError := request.URL.Query().Get("error")
-	if err != nil || state == "" || (code == "" && providerError == "") || (code != "" && providerError != "") {
+	query, queryErr := url.ParseQuery(request.URL.RawQuery)
+	state, code, providerError := query.Get("state"), query.Get("code"), query.Get("error")
+	flowCookies := 0
+	for _, candidate := range request.Cookies() {
+		if candidate.Name == flowCookieName {
+			flowCookies++
+		}
+	}
+	success := len(query["code"]) == 1 && code != "" && len(query["error"]) == 0
+	failure := len(query["error"]) == 1 && providerError != "" && len(query["code"]) == 0
+	if err != nil || flowCookies != 1 || cookie.Value == "" || queryErr != nil || len(query["state"]) != 1 || state == "" || (!success && !failure) {
 		writeJSON(response, 400, map[string]string{"error": "invalid calendar oauth callback"})
 		return
 	}

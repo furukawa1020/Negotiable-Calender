@@ -80,11 +80,40 @@ type capturedSource struct {
 }
 
 func WithSourceSnapshot(ctx context.Context, userID string, state SourceState) context.Context {
-	return context.WithValue(ctx, sourceContextKey{}, capturedSource{userID, state})
+	return context.WithValue(ctx, sourceContextKey{}, capturedSource{userID, cloneSourceState(state)})
 }
 func CapturedSource(ctx context.Context, userID string) (SourceState, bool) {
 	v, ok := ctx.Value(sourceContextKey{}).(capturedSource)
-	return v.State, ok && v.UserID == userID
+	if !ok || v.UserID != userID {
+		return SourceState{}, false
+	}
+	return cloneSourceState(v.State), true
+}
+
+// Context evidence must be immutable from both the producer and every reader.
+func cloneSourceState(state SourceState) SourceState {
+	if state.Connection == nil {
+		return state
+	}
+	c := *state.Connection
+	if c.SourceFresh != nil {
+		fresh := *c.SourceFresh
+		c.SourceFresh = &fresh
+	}
+	for _, field := range []**time.Time{&c.SyncLeaseUntil, &c.LastSyncedAt, &c.LastAttemptAt, &c.NextAttemptAt} {
+		if *field != nil {
+			stamp := **field
+			*field = &stamp
+		}
+	}
+	if c.GrantedScopes != nil {
+		c.GrantedScopes = append([]string{}, c.GrantedScopes...)
+	}
+	if c.RefreshTokenCipher != nil {
+		c.RefreshTokenCipher = append([]byte{}, c.RefreshTokenCipher...)
+	}
+	state.Connection = &c
+	return state
 }
 
 type SourceSnapshotStore interface {

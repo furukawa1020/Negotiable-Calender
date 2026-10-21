@@ -35,7 +35,15 @@ func (handler *Handler) privateEvents(response http.ResponseWriter, request *htt
 		writeJSON(response, http.StatusServiceUnavailable, map[string]string{"error": "private calendar is not configured"})
 		return
 	}
-	connection, err := handler.store.GetConnection(request.Context(), userID)
+	ctx, cancel := context.WithTimeout(request.Context(), 20*time.Second)
+	defer cancel()
+	if privateReadCancelled(response, ctx) {
+		return
+	}
+	connection, err := handler.store.GetConnection(ctx, userID)
+	if privateReadCancelled(response, ctx) {
+		return
+	}
 	if errors.Is(err, ErrNotFound) {
 		writeJSON(response, http.StatusConflict, map[string]string{"error": "calendar connection required"})
 		return
@@ -61,9 +69,10 @@ func (handler *Handler) privateEvents(response http.ResponseWriter, request *htt
 		writeJSON(response, http.StatusConflict, map[string]string{"error": "calendar reconnect required"})
 		return
 	}
-	ctx, cancel := context.WithTimeout(request.Context(), 20*time.Second)
-	defer cancel()
 	tokens, err := handler.provider.Refresh(ctx, refreshToken)
+	if privateReadCancelled(response, ctx) {
+		return
+	}
 	if err != nil {
 		if errors.Is(err, ErrReconnectRequired) {
 			_ = handler.store.MarkReconnectRequired(request.Context(), userID)
@@ -75,6 +84,9 @@ func (handler *Handler) privateEvents(response http.ResponseWriter, request *htt
 		return
 	}
 	events, err := provider.ListPrivateEvents(ctx, tokens.AccessToken, from, to)
+	if privateReadCancelled(response, ctx) {
+		return
+	}
 	if err != nil {
 		if errors.Is(err, ErrReconnectRequired) {
 			_ = handler.store.MarkReconnectRequired(request.Context(), userID)
@@ -87,13 +99,24 @@ func (handler *Handler) privateEvents(response http.ResponseWriter, request *htt
 	}
 	timezone := "UTC"
 	if store, supported := handler.store.(userTimezoneStore); supported {
-		if value, timezoneErr := store.UserTimezone(request.Context(), userID); timezoneErr == nil && value != "" {
+		if value, timezoneErr := store.UserTimezone(ctx, userID); timezoneErr == nil && value != "" {
 			timezone = value
 		}
+	}
+	if privateReadCancelled(response, ctx) {
+		return
 	}
 	writeJSON(response, http.StatusOK, map[string]any{
 		"userId": userID, "timezone": timezone, "from": from, "to": to, "events": events,
 	})
+}
+
+func privateReadCancelled(response http.ResponseWriter, ctx context.Context) bool {
+	if ctx.Err() == nil {
+		return false
+	}
+	writeJSON(response, http.StatusGatewayTimeout, map[string]string{"error": "private calendar read cancelled or timed out"})
+	return true
 }
 
 func parsePrivateEventRange(response http.ResponseWriter, request *http.Request) (time.Time, time.Time, bool) {

@@ -22,7 +22,7 @@ func (BusyInterval) MarshalJSON() ([]byte, error) { return nil, privateevent.Err
 // PrivateReadable does not require public policy publication: a requester's
 // calendar conflicts must not depend on whether they accept incoming requests.
 func (s SourceState) PrivateReadable(from, to, now time.Time) bool {
-	return !from.IsZero() && to.After(from) && (!s.Managed || (s.Committed(now) && s.Snapshot.Covers(from, to)))
+	return !from.IsZero() && to.After(from) && (s.PolicyOnly() || (s.Committed(now) && s.Snapshot.Covers(from, to)))
 }
 
 func ValidateBusyIntervals(source SourceState, intervals []BusyInterval, from, to, now time.Time) error {

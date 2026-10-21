@@ -48,15 +48,24 @@ type SourceState struct {
 	Connection        *Connection
 }
 
+// Only the complete absence of provider evidence permits policy-only fallback.
+// A lost Managed flag must not turn stale or disconnected evidence into free time.
+func (s SourceState) PolicyOnly() bool {
+	return !s.Managed && s.Connection == nil && s.Snapshot == (SourceSnapshot{}) && s.PublishedRevision == ""
+}
+
 func (s SourceState) Committed(now time.Time) bool {
 	c := s.Connection
-	return s.Snapshot.Fresh(now) && c != nil && !c.ReconnectRequired && c.LastErrorCode == "" && c.SyncLeaseID == "" && c.LastSyncedAt != nil && c.LastSyncedAt.UTC().Truncate(time.Microsecond).Equal(s.Snapshot.ObservedAt)
+	return s.Managed && s.Snapshot.Fresh(now) && c != nil && !c.ReconnectRequired && c.LastErrorCode == "" && c.SyncLeaseID == "" && c.LastSyncedAt != nil && c.LastSyncedAt.UTC().Truncate(time.Microsecond).Equal(s.Snapshot.ObservedAt)
 }
 func (s SourceState) Readable(now time.Time) bool {
-	return !s.Managed || (s.Committed(now) && s.PublishedRevision == s.Snapshot.Revision)
+	return s.PolicyOnly() || (s.Committed(now) && s.PublishedRevision == s.Snapshot.Revision)
 }
 func (s SourceState) Rebuildable(ctx context.Context, userID string, now time.Time) bool {
-	if !s.Managed || s.Committed(now) {
+	if !s.Managed {
+		return s.PolicyOnly()
+	}
+	if s.Committed(now) {
 		return true
 	}
 	lease, ok := SyncLeaseFromContext(ctx)

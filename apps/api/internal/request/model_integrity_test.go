@@ -49,13 +49,15 @@ func TestOptionalCandidateTimesMustBeValidUTC(t *testing.T) {
 	now := time.Now().UTC()
 	for _, field := range []string{"start", "end", "response"} {
 		for _, stamp := range []time.Time{time.Time{}, now.In(time.FixedZone("offset", 3600)), now} {
-			option := Option{ID: "o", RequestID: "r", Type: OptionAsync, CreatedAt: now}
+			start, end := now.Add(-time.Minute), now.Add(time.Minute)
+			option := Option{ID: "o", RequestID: "r", Type: OptionMeeting, StartAt: &start, EndAt: &end, CreatedAt: now.Add(-time.Hour)}
 			switch field {
 			case "start":
 				option.StartAt = &stamp
 			case "end":
 				option.EndAt = &stamp
 			case "response":
+				option.Type, option.StartAt, option.EndAt = OptionAsync, nil, nil
 				option.ResponseBy = &stamp
 			}
 			valid := !stamp.IsZero() && stamp.Location() == time.UTC

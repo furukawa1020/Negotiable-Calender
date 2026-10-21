@@ -195,6 +195,18 @@ func (o Option) Validate() error {
 	if !o.Type.Valid() {
 		return fmt.Errorf("invalid option type")
 	}
+	if o.Type != OptionMeeting && (o.StartAt != nil || o.EndAt != nil) {
+		return fmt.Errorf("meeting times require a meeting option")
+	}
+	if o.Type != OptionAsync && o.ResponseBy != nil {
+		return fmt.Errorf("response deadline requires an async option")
+	}
+	if o.Type != OptionDelegate && o.DelegateUserID != "" {
+		return fmt.Errorf("delegate user requires a delegate option")
+	}
+	if o.ResponseBy != nil && !o.ResponseBy.After(o.CreatedAt) {
+		return fmt.Errorf("response deadline must follow option creation")
+	}
 	for name, value := range map[string]*time.Time{"start_at": o.StartAt, "end_at": o.EndAt, "response_by": o.ResponseBy} {
 		if value != nil {
 			if err := validUTC(name, *value); err != nil {

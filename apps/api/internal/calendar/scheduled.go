@@ -66,9 +66,10 @@ func (handler *ScheduledHandler) ServeHTTP(w http.ResponseWriter, r *http.Reques
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	payload, err := handler.validate(ctx, parts[1], handler.config.Audience)
+	authContextErr := ctx.Err()
 	cancel()
 	now := time.Now().Unix()
-	if err != nil || payload == nil || payload.Audience != handler.config.Audience || payload.Subject != handler.config.Subject || payload.Issuer != "https://accounts.google.com" || payload.Expires <= now || payload.IssuedAt <= 0 || payload.IssuedAt > now+30 || payload.Claims["email"] != handler.config.Email || payload.Claims["email_verified"] != true {
+	if err != nil || authContextErr != nil || payload == nil || payload.Audience != handler.config.Audience || payload.Subject != handler.config.Subject || payload.Issuer != "https://accounts.google.com" || payload.Expires <= now || payload.IssuedAt <= 0 || payload.IssuedAt > now+30 || payload.Claims["email"] != handler.config.Email || payload.Claims["email_verified"] != true {
 		writeJSON(w, 401, map[string]string{"error": "scheduler identity required"})
 		return
 	}
@@ -91,6 +92,9 @@ func (handler *ScheduledHandler) ServeHTTP(w http.ResponseWriter, r *http.Reques
 	ctx, cancel = context.WithTimeout(r.Context(), 40*time.Second)
 	defer cancel()
 	result, err := handler.runner.RunDue(ctx)
+	if ctx.Err() != nil {
+		err = ctx.Err()
+	}
 	state := "completed"
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 		state = "budget_exhausted"

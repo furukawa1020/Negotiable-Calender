@@ -40,6 +40,12 @@ func googleFailure(ctx context.Context, response *http.Response, token bool, ser
 	if err != nil || len(data) > googleErrorBodyBytes {
 		return failure
 	}
+	if err := validateProviderJSON(ctx, data); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return failure
+	}
 	if token {
 		var body struct {
 			Error string `json:"error"`

@@ -81,8 +81,8 @@ func (b *calendarReadBudget) decode(ctx context.Context, response *http.Response
 	// Check raw item count before allocating the much larger typed item slice.
 	// A tiny-object array must not amplify a bounded JSON body into an unbounded
 	// allocation. The raw envelope is itself limited by the byte budget above.
-	if !json.Valid(trimmed) {
-		return errCalendarResponse
+	if err := validateProviderJSON(ctx, trimmed); err != nil {
+		return err
 	}
 	fields := json.NewDecoder(bytes.NewReader(trimmed))
 	if _, err := fields.Token(); err != nil {

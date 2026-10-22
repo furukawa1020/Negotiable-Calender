@@ -34,6 +34,9 @@ func (handler *Handler) SyncUser(ctx context.Context, userID string) (SyncResult
 }
 
 func (handler *Handler) syncUser(ctx context.Context, userID string) (SyncResult, error) {
+	if err := ctx.Err(); err != nil {
+		return SyncResult{}, syncFailure(failureCode(err), 503, "calendar sync interrupted; retry", err)
+	}
 	if !handler.provider.Configured() || handler.cipher == nil {
 		return SyncResult{}, syncFailure("not_configured", 503, "google calendar is not configured", nil)
 	}
@@ -64,12 +67,25 @@ func (handler *Handler) syncUser(ctx context.Context, userID string) (SyncResult
 	if connection.ReconnectRequired {
 		return SyncResult{}, syncFailure("reconnect_required", 409, "calendar reconnect required", ErrReconnectRequired)
 	}
+	interrupted := func() error {
+		if err := ctx.Err(); err != nil {
+			handler.markFailure(ctx, connection, failureCode(err), false)
+			return syncFailure(failureCode(err), 503, "calendar sync interrupted; retry", err)
+		}
+		return nil
+	}
+	if err := interrupted(); err != nil {
+		return SyncResult{}, err
+	}
 	refresh, err := handler.cipher.Decrypt(connection.RefreshTokenCipher)
 	if err != nil {
 		handler.markFailure(ctx, connection, "grant_decrypt_failed", true)
 		return SyncResult{}, syncFailure("grant_decrypt_failed", 500, "calendar reconnect required", err)
 	}
 	tokens, err := handler.provider.Refresh(ctx, refresh)
+	if err := interrupted(); err != nil {
+		return SyncResult{}, err
+	}
 	if err != nil {
 		reconnect := errors.Is(err, ErrReconnectRequired)
 		handler.markFailure(ctx, connection, failureCode(err), reconnect)
@@ -83,6 +99,9 @@ func (handler *Handler) syncUser(ctx context.Context, userID string) (SyncResult
 	from, to := now.Add(-handler.config.SyncPast), now.Add(handler.config.SyncFuture)
 	if snapshots, ok := handler.store.(SourceSnapshotStore); ok {
 		source, err := snapshots.LoadSourceSnapshot(ctx, userID)
+		if err := interrupted(); err != nil {
+			return SyncResult{}, err
+		}
 		if err != nil {
 			handler.markFailure(ctx, connection, "source_load_failed", false)
 			return SyncResult{}, syncFailure("source_load_failed", 500, "unable to verify calendar source", err)
@@ -99,8 +118,14 @@ func (handler *Handler) syncUser(ctx context.Context, userID string) (SyncResult
 	incrementalProvider, incrementalOK := handler.provider.(IncrementalProvider)
 	if backgroundOK && incrementalOK {
 		changes, changeErr := incrementalProvider.ListChanges(ctx, tokens.AccessToken, connection.SyncToken, from, to)
+		if err := interrupted(); err != nil {
+			return SyncResult{}, err
+		}
 		if errors.Is(changeErr, ErrSyncTokenExpired) {
 			changes, changeErr = incrementalProvider.ListChanges(ctx, tokens.AccessToken, "", from, to)
+			if err := interrupted(); err != nil {
+				return SyncResult{}, err
+			}
 		}
 		if changeErr != nil {
 			reconnect := errors.Is(changeErr, ErrReconnectRequired)
@@ -118,6 +143,9 @@ func (handler *Handler) syncUser(ctx context.Context, userID string) (SyncResult
 		nextToken = changes.NextSyncToken
 	} else {
 		spans, listErr := handler.provider.ListBusy(ctx, tokens.AccessToken, from, to)
+		if err := interrupted(); err != nil {
+			return SyncResult{}, err
+		}
 		if listErr != nil {
 			return SyncResult{}, syncFailure("calendar_read_failed", 502, "unable to read calendar", listErr)
 		}
@@ -127,6 +155,9 @@ func (handler *Handler) syncUser(ctx context.Context, userID string) (SyncResult
 		count = len(spans)
 	}
 
+	if err := interrupted(); err != nil {
+		return SyncResult{}, err
+	}
 	if handler.projector == nil {
 		handler.markFailure(ctx, connection, "projection_unconfigured", false)
 		return SyncResult{}, syncFailure("projection_unconfigured", 500, "unable to rebuild public availability", nil)
@@ -135,12 +166,18 @@ func (handler *Handler) syncUser(ctx context.Context, userID string) (SyncResult
 		handler.markFailure(ctx, connection, "projection_rebuild_failed", false)
 		return SyncResult{}, syncFailure("projection_rebuild_failed", 500, "unable to rebuild public availability", err)
 	}
+	if err := interrupted(); err != nil {
+		return SyncResult{}, err
+	}
 	if backgroundOK {
 		if err := backgroundStore.MarkSyncSuccess(ctx, userID, nextToken, now, now.Add(defaultSyncInterval)); err != nil {
 			return SyncResult{}, syncFailure("completion_store_failed", 500, "unable to complete calendar sync", err)
 		}
 	} else if err := handler.store.MarkSynced(ctx, userID, now); err != nil {
 		return SyncResult{}, syncFailure("completion_store_failed", 500, "unable to complete calendar sync", err)
+	}
+	if err := interrupted(); err != nil {
+		return SyncResult{}, err
 	}
 	return SyncResult{BusySpanCount: count, LastSyncedAt: now}, nil
 }

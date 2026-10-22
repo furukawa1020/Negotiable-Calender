@@ -15,6 +15,7 @@ import { CounterproposalForm, CounterproposalAgreement } from './Counterproposal
 import { useRequestResolution } from './useRequestResolution'
 import { fetchBookingResult, readCancellation, readCompletion } from './bookingTransport'
 import { readRequestList } from './requestList'
+import { readNotifications, type AppNotification } from './notificationResponse'
 import { readInvitationURL, readWorkspace, workspaceError, WorkspaceRejected } from './workspaceResponse'
 import { readRescheduleSnapshot, matchesRescheduleOutcome } from './bookingResponse'
 import type { CoordinationRequest } from './bookingResponse'
@@ -105,15 +106,6 @@ type PersonCard = {
   timezone: string
   role: string
   segments: ProjectionRow[]
-}
-
-type AppNotification = {
-  id: string
-  type: string
-  requestId: string
-  message: string
-  readAt?: string
-  createdAt: string
 }
 
 type AuditEvent = {
@@ -654,11 +646,7 @@ function App() {
     try {
       const payload = await fetchBookingResult(`${apiURL}/api/v1/notifications`, {
         headers: { 'X-Demo-User-ID': activeUserID },
-      }, async response => {
-        const value = await response.json() as { notifications: AppNotification[] }
-        if (!Array.isArray(value?.notifications)) throw new Error('invalid notifications')
-        return value
-      }, isCurrent)
+      }, readNotifications, isCurrent)
       if (!payload || !isCurrent()) return
       setNotifications(payload.notifications)
     } catch {

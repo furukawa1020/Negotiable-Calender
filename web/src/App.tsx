@@ -16,6 +16,7 @@ import { useRequestResolution } from './useRequestResolution'
 import { fetchBookingResult, readCancellation, readCompletion } from './bookingTransport'
 import { readRequestList } from './requestList'
 import { readNotifications, type AppNotification } from './notificationResponse'
+import { readAuditLogs, type AuditEvent } from './auditResponse'
 import { readInvitationURL, readWorkspace, workspaceError, WorkspaceRejected } from './workspaceResponse'
 import { readRescheduleSnapshot, matchesRescheduleOutcome } from './bookingResponse'
 import type { CoordinationRequest } from './bookingResponse'
@@ -106,16 +107,6 @@ type PersonCard = {
   timezone: string
   role: string
   segments: ProjectionRow[]
-}
-
-type AuditEvent = {
-  id: string
-  organizationId: string
-  actorUserId: string
-  action: string
-  resourceType: string
-  resourceId: string
-  createdAt: string
 }
 
 type AuthUser = {
@@ -686,11 +677,7 @@ function App() {
           'X-Demo-User-ID': activeUserID,
           'X-Organization-ID': activeOrganizationID,
         },
-      }, async response => {
-        const value = await response.json() as { auditLogs: AuditEvent[] }
-        if (!Array.isArray(value?.auditLogs)) throw new Error('invalid audit')
-        return value
-      }, isCurrent)
+      }, readAuditLogs, isCurrent)
       if (!payload || !isCurrent()) return
       setAuditLogs(payload.auditLogs)
     } catch {

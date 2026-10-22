@@ -475,7 +475,7 @@ describe('App', () => {
           id: 'request-1', requesterUserId: 'demo-member', targetUserId: 'demo-manager',
           title: '新API設計レビュー', type: 'review', durationMinutes: 15,
           deadlineAt: '2026-09-02T08:00:00Z', priority: 'normal', status: 'suggested',
-          createdAt: '2026-09-01T00:00:00Z', options: [{ id: 'option-1', type: 'meeting' }],
+          createdAt: '2026-09-01T00:00:00Z', options: [{ id: 'option-1', type: 'meeting', startAt: '2026-09-02T07:00:00Z', endAt: '2026-09-02T07:15:00Z' }],
         }],
       }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ id: 'request-1', status: 'cancelled' }), { status: 200 }))

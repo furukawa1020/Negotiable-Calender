@@ -43,7 +43,7 @@ export function RequestBrowser({ requests, children }: { requests: CoordinationR
         <option value="priority">優先度が高い順</option>
       </select></label>
       <button type="button" className="secondary-button" disabled={!query && !status} onClick={() => { setQuery(''); setStatus('') }}>絞り込みを解除</button>
-      <span role="status" aria-live="polite">{requests.length}件中 {visible.length}件を表示</span>
+      <span className="request-count" aria-live="polite">{requests.length}件中 {visible.length}件を表示</span>
     </div>
     {requests.length > 0 && visible.length === 0 ? <p className="people-status">条件に一致する依頼はありません。検索語や状態を変更してください。</p> : null}
     {children(visible)}

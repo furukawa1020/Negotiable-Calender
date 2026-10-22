@@ -38,7 +38,7 @@ it('combines normalized search and status without mutating requests', () => {
 it('filters, announces counts and restores all rows', () => {
   render(<RequestBrowser requests={requests}>{rows}</RequestBrowser>)
   fireEvent.change(screen.getByRole('searchbox', { name: '依頼を検索' }), { target: { value: 'abc' } })
-  expect(screen.getByRole('status')).toHaveTextContent('2件中 1件を表示')
+  expect(screen.getByText('2件中 1件を表示')).toHaveAttribute('aria-live', 'polite')
   fireEvent.change(screen.getByRole('combobox', { name: '状態' }), { target: { value: 'accepted' } })
   expect(screen.getByText(/条件に一致する依頼はありません/)).toBeInTheDocument()
   fireEvent.click(screen.getByRole('button', { name: '絞り込みを解除' }))

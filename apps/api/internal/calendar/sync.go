@@ -40,6 +40,11 @@ func (handler *Handler) syncUser(ctx context.Context, userID string) (SyncResult
 	if !handler.provider.Configured() || handler.cipher == nil {
 		return SyncResult{}, syncFailure("not_configured", 503, "google calendar is not configured", nil)
 	}
+	// Configuration errors must not consume a lease or partially replace the
+	// source calendar when public availability cannot be rebuilt at all.
+	if handler.projector == nil {
+		return SyncResult{}, syncFailure("projection_unconfigured", 503, "unable to rebuild public availability", nil)
+	}
 	var connection Connection
 	var err error
 	if leases, ok := handler.store.(SyncLeaseStore); ok {
@@ -157,10 +162,6 @@ func (handler *Handler) syncUser(ctx context.Context, userID string) (SyncResult
 
 	if err := interrupted(); err != nil {
 		return SyncResult{}, err
-	}
-	if handler.projector == nil {
-		handler.markFailure(ctx, connection, "projection_unconfigured", false)
-		return SyncResult{}, syncFailure("projection_unconfigured", 500, "unable to rebuild public availability", nil)
 	}
 	if err := handler.projector.Rebuild(ctx, userID, from, to, now); err != nil {
 		handler.markFailure(ctx, connection, "projection_rebuild_failed", false)

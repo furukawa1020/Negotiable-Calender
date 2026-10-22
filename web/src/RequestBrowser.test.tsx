@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, expect, it } from 'vitest'
-import { RequestBrowser, filterRequests, orderRequests } from './RequestBrowser'
+import { RequestBrowser } from './RequestBrowser'
+import { filterRequests, orderRequests } from './requestBrowserModel'
 import type { CoordinationRequest } from './bookingResponse'
 
 const base: CoordinationRequest = { id: 'r-1', requesterUserId: 'alice', targetUserId: 'bob', title: 'ＡＢＣ 設計レビュー', status: 'suggested', type: 'review', priority: 'normal', durationMinutes: 30, deadlineAt: '2030-02-01T00:00:00Z', createdAt: '2030-01-01T00:00:00Z', options: [] }

@@ -79,7 +79,7 @@ describe('Booking operations respect account and workspace lifetime', () => {
     fireEvent.click(screen.getByRole('button', { name: '会議を完了にする' }))
     fireEvent.click(screen.getByRole('button', { name: '会議の完了を確定する' }))
     await screen.findByText('完了した会議の日時')
-    expect(screen.getByText('完了')).toBeInTheDocument()
+    expect(screen.getByText('完了', { selector: '.request-meta span' })).toBeInTheDocument()
     expect(screen.queryByText('completed')).not.toBeInTheDocument()
     expect(screen.getByRole('status')).toHaveTextContent('会議の完了を確認しました。')
     expect(screen.getByRole('button', { name: 'カレンダーに登録（ICS）' })).toBeEnabled()

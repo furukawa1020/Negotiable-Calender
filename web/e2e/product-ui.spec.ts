@@ -19,7 +19,7 @@ async function fixtureAPI(page: Page) {
       default: { availability: 'available', interruptibility: 'normal', requestability: 'open', reschedulability: 'medium' },
       workingHours: [1, 2, 3, 4, 5].map((weekday) => ({ weekday, startMinute: 540, endMinute: 1080 })), rules: [],
     }
-    if (path.endsWith('/audit-logs')) json = { auditLogs: [{ id: 'audit-1', action: 'request_created', actorUserId: 'sample-member', resourceType: 'request', resourceId: 'request-1', createdAt: option.startAt }] }
+    if (path.endsWith('/audit-logs')) json = { auditLogs: [{ id: 'audit-1', organizationId: 'demo-org', action: 'request_created', actorUserId: 'sample-member', resourceType: 'request', resourceId: 'request-1', createdAt: option.startAt }] }
     if (path.endsWith('/notifications')) json = { notifications: [] }
     return route.fulfill({ status: 200, json })
   })
@@ -122,6 +122,15 @@ for (const width of [1440, 1024, 390, 320]) {
         await page.getByRole('navigation').getByRole('button', { name: button, exact: true }).click()
         await expect(page.getByRole('heading', { name: heading })).toBeVisible()
         await expect(page.getByText(loaded, { exact: true })).toBeVisible()
+        if (button === '依頼' || button === '送信済み') {
+          await page.getByRole('searchbox', { name: '依頼を検索' }).fill('存在しない依頼')
+          await expect(page.getByText('条件に一致する依頼はありません。検索語や状態を変更してください。')).toBeVisible()
+          await page.getByRole('button', { name: '絞り込みを解除' }).click()
+          await page.getByRole('combobox', { name: '状態', exact: true }).selectOption('accepted')
+          await expect(page.getByText('1件中 0件を表示')).toBeVisible()
+          await page.getByRole('button', { name: '絞り込みを解除' }).click()
+          await expect(page.getByText(loaded, { exact: true })).toBeVisible()
+        }
         await expect(page.getByRole('navigation').getByRole('button', { name: button, exact: true })).toHaveAttribute('aria-current', 'page')
         await noPageOverflow(page)
         await page.screenshot({ path: testInfo.outputPath(`${button}.png`), fullPage: true })

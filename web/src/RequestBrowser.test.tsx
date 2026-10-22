@@ -26,7 +26,7 @@ it('changes ordering without losing the active filter', () => {
   expect(screen.getAllByRole('listitem').map(row => row.textContent)).toEqual([later.title, base.title])
   fireEvent.change(screen.getByRole('combobox', { name: '並び順' }), { target: { value: 'deadline' } })
   expect(screen.getAllByRole('listitem').map(row => row.textContent)).toEqual([base.title, later.title])
-  expect(screen.getByRole('status')).toHaveTextContent('3件中 2件を表示')
+  expect(screen.getByText('3件中 2件を表示')).toHaveAttribute('aria-live', 'polite')
 })
 it('combines normalized search and status without mutating requests', () => {
   expect(filterRequests(requests, ' abc ', 'suggested')).toEqual([base])

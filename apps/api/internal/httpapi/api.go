@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -488,8 +489,13 @@ func (api *API) listCoordinationRequests(response http.ResponseWriter, request *
 		writeJSON(response, http.StatusUnauthorized, map[string]string{"error": "request identity is required"})
 		return
 	}
+	query, queryErr := url.ParseQuery(request.URL.RawQuery)
+	if queryErr != nil || len(query["scope"]) > 1 || len(query) > 1 || (len(query) == 1 && len(query["scope"]) == 0) {
+		writeJSON(response, http.StatusBadRequest, map[string]string{"error": "invalid request scope"})
+		return
+	}
 	sent := false
-	switch request.URL.Query().Get("scope") {
+	switch query.Get("scope") {
 	case "", "inbox":
 	case "sent":
 		sent = true

@@ -56,6 +56,14 @@ func (handler *Handler) syncUser(ctx context.Context, userID string) (SyncResult
 	if err != nil {
 		return SyncResult{}, syncFailure("connection_load_failed", 500, "unable to sync calendar", err)
 	}
+	// Never decrypt credentials or write failure state for another account,
+	// even if a storage adapter returned a successful but inconsistent result.
+	if userID == "" || connection.UserID != userID {
+		return SyncResult{}, syncFailure("connection_load_failed", 500, "unable to sync calendar", nil)
+	}
+	if connection.ReconnectRequired {
+		return SyncResult{}, syncFailure("reconnect_required", 409, "calendar reconnect required", ErrReconnectRequired)
+	}
 	refresh, err := handler.cipher.Decrypt(connection.RefreshTokenCipher)
 	if err != nil {
 		handler.markFailure(ctx, connection, "grant_decrypt_failed", true)

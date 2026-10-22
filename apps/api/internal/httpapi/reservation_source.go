@@ -6,11 +6,19 @@ import (
 )
 
 func (api *API) candidateReservations(ctx context.Context, requester, target string) ([]coord.ReservedRange, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	store, ok := api.requests.(coord.ReservationStore)
 	if !ok {
 		return nil, coord.ErrReservationUnavailable
 	}
 	ctx, cancel := context.WithTimeout(ctx, coord.ReservationReadTimeout)
 	defer cancel()
-	return store.LoadConfirmedRanges(ctx, requester, target)
+	values, err := store.LoadConfirmedRanges(ctx, requester, target)
+	// A successful adapter response cannot extend the evidence budget.
+	if interrupted := ctx.Err(); interrupted != nil {
+		return nil, interrupted
+	}
+	return values, err
 }

@@ -15,6 +15,7 @@ import { CounterproposalForm, CounterproposalAgreement } from './Counterproposal
 import { useRequestResolution } from './useRequestResolution'
 import { fetchBookingResult, readCancellation, readCompletion } from './bookingTransport'
 import { readRequestList } from './requestList'
+import { RequestBrowser } from './RequestBrowser'
 import { readNotifications, type AppNotification } from './notificationResponse'
 import { readAuditLogs, type AuditEvent } from './auditResponse'
 import { readInvitationURL, readWorkspace, workspaceError, WorkspaceRejected } from './workspaceResponse'
@@ -1414,8 +1415,8 @@ function App() {
             {!inboxLoading && !inboxError && inboxRequests.length === 0 ? (
               <p className="people-status">{inboxLoaded ? '新しい依頼はありません。' : '「更新」で依頼を取得してください。'}</p>
             ) : null}
-            <div className="request-list">
-              {inboxRequests.map((item) => (
+            <RequestBrowser key={`${activeOrganizationID}:${activeUserID}:inbox`} requests={inboxRequests}>{visible => <div className="request-list">
+              {visible.map((item) => (
                 <article className="request-row" key={item.id}>
                   <div className="request-summary">
                     <div className="request-meta">
@@ -1472,7 +1473,7 @@ function App() {
                   </div>
                 </article>
               ))}
-            </div>
+            </div>}</RequestBrowser>
           </section>
         ) : currentView === 'sent' ? (
           <section className="inbox-view" aria-labelledby="sent-title">
@@ -1486,8 +1487,8 @@ function App() {
             {sentLoading ? <p className="people-status" role="status">送信済み依頼を取得しています…</p> : null}
             {sentError ? <p className="people-status error" role="alert">{sentError}</p> : null}
             {!sentLoading && !sentError && sentRequests.length === 0 ? <p className="people-status">{sentLoaded ? '送信済み依頼はありません。' : '「更新」で依頼を取得してください。'}</p> : null}
-            <div className="request-list">
-              {sentRequests.map((item) => {
+            <RequestBrowser key={`${activeOrganizationID}:${activeUserID}:sent`} requests={sentRequests}>{visible => <div className="request-list">
+              {visible.map((item) => {
                 const cancellable = ['pending', 'suggested', 'delegated'].includes(item.status)
                 return (
                   <article className="request-row" key={item.id}>
@@ -1518,7 +1519,7 @@ function App() {
                   </article>
                 )
               })}
-            </div>
+            </div>}</RequestBrowser>
           </section>
         ) : (
           <section className="audit-view" aria-labelledby="audit-title">

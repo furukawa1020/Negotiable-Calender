@@ -139,6 +139,11 @@ main { grid-column: 2; min-width: 0; width: min(1400px, calc(100% - 64px)); marg
 .people-status { border-top: 1px solid var(--line); }
 .error, [role="alert"] { color: #99382d; }
 .people-list, .request-list, .audit-list { display: grid; background: white; border-top: 2px solid #748993; }
+.request-tools { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; padding: 16px 0; border-top: 1px solid #c7d1d5; }
+.request-tools label { display: grid; gap: 6px; font-size: 13px; font-weight: 600; }
+.request-tools input, .request-tools select { max-width: 100%; min-height: 38px; padding: 7px 10px; border: 1px solid #748993; border-radius: 2px; background: white; color: #172f3b; font: inherit; }
+.request-tools input { width: 260px; }
+.request-tools [role="status"] { align-self: center; font-size: 13px; }
 .person-row { display: grid; grid-template-columns: 230px minmax(0, 1fr); border-bottom: 1px solid var(--line); }
 .person-profile { padding: 20px; display: grid; grid-template-columns: auto 1fr; align-content: center; align-items: center; gap: 5px 12px; border-right: 1px solid var(--line); }
 .person-avatar { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 50%; color: white; background: #59727c; }

@@ -1,19 +1,12 @@
 import { useState, type ReactNode } from 'react'
 import type { CoordinationRequest } from './bookingResponse'
+import { filterRequests } from './requestBrowserModel'
 
 const statuses = [
   ['pending', '受付待ち'], ['suggested', '候補提示済み'], ['accepted', '日時確定'],
   ['delegated', '担当変更済み'], ['async', '非同期回答済み'], ['declined', '辞退'],
   ['cancelled', 'キャンセル'], ['expired', '期限切れ'], ['completed', '完了'],
 ] as const
-const normalize = (value: string) => value.normalize('NFKC').toLocaleLowerCase('ja-JP').trim()
-
-export function filterRequests(requests: CoordinationRequest[], query: string, status: string): CoordinationRequest[] {
-  const needle = normalize(query)
-  return requests.filter(row => (status === '' || row.status === status)
-    && [row.title, row.requesterUserId, row.targetUserId, row.id].some(value => normalize(value).includes(needle)))
-}
-
 export function RequestBrowser({ requests, children }: { requests: CoordinationRequest[]; children: (rows: CoordinationRequest[]) => ReactNode }) {
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState('')

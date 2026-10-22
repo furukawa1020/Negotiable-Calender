@@ -19,7 +19,7 @@ async function fixtureAPI(page: Page) {
       default: { availability: 'available', interruptibility: 'normal', requestability: 'open', reschedulability: 'medium' },
       workingHours: [1, 2, 3, 4, 5].map((weekday) => ({ weekday, startMinute: 540, endMinute: 1080 })), rules: [],
     }
-    if (path.endsWith('/audit-logs')) json = { auditLogs: [{ id: 'audit-1', action: 'request_created', actorUserId: 'sample-member', resourceType: 'request', resourceId: 'request-1', createdAt: option.startAt }] }
+    if (path.endsWith('/audit-logs')) json = { auditLogs: [{ id: 'audit-1', organizationId: 'demo-org', action: 'request_created', actorUserId: 'sample-member', resourceType: 'request', resourceId: 'request-1', createdAt: option.startAt }] }
     if (path.endsWith('/notifications')) json = { notifications: [] }
     return route.fulfill({ status: 200, json })
   })

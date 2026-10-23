@@ -800,6 +800,12 @@ func (api *API) listManualOverrides(response http.ResponseWriter, request *http.
 	if values == nil {
 		values = []policy.ManualOverride{}
 	}
+	for _, value := range values {
+		if value.UserID != request.PathValue("userId") {
+			writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "invalid manual override result"})
+			return
+		}
+	}
 	writeJSON(response, http.StatusOK, map[string]any{"overrides": values})
 }
 
@@ -883,6 +889,10 @@ func (api *API) getSharingPolicy(response http.ResponseWriter, request *http.Req
 	if err != nil {
 		api.logger.Error("get sharing policy", "failure_code", safeFailureCode(err))
 		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to load sharing policy"})
+		return
+	}
+	if value.UserID != request.PathValue("userId") {
+		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "invalid sharing policy result"})
 		return
 	}
 	writeJSON(response, http.StatusOK, value)

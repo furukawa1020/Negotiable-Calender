@@ -158,6 +158,15 @@ func (api *API) listAuditLogs(response http.ResponseWriter, request *http.Reques
 		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to load audit logs"})
 		return
 	}
+	for _, value := range values {
+		if value.OrganizationID != organizationID {
+			writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "invalid audit result"})
+			return
+		}
+	}
+	if values == nil {
+		values = []audit.Event{}
+	}
 	writeJSON(response, http.StatusOK, map[string]any{"auditLogs": values})
 }
 

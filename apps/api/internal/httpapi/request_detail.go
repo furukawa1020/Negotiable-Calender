@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"errors"
 	coord "github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/request"
 	"net/http"
@@ -23,7 +24,12 @@ func (api *API) loadWorkspaceRequest(response http.ResponseWriter, request *http
 	if !ok {
 		return fail(503, "workspace request reading unavailable")
 	}
-	value, err := store.GetInOrganization(request.Context(), id, actor, org)
+	value, err := readWorkspace(request.Context(), func(ctx context.Context) (coord.CoordinationRequest, error) {
+		return store.GetInOrganization(ctx, id, actor, org)
+	})
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return fail(503, "workspace request read interrupted")
+	}
 	if errors.Is(err, coord.ErrCreationForbidden) {
 		return fail(403, "current workspace membership required")
 	}

@@ -41,7 +41,11 @@ func TestStorageFailuresNeverExposeRawErrors(t *testing.T) {
 				r.Header.Set("Origin", "https://app.test")
 				w := httptest.NewRecorder()
 				handler.ServeHTTP(w, r)
-				if w.Code != 500 || strings.Contains(w.Body.String(), "private-secret") || strings.Contains(logs.String(), "private-secret") || !strings.Contains(logs.String(), "failure_code="+safeFailureCode(cause)) {
+				want := 500
+				if endpoint == "/api/v1/requests/r" && (errors.Is(cause, context.Canceled) || errors.Is(cause, context.DeadlineExceeded)) {
+					want = 503
+				}
+				if w.Code != want || strings.Contains(w.Body.String(), "private-secret") || strings.Contains(logs.String(), "private-secret") || !strings.Contains(logs.String(), "failure_code="+safeFailureCode(cause)) {
 					t.Fatalf("unsafe failure handling status=%d response=%s logs=%s", w.Code, w.Body.String(), logs.String())
 				}
 				if w.Header().Get("Cache-Control") != "no-store" || w.Header().Get("Access-Control-Allow-Origin") != "https://app.test" {

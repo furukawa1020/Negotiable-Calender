@@ -23,6 +23,14 @@ const invalidSnapshots: [string, (value: ReturnType<typeof snapshot>) => unknown
   ['negative duration', v => ({ ...v, durationMinutes: -1 })], ['invalid deadline', v => ({ ...v, deadlineAt: 'invalid' })],
   ['invalid creation', v => ({ ...v, createdAt: {} })], ['object message', v => ({ ...v, asyncMessage: {} })],
   ['unknown status', v => ({ ...v, status: 'unknown' })], ['coerced status', v => ({ ...v, status: ['accepted'] })],
+  ['unknown request type', v => ({ ...v, type: 'unknown' })],
+  ['unknown priority', v => ({ ...v, priority: 'unknown' })],
+  ['unsafe duration', v => ({ ...v, durationMinutes: Number.MAX_SAFE_INTEGER + 1 })],
+  ['completed missing meeting', v => ({ ...v, status: 'completed', acceptedOptionId: '' })],
+  ['cancelled invalid meeting reference', v => ({ ...v, status: 'cancelled', acceptedOptionId: 'absent' })],
+  ['async with meeting dates', v => ({ ...v, options: [...v.options, { id: 'async', type: 'async', startAt: v.options[0].startAt }] })],
+  ['meeting with response deadline', v => ({ ...v, options: [{ ...v.options[0], responseBy: v.deadlineAt }, v.options[1]] })],
+  ['meeting with delegation', v => ({ ...v, options: [{ ...v.options[0], delegateUserId: 'eve' }, v.options[1]] })],
   ['missing options', v => ({ ...v, options: null })], ['null option', v => ({ ...v, options: [null] })],
   ['duplicate option', v => ({ ...v, options: [v.options[0], v.options[0]] })],
   ['wrong option owner', v => ({ ...v, options: [{ ...v.options[0], requestId: 'another' }, v.options[1]] })],
@@ -40,6 +48,11 @@ const invalidSnapshots: [string, (value: ReturnType<typeof snapshot>) => unknown
 ]
 
 describe('booking response contracts', () => {
+  it('preserves valid nonmeeting options without optional response deadlines', async () => {
+    const v = snapshot()
+    const value = { ...v, options: [...v.options, { id: 'async', type: 'async' }, { id: 'decline', type: 'decline' }, { id: 'delegate', type: 'delegate', delegateUserId: 'eve' }] }
+    expect(await read(value)).toEqual(value)
+  })
   it.each(invalidSnapshots)('rejects %s without returning a renderable request', async (_, change) => {
     await expect(read(change(snapshot()))).rejects.toThrow('unconfirmed')
   })

@@ -46,8 +46,10 @@ export async function readRescheduleSnapshot(response: Response, id: string, org
   if (!text(id) || !text(organizationID) || !text(actor) || !record(value) || value.id !== id || value.organizationId !== organizationID
     || !text(value.requesterUserId) || !text(value.targetUserId) || value.requesterUserId === value.targetUserId
     || ![value.requesterUserId, value.targetUserId].includes(actor)
-    || !text(value.title) || !text(value.type) || !text(value.priority)
-    || !Number.isInteger(value.durationMinutes) || (value.durationMinutes as number) <= 0
+    || !text(value.title)
+    || !choice(value.type, ['quick_question', 'meeting', 'review', 'approval', 'decision', 'async_response', 'urgent_contact'])
+    || !choice(value.priority, ['low', 'normal', 'high', 'urgent'])
+    || !Number.isSafeInteger(value.durationMinutes) || (value.durationMinutes as number) <= 0
     || !date(value.deadlineAt) || !date(value.createdAt)
     || !choice(value.status, ['pending', 'suggested', 'accepted', 'declined', 'delegated', 'cancelled', 'expired', 'completed', 'async'])
     || !optionalText(value.acceptedOptionId) || !optionalText(value.asyncMessage) || !optionalText(value.delegatedFromUserId)
@@ -62,13 +64,16 @@ export async function readRescheduleSnapshot(response: Response, id: string, org
       || (option.startAt !== undefined && !date(option.startAt))
       || (option.endAt !== undefined && !date(option.endAt))
       || (option.responseBy !== undefined && !date(option.responseBy))) throw invalid()
+    if (option.type !== 'meeting' && (option.startAt !== undefined || option.endAt !== undefined)) throw invalid()
+    if (option.type !== 'async' && option.responseBy !== undefined) throw invalid()
+    if (option.type !== 'delegate' && option.delegateUserId !== undefined) throw invalid()
     if (option.type === 'meeting' && (!date(option.startAt) || !date(option.endAt)
       || Date.parse(option.endAt) <= Date.parse(option.startAt))) throw invalid()
     ids.add(option.id)
   }
   const options = value.options as CoordinationOption[]
   const meeting = (optionID: unknown) => options.some(option => option.id === optionID && option.type === 'meeting')
-  if (value.status === 'accepted' && !meeting(value.acceptedOptionId)) throw invalid()
+  if ((value.acceptedOptionId || ['accepted', 'completed'].includes(String(value.status))) && !meeting(value.acceptedOptionId)) throw invalid()
   const proposal = value.rescheduleProposal
   if (proposal !== undefined && (!record(proposal) || !text(proposal.id) || !text(proposal.expectedOptionId)
     || proposal.id === proposal.expectedOptionId

@@ -8,6 +8,22 @@ const base: CoordinationRequest = { id: 'r-1', requesterUserId: 'alice', targetU
 const requests = [base, { ...base, id: 'r-2', title: '確定した会議', status: 'accepted' }]
 const rows = (values: CoordinationRequest[]) => <ul>{values.map(row => <li key={row.id}>{row.title}</li>)}</ul>
 afterEach(cleanup)
+it('combines type and priority with search and status and clears all filters', () => {
+  const urgent = { ...base, id: 'urgent', priority: 'urgent' }
+  const meeting = { ...urgent, id: 'meeting', type: 'meeting' }
+  const values = [base, urgent, meeting, requests[1]]
+  expect(filterRequests(values, 'abc', 'suggested', 'review', 'urgent')).toEqual([urgent])
+  render(<RequestBrowser requests={values}>{rows}</RequestBrowser>)
+  fireEvent.change(screen.getByRole('combobox', { name: '依頼種別' }), { target: { value: 'review' } })
+  fireEvent.change(screen.getByRole('combobox', { name: '優先度' }), { target: { value: 'urgent' } })
+  expect(screen.getAllByRole('listitem')).toHaveLength(1)
+  fireEvent.change(screen.getByRole('combobox', { name: '状態' }), { target: { value: 'accepted' } })
+  expect(screen.queryAllByRole('listitem')).toHaveLength(0)
+  fireEvent.click(screen.getByRole('button', { name: '絞り込みを解除' }))
+  expect(screen.getByRole('combobox', { name: '依頼種別' })).toHaveValue('')
+  expect(screen.getByRole('combobox', { name: '優先度' })).toHaveValue('')
+  expect(screen.getAllByRole('listitem')).toHaveLength(4)
+})
 it('paginates loaded rows, resets after filtering and clamps on refreshed data', () => {
   const many = Array.from({ length: 41 }, (_, i) => ({ ...base, id: `r-${String(i).padStart(3, '0')}`, title: `依頼${i}` }))
   const view = render(<RequestBrowser requests={many}>{rows}</RequestBrowser>)

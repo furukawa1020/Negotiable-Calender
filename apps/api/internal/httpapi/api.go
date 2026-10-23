@@ -217,6 +217,15 @@ func (api *API) listNotifications(response http.ResponseWriter, request *http.Re
 		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "unable to load notifications"})
 		return
 	}
+	for _, value := range values {
+		if value.UserID != userID {
+			writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "invalid notification result"})
+			return
+		}
+	}
+	if values == nil {
+		values = []notification.Notification{}
+	}
 	writeJSON(response, http.StatusOK, map[string]any{"notifications": values})
 }
 

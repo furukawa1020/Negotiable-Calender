@@ -71,6 +71,9 @@ func NewView(userID, timezone string, projections []ScheduleProjection) (View, e
 	}
 	view := View{UserID: userID, Timezone: timezone, Segments: make([]Segment, 0, len(projections))}
 	for _, item := range projections {
+		if item.UserID != userID {
+			return View{}, fmt.Errorf("projection owner does not match view")
+		}
 		if err := item.Validate(); err != nil {
 			return View{}, err
 		}

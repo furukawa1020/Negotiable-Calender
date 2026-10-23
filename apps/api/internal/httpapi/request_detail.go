@@ -28,6 +28,7 @@ func (api *API) loadWorkspaceRequest(response http.ResponseWriter, request *http
 		return store.GetInOrganization(ctx, id, actor, org)
 	})
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		api.logger.Error("load workspace request interrupted", "failure_code", safeFailureCode(err))
 		return fail(503, "workspace request read interrupted")
 	}
 	if errors.Is(err, coord.ErrCreationForbidden) {

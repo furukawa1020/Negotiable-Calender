@@ -539,7 +539,14 @@ func (api *API) listCoordinationRequests(response http.ResponseWriter, request *
 		writeJSON(response, http.StatusServiceUnavailable, map[string]string{"error": "workspace request listing unavailable"})
 		return
 	}
-	values, err := store.ListInOrganization(request.Context(), userID, org, sent)
+	values, err := readWorkspace(request.Context(), func(ctx context.Context) ([]coordinationrequest.CoordinationRequest, error) {
+		return store.ListInOrganization(ctx, userID, org, sent)
+	})
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		api.logger.Error("list workspace requests interrupted", "failure_code", safeFailureCode(err))
+		writeJSON(response, http.StatusServiceUnavailable, map[string]string{"error": "workspace request read interrupted"})
+		return
+	}
 	if errors.Is(err, coordinationrequest.ErrCreationForbidden) {
 		writeJSON(response, http.StatusForbidden, map[string]string{"error": "current workspace membership required"})
 		return

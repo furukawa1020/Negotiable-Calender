@@ -128,6 +128,19 @@ func (api *API) exportUserData(response http.ResponseWriter, request *http.Reque
 		return
 	}
 
+	// Reject the complete export before serializing any data if storage returns
+	// rows outside the authenticated user's self-service boundary.
+	valid := sharingPolicy == nil || sharingPolicy.UserID == userID
+	for _, value := range requests {
+		valid = valid && (value.RequesterUserID == userID || value.TargetUserID == userID)
+	}
+	for _, value := range projections {
+		valid = valid && value.UserID == userID
+	}
+	if !valid {
+		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "invalid user export result"})
+		return
+	}
 	response.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="negotiable-calendar-%s.json"`, userID))
 	writeJSON(response, http.StatusOK, map[string]any{
 		"generatedAt": time.Now().UTC(),

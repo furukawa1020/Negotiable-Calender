@@ -353,7 +353,7 @@ describe('App', () => {
     fireEvent.click(screen.getByRole('button', { name: '依頼' }))
     expect(await screen.findByRole('heading', { name: '受信した依頼' })).toBeInTheDocument()
     expect(await screen.findByRole('heading', { name: '新API設計レビュー' })).toBeInTheDocument()
-    expect(screen.getByText('会議')).toBeInTheDocument()
+    expect(screen.getByText('会議', { selector: '.option-row span' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '担当を引き継ぐ' })).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('別の開始時間'), { target: { value: '2026-08-28T10:00' } })
     fireEvent.change(screen.getByLabelText('終了時間'), { target: { value: '2026-08-28T10:15' } })

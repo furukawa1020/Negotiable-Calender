@@ -7,12 +7,16 @@ const statuses = [
   ['delegated', '担当変更済み'], ['async', '非同期回答済み'], ['declined', '辞退'],
   ['cancelled', 'キャンセル'], ['expired', '期限切れ'], ['completed', '完了'],
 ] as const
+const types = [['quick_question', '短い質問'], ['meeting', '会議'], ['review', 'レビュー'], ['approval', '承認'], ['decision', '意思決定'], ['async_response', '非同期の回答'], ['urgent_contact', '緊急連絡']] as const
+const priorities = [['urgent', '緊急'], ['high', '高'], ['normal', '通常'], ['low', '低']] as const
 export function RequestBrowser({ requests, children }: { requests: CoordinationRequest[]; children: (rows: CoordinationRequest[]) => ReactNode }) {
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState('')
+  const [type, setType] = useState('')
+  const [priority, setPriority] = useState('')
   const [order, setOrder] = useState<RequestOrder>('newest')
   const [page, setPage] = useState(0)
-  const visible = orderRequests(filterRequests(requests, query, status), order)
+  const visible = orderRequests(filterRequests(requests, query, status, type, priority), order)
   const pages = Math.max(1, Math.ceil(visible.length / 20))
   const currentPage = Math.min(page, pages - 1)
   // Clamp stored state too: later refreshes must not restore an obsolete page.
@@ -30,7 +34,15 @@ export function RequestBrowser({ requests, children }: { requests: CoordinationR
         <option value="deadline">期限が近い順</option>
         <option value="priority">優先度が高い順</option>
       </select></label>
-      <button type="button" className="secondary-button" disabled={!query && !status} onClick={() => { setQuery(''); setStatus(''); setPage(0) }}>絞り込みを解除</button>
+      <label>依頼種別<select value={type} onChange={event => { setType(event.target.value); setPage(0) }}>
+        <option value="">すべての種別</option>
+        {types.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+      </select></label>
+      <label>優先度<select value={priority} onChange={event => { setPriority(event.target.value); setPage(0) }}>
+        <option value="">すべての優先度</option>
+        {priorities.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+      </select></label>
+      <button type="button" className="secondary-button" disabled={!query && !status && !type && !priority} onClick={() => { setQuery(''); setStatus(''); setType(''); setPriority(''); setPage(0) }}>絞り込みを解除</button>
       <span className="request-count" aria-live="polite">{requests.length}件中 {visible.length}件{pages > 1 ? `に一致・${currentPage * 20 + 1}〜${currentPage * 20 + displayed.length}件を表示` : 'を表示'}</span>
     </div>
     {requests.length > 0 && visible.length === 0 ? <p className="people-status">条件に一致する依頼はありません。検索語や状態を変更してください。</p> : null}

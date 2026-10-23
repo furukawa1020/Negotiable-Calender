@@ -12,8 +12,9 @@ export function orderRequests(requests: CoordinationRequest[], order: RequestOrd
   })
 }
 
-export function filterRequests(requests: CoordinationRequest[], query: string, status: string): CoordinationRequest[] {
+export function filterRequests(requests: CoordinationRequest[], query: string, status: string, type = '', priority = ''): CoordinationRequest[] {
   const needle = normalize(query)
   return requests.filter(row => (status === '' || row.status === status)
+    && (type === '' || row.type === type) && (priority === '' || row.priority === priority)
     && [row.title, row.requesterUserId, row.targetUserId, row.id].some(value => normalize(value).includes(needle)))
 }

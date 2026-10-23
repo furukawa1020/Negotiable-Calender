@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, expect, it } from 'vitest'
 import { RequestBrowser } from './RequestBrowser'
 import { filterRequests, orderRequests } from './requestBrowserModel'
@@ -8,6 +8,39 @@ const base: CoordinationRequest = { id: 'r-1', requesterUserId: 'alice', targetU
 const requests = [base, { ...base, id: 'r-2', title: '確定した会議', status: 'accepted' }]
 const rows = (values: CoordinationRequest[]) => <ul>{values.map(row => <li key={row.id}>{row.title}</li>)}</ul>
 afterEach(cleanup)
+it('searches normalized names and AND keywords across fields without mutating data', () => {
+  expect(filterRequests(requests, 'ＡＢＣ　田中', '', '', '', { bob: '田中 花子' })).toEqual([base])
+  expect(filterRequests(requests, 'abc alice', '')).toEqual([base])
+  expect(filterRequests(requests, 'abc missing', '', '', '', { bob: '田中' })).toEqual([])
+  expect(filterRequests([{ ...base, requesterUserId: 'toString' }], 'native code', '')).toEqual([])
+})
+it('loads names explicitly, retries errors and discards names across identity keys', async () => {
+  let fail = true
+  const load = async () => { if (fail) throw new Error('private'); return { bob: '田中 花子' } }
+  const view = render(<RequestBrowser key="a" requests={requests} loadPeople={load}>{rows}</RequestBrowser>)
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '田中 abc' } })
+  expect(screen.queryAllByRole('listitem')).toHaveLength(0)
+  fireEvent.click(screen.getByRole('button', { name: '検索用の氏名を取得' }))
+  await screen.findByText(/氏名を取得できませんでした/)
+  fail = false
+  fireEvent.click(screen.getByRole('button', { name: '検索用の氏名を取得' }))
+  await screen.findByText('組織の氏名を検索に使えます')
+  expect(screen.getAllByRole('listitem')).toHaveLength(1)
+  view.rerender(<RequestBrowser key="b" requests={requests}>{rows}</RequestBrowser>)
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '田中' } })
+  expect(screen.queryAllByRole('listitem')).toHaveLength(0)
+})
+it('ignores a late directory response after identity replacement', async () => {
+  let resolve!: (names: Record<string, string>) => void
+  const load = () => new Promise<Record<string, string>>(done => { resolve = done })
+  const view = render(<RequestBrowser key="a" requests={requests} loadPeople={load}>{rows}</RequestBrowser>)
+  fireEvent.click(screen.getByRole('button', { name: '検索用の氏名を取得' }))
+  view.rerender(<RequestBrowser key="b" requests={requests} loadPeople={load}>{rows}</RequestBrowser>)
+  await act(async () => { resolve({ bob: '以前の利用者' }) })
+  expect(screen.queryByText('組織の氏名を検索に使えます')).not.toBeInTheDocument()
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '以前の利用者' } })
+  expect(screen.queryAllByRole('listitem')).toHaveLength(0)
+})
 it('combines type and priority with search and status and clears all filters', () => {
   const urgent = { ...base, id: 'urgent', priority: 'urgent' }
   const meeting = { ...urgent, id: 'meeting', type: 'meeting' }

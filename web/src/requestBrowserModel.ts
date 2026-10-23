@@ -1,4 +1,5 @@
 import type { CoordinationRequest } from './bookingResponse'
+import type { RequestPeople } from './requestPeople'
 const normalize = (value: string) => value.normalize('NFKC').toLocaleLowerCase('ja-JP').trim()
 export type RequestOrder = 'newest' | 'deadline' | 'priority'
 const priorities: Record<string, number> = { urgent: 3, high: 2, normal: 1, low: 0 }
@@ -12,9 +13,12 @@ export function orderRequests(requests: CoordinationRequest[], order: RequestOrd
   })
 }
 
-export function filterRequests(requests: CoordinationRequest[], query: string, status: string, type = '', priority = ''): CoordinationRequest[] {
-  const needle = normalize(query)
+export function filterRequests(requests: CoordinationRequest[], query: string, status: string, type = '', priority = '', names: RequestPeople = {}): CoordinationRequest[] {
+  const needles = normalize(query).split(/\s+/).filter(Boolean)
   return requests.filter(row => (status === '' || row.status === status)
     && (type === '' || row.type === type) && (priority === '' || row.priority === priority)
-    && [row.title, row.requesterUserId, row.targetUserId, row.id].some(value => normalize(value).includes(needle)))
+    && needles.every(needle => [row.title, row.requesterUserId, row.targetUserId, row.id,
+      Object.hasOwn(names, row.requesterUserId) ? names[row.requesterUserId] : '',
+      Object.hasOwn(names, row.targetUserId) ? names[row.targetUserId] : '',
+    ].some(value => normalize(value).includes(needle))))
 }

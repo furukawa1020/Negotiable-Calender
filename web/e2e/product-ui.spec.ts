@@ -152,5 +152,32 @@ for (const width of [1440, 1024, 390, 320]) {
       await noPageOverflow(page)
       await page.screenshot({ path: testInfo.outputPath('signin.png'), fullPage: true })
     })
+
+    test('request pagination, category filters and participant search work together', async ({ page }) => {
+      await fixtureAPI(page)
+      await page.route('**/api/v1/requests*', route => route.fulfill({ json: { requests: Array.from({ length: 23 }, (_, i) => ({
+        id: `r-${String(i).padStart(3, '0')}`, requesterUserId: 'sample-manager', targetUserId: 'demo-manager',
+        title: `設計レビュー ${i}`, type: i === 22 ? 'meeting' : 'review', status: 'cancelled', priority: i === 22 ? 'urgent' : 'normal',
+        durationMinutes: 30, deadlineAt: '2030-02-01T00:00:00Z', createdAt: '2030-01-01T00:00:00Z', options: [],
+      })) } }))
+      await page.goto('http://127.0.0.1:5187')
+      await page.getByRole('button', { name: '依頼', exact: true }).click()
+      await expect(page.locator('.request-summary h2')).toHaveCount(20)
+      await page.getByRole('button', { name: '次のページ' }).click()
+      await expect(page.locator('.request-summary h2')).toHaveCount(3)
+      await expect(page.getByText('2 / 2 ページ')).toBeVisible()
+      await page.getByRole('combobox', { name: '依頼種別', exact: true }).selectOption('meeting')
+      await page.getByRole('combobox', { name: '優先度', exact: true }).selectOption('urgent')
+      await expect(page.locator('.request-summary h2')).toHaveCount(1)
+      await page.getByRole('button', { name: '検索用の氏名を取得' }).click()
+      await expect(page.getByText('組織の氏名を検索に使えます')).toBeVisible()
+      await page.getByRole('searchbox').fill('サンプル管理者　レビュー')
+      await expect(page.getByRole('heading', { name: '設計レビュー 22', exact: true })).toBeVisible()
+      await noPageOverflow(page)
+      await page.getByRole('button', { name: '絞り込みを解除' }).click()
+      await expect(page.locator('.request-summary h2')).toHaveCount(20)
+      await expect(page.getByText('1 / 2 ページ')).toBeVisible()
+      await noPageOverflow(page)
+    })
   })
 }

@@ -1,4 +1,5 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import type { RequestPeople } from './requestPeople'
 import type { CoordinationRequest } from './bookingResponse'
 import { filterRequests, orderRequests, type RequestOrder } from './requestBrowserModel'
 
@@ -9,14 +10,40 @@ const statuses = [
 ] as const
 const types = [['quick_question', '短い質問'], ['meeting', '会議'], ['review', 'レビュー'], ['approval', '承認'], ['decision', '意思決定'], ['async_response', '非同期の回答'], ['urgent_contact', '緊急連絡']] as const
 const priorities = [['urgent', '緊急'], ['high', '高'], ['normal', '通常'], ['low', '低']] as const
-export function RequestBrowser({ requests, children }: { requests: CoordinationRequest[]; children: (rows: CoordinationRequest[]) => ReactNode }) {
+export function RequestBrowser({ requests, children, loadPeople }: { requests: CoordinationRequest[]; children: (rows: CoordinationRequest[]) => ReactNode; loadPeople?: () => Promise<RequestPeople | undefined> }) {
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState('')
   const [type, setType] = useState('')
   const [priority, setPriority] = useState('')
   const [order, setOrder] = useState<RequestOrder>('newest')
   const [page, setPage] = useState(0)
-  const visible = orderRequests(filterRequests(requests, query, status, type, priority), order)
+  const [names, setNames] = useState<RequestPeople>({})
+  const [namesLoading, setNamesLoading] = useState(false)
+  const [namesMessage, setNamesMessage] = useState('')
+  const active = useRef(false)
+  const nameOperation = useRef(0)
+  useEffect(() => { nameOperation.current++; active.current = true; return () => { active.current = false } }, [])
+  const loadNames = async () => {
+    if (!loadPeople || namesLoading) return
+    const operation = ++nameOperation.current
+    const current = () => active.current && operation === nameOperation.current
+    setNamesLoading(true)
+    setNamesMessage('')
+    setNames({})
+    try {
+      const result = await loadPeople()
+      if (!current()) return
+      if (!result) throw new Error('directory unavailable')
+      setNames(result)
+      setPage(0)
+      setNamesMessage('組織の氏名を検索に使えます')
+    } catch {
+      if (current()) setNamesMessage('氏名を取得できませんでした。件名・IDで検索するか再試行してください。')
+    } finally {
+      if (current()) setNamesLoading(false)
+    }
+  }
+  const visible = orderRequests(filterRequests(requests, query, status, type, priority, names), order)
   const pages = Math.max(1, Math.ceil(visible.length / 20))
   const currentPage = Math.min(page, pages - 1)
   // Clamp stored state too: later refreshes must not restore an obsolete page.
@@ -43,6 +70,8 @@ export function RequestBrowser({ requests, children }: { requests: CoordinationR
         {priorities.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
       </select></label>
       <button type="button" className="secondary-button" disabled={!query && !status && !type && !priority} onClick={() => { setQuery(''); setStatus(''); setType(''); setPriority(''); setPage(0) }}>絞り込みを解除</button>
+      {loadPeople ? <button type="button" className="secondary-button" disabled={namesLoading} onClick={() => { void loadNames() }}>{namesLoading ? '氏名を取得中…' : '検索用の氏名を取得'}</button> : null}
+      {namesMessage ? <span className="request-count" aria-live="polite">{namesMessage}</span> : null}
       <span className="request-count" aria-live="polite">{requests.length}件中 {visible.length}件{pages > 1 ? `に一致・${currentPage * 20 + 1}〜${currentPage * 20 + displayed.length}件を表示` : 'を表示'}</span>
     </div>
     {requests.length > 0 && visible.length === 0 ? <p className="people-status">条件に一致する依頼はありません。検索語や状態を変更してください。</p> : null}

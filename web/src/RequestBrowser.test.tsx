@@ -8,6 +8,31 @@ const base: CoordinationRequest = { id: 'r-1', requesterUserId: 'alice', targetU
 const requests = [base, { ...base, id: 'r-2', title: '確定した会議', status: 'accepted' }]
 const rows = (values: CoordinationRequest[]) => <ul>{values.map(row => <li key={row.id}>{row.title}</li>)}</ul>
 afterEach(cleanup)
+it('paginates loaded rows, resets after filtering and clamps on refreshed data', () => {
+  const many = Array.from({ length: 41 }, (_, i) => ({ ...base, id: `r-${String(i).padStart(3, '0')}`, title: `依頼${i}` }))
+  const view = render(<RequestBrowser requests={many}>{rows}</RequestBrowser>)
+  expect(screen.getAllByRole('listitem')).toHaveLength(20)
+  expect(screen.getByRole('button', { name: '前のページ' })).toBeDisabled()
+  fireEvent.click(screen.getByRole('button', { name: '次のページ' }))
+  expect(screen.getByText('2 / 3 ページ')).toBeInTheDocument()
+  expect(screen.getAllByRole('listitem')[0]).toHaveTextContent('依頼20')
+  fireEvent.click(screen.getByRole('button', { name: '次のページ' }))
+  expect(screen.getAllByRole('listitem')).toHaveLength(1)
+  expect(screen.getByRole('button', { name: '次のページ' })).toBeDisabled()
+  view.rerender(<RequestBrowser requests={many.slice(0, 21)}>{rows}</RequestBrowser>)
+  expect(screen.getByText('2 / 2 ページ')).toBeInTheDocument()
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '依頼0' } })
+  expect(screen.getAllByRole('listitem')).toHaveLength(1)
+  fireEvent.click(screen.getByRole('button', { name: '絞り込みを解除' }))
+  expect(screen.getByText('1 / 2 ページ')).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: '次のページ' }))
+  fireEvent.change(screen.getByRole('combobox', { name: '並び順' }), { target: { value: 'deadline' } })
+  expect(screen.getByText('1 / 2 ページ')).toBeInTheDocument()
+  view.rerender(<RequestBrowser requests={[]}>{rows}</RequestBrowser>)
+  expect(screen.queryByRole('navigation', { name: '依頼のページ送り' })).not.toBeInTheDocument()
+  view.rerender(<RequestBrowser requests={many}>{rows}</RequestBrowser>)
+  expect(screen.getByText('1 / 3 ページ')).toBeInTheDocument()
+})
 it('orders by deadline, priority or newest without changing the source and breaks ties by ID', () => {
   const a = { ...base, id: 'a', deadlineAt: '2030-02-03T00:00:00Z', priority: 'urgent' }
   const b = { ...base, id: 'b', createdAt: '2030-01-03T00:00:00Z', priority: 'low' }

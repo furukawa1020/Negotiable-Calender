@@ -543,6 +543,7 @@ func (api *API) listCoordinationRequests(response http.ResponseWriter, request *
 		return store.ListInOrganization(ctx, userID, org, sent)
 	})
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		api.logger.Error("list workspace requests interrupted", "failure_code", safeFailureCode(err))
 		writeJSON(response, http.StatusServiceUnavailable, map[string]string{"error": "workspace request read interrupted"})
 		return
 	}

@@ -1473,7 +1473,7 @@ function App() {
             {!inboxLoading && !inboxError && inboxRequests.length === 0 ? (
               <p className="people-status">{inboxLoaded ? '新しい依頼はありません。' : '「更新」で依頼を取得してください。'}</p>
             ) : null}
-            <RequestBrowser key={`${activeOrganizationID}:${activeUserID}:inbox:${notificationFocus.version}`} initialQuery={notificationFocus.id} requests={inboxRequests} loadPeople={() => fetchBookingResult(`${apiURL}/api/v1/people?organizationId=${encodeURIComponent(activeOrganizationID)}`, { headers: { 'X-Demo-User-ID': activeUserID, 'X-Organization-ID': activeOrganizationID } }, readRequestPeople, captureRequestLifetime())}>{visible => <div className="request-list">
+            <RequestBrowser key={`${activeOrganizationID}:${activeUserID}:inbox:${notificationFocus.version}`} initialRequestID={notificationFocus.id} requests={inboxRequests} loadPeople={() => fetchBookingResult(`${apiURL}/api/v1/people?organizationId=${encodeURIComponent(activeOrganizationID)}`, { headers: { 'X-Demo-User-ID': activeUserID, 'X-Organization-ID': activeOrganizationID } }, readRequestPeople, captureRequestLifetime())}>{visible => <div className="request-list">
               {visible.map((item) => (
                 <article className="request-row" key={item.id}>
                   <div className="request-summary">
@@ -1545,7 +1545,7 @@ function App() {
             {sentLoading ? <p className="people-status" role="status">送信済み依頼を取得しています…</p> : null}
             {sentError ? <p className="people-status error" role="alert">{sentError}</p> : null}
             {!sentLoading && !sentError && sentRequests.length === 0 ? <p className="people-status">{sentLoaded ? '送信済み依頼はありません。' : '「更新」で依頼を取得してください。'}</p> : null}
-            <RequestBrowser key={`${activeOrganizationID}:${activeUserID}:sent:${notificationFocus.version}`} initialQuery={notificationFocus.id} requests={sentRequests} loadPeople={() => fetchBookingResult(`${apiURL}/api/v1/people?organizationId=${encodeURIComponent(activeOrganizationID)}`, { headers: { 'X-Demo-User-ID': requesterUserID, 'X-Organization-ID': activeOrganizationID } }, readRequestPeople, captureRequestLifetime())}>{visible => <div className="request-list">
+            <RequestBrowser key={`${activeOrganizationID}:${activeUserID}:sent:${notificationFocus.version}`} initialRequestID={notificationFocus.id} requests={sentRequests} loadPeople={() => fetchBookingResult(`${apiURL}/api/v1/people?organizationId=${encodeURIComponent(activeOrganizationID)}`, { headers: { 'X-Demo-User-ID': requesterUserID, 'X-Organization-ID': activeOrganizationID } }, readRequestPeople, captureRequestLifetime())}>{visible => <div className="request-list">
               {visible.map((item) => {
                 const cancellable = ['pending', 'suggested', 'delegated'].includes(item.status)
                 return (

@@ -16,6 +16,7 @@ import { useRequestResolution } from './useRequestResolution'
 import { fetchBookingResult, readCancellation, readCompletion } from './bookingTransport'
 import { readRequestList } from './requestList'
 import { RequestBrowser } from './RequestBrowser'
+import { NotificationBrowser } from './NotificationBrowser'
 import { readRequestPeople } from './requestPeople'
 import { readNotifications, type AppNotification } from './notificationResponse'
 import { readAuditLogs, type AuditEvent } from './auditResponse'
@@ -1181,12 +1182,12 @@ function App() {
                 <div className="notification-heading"><strong>通知</strong><span>予定詳細は含まれません</span></div>
                 {notificationsLoading ? <p role="status">取得中…</p> : null}
                 {!notificationsLoading && notifications.length === 0 ? <p>新しい通知はありません。</p> : null}
-                {notifications.map((item) => (
+                <NotificationBrowser key={`${activeOrganizationID}:${activeUserID}`} notifications={notifications}>{visible => visible.map((item) => (
                   <button className={item.readAt ? 'notification-item read' : 'notification-item'} type="button" key={item.id} onClick={() => markNotificationRead(item.id)}>
                     <span>{item.message}</span>
                     <time>{formatDateTime(item.createdAt)}</time>
                   </button>
-                ))}
+                ))}</NotificationBrowser>
               </section>
             ) : null}
           </div>

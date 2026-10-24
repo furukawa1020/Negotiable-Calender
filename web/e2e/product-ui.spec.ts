@@ -121,7 +121,8 @@ for (const width of [1440, 1024, 390, 320]) {
       ]) {
         await page.getByRole('navigation').getByRole('button', { name: button, exact: true }).click()
         await expect(page.getByRole('heading', { name: heading })).toBeVisible()
-        await expect(page.getByText(loaded, { exact: true })).toBeVisible()
+        if (button === '監査') await expect(page.locator('.audit-row strong').filter({ hasText: loaded })).toBeVisible()
+        else await expect(page.getByText(loaded, { exact: true })).toBeVisible()
         if (button === '依頼' || button === '送信済み') {
           await page.getByRole('searchbox', { name: '依頼を検索' }).fill('存在しない依頼')
           await expect(page.getByText('条件に一致する依頼はありません。検索語や状態を変更してください。')).toBeVisible()

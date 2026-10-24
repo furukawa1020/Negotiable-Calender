@@ -64,6 +64,10 @@ func ApplyReschedule(value *CoordinationRequest, actor string, command Reschedul
 			}
 			return ErrRescheduleInvalid
 		}
+		if !validMutationTime(*value, now) {
+			return ErrRescheduleInvalid
+		}
+		now = now.UTC()
 		if value.Status != Accepted || (p != nil && p.Status == "proposed") || len(value.Options) >= 100 {
 			return ErrRescheduleInvalid
 		}
@@ -116,6 +120,10 @@ func ApplyReschedule(value *CoordinationRequest, actor string, command Reschedul
 	if p.Status == terminal {
 		return ErrRescheduleRepeated
 	}
+	if !validMutationTime(*value, now) {
+		return ErrRescheduleInvalid
+	}
+	now = now.UTC()
 	if value.Status != Accepted || p.Status != "proposed" || value.AcceptedOptionID != p.ExpectedOptionID {
 		return ErrRescheduleInvalid
 	}

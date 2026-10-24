@@ -1,10 +1,8 @@
 package httpapi
 
 import (
-	"encoding/json"
 	"errors"
 	coordinationrequest "github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/request"
-	"io"
 	"net/http"
 )
 
@@ -17,14 +15,16 @@ func (api *API) rescheduleMeeting(response http.ResponseWriter, request *http.Re
 		return
 	}
 	var input coordinationrequest.RescheduleCommand
-	decoder := json.NewDecoder(http.MaxBytesReader(response, request.Body, 8<<10))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&input); err != nil || input.ProposalID == "" || input.ExpectedOptionID == "" || decoder.Decode(&struct{}{}) != io.EOF {
+	if err := decodeCommand(response, request, &input, 8<<10); err != nil || input.ProposalID == "" || input.ExpectedOptionID == "" {
 		writeJSON(response, 400, map[string]string{"error": "valid proposal and expected option are required"})
 		return
 	}
 	if input.Action != "propose" && input.Action != "accept" && input.Action != "decline" && input.Action != "withdraw" {
 		writeJSON(response, 400, map[string]string{"error": "invalid reschedule action"})
+		return
+	}
+	if (input.Action == "propose") == input.StartAt.IsZero() {
+		writeJSON(response, 400, map[string]string{"error": "startAt is required only for proposals"})
 		return
 	}
 	store, ok := api.requests.(coordinationrequest.ScopedRescheduleStore)

@@ -15,7 +15,8 @@ func TestCommandsRejectInvalidWholeBodyBeforeSideEffects(t *testing.T) {
 		{"/api/v1/requests/r/async", `{"message":"answer"}`},
 		{"/api/v1/users/actor/manual-overrides", `{"startAt":"2098-01-01T00:00:00Z","endAt":"2098-01-01T00:30:00Z","expiresAt":"2098-01-02T00:30:00Z","state":{"availability":"available","interruptibility":"open","requestability":"open","reschedulability":"high"}}`},
 	} {
-		for _, body := range []string{route.body + `{}`, route.body + `null`, route.body + `garbage`, `null`, `[]`, `{"unknown":true}`, route.body + strings.Repeat(" ", 1<<20)} {
+		duplicateBody := strings.TrimSuffix(route.body, "}") + "," + strings.TrimPrefix(route.body, "{")
+		for _, body := range []string{duplicateBody, route.body + `{}`, route.body + `null`, route.body + `garbage`, `null`, `[]`, `{"unknown":true}`, route.body + strings.Repeat(" ", 1<<20)} {
 			t.Run(route.path+"/"+body[:min(len(body), 12)], func(t *testing.T) {
 				store, policies := &stubRequestStore{}, &stubPolicyStore{}
 				handler := New(stubDatabase{}, policies, &stubProjectionStore{}, &stubOrganizationStore{}, store, "", testLogger())
@@ -32,6 +33,32 @@ func TestCommandsRejectInvalidWholeBodyBeforeSideEffects(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestCommandKeyUniquenessAndDepth(t *testing.T) {
+	type command struct {
+		Name  string         `json:"name"`
+		State map[string]any `json:"state"`
+	}
+	for _, body := range []string{
+		`{"name":"one","Name":"two"}`,
+		`{"name":"one","na\u006de":"two"}`,
+		`{"state":{"start":"one","ſtart":"two"}}`,
+		`{"state":{"key":1,"KEY":2}}`,
+		`{"state":{"nested":[{"id":1,"id":2}]}}`,
+		`{"state":{"nested":` + strings.Repeat("[", 65) + "0" + strings.Repeat("]", 65) + `}}`,
+	} {
+		value := command{Name: "unchanged"}
+		err := decodeCommand(httptest.NewRecorder(), httptest.NewRequest("POST", "/", strings.NewReader(body)), &value, 4096)
+		if err == nil || value.Name != "unchanged" || value.State != nil {
+			t.Fatalf("accepted invalid command: %s (%v)", body, err)
+		}
+	}
+	var value command
+	body := `{"name":"ok","state":{"items":[{"id":1},{"id":2}]}}`
+	if err := decodeCommand(httptest.NewRecorder(), httptest.NewRequest("POST", "/", strings.NewReader(body)), &value, 4096); err != nil || value.Name != "ok" {
+		t.Fatalf("valid separate objects rejected: %v", err)
 	}
 }
 

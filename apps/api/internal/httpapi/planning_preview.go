@@ -32,6 +32,9 @@ func (api *API) getPlanningPreview(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 401, map[string]string{"error": "request identity is required"})
 		return
 	}
+	if planningInterrupted(w, r.Context()) {
+		return
+	}
 	if allowed, retry := api.planningBudget.allow(userID, time.Now()); !allowed {
 		w.Header().Set("Retry-After", strconv.Itoa(max(1, int(math.Ceil(retry.Seconds())))))
 		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "planning request limit reached"})
@@ -46,6 +49,9 @@ func (api *API) getPlanningPreview(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	r = r.WithContext(ctx)
 	value, err := api.requests.GetForUser(r.Context(), r.PathValue("requestId"), userID)
+	if planningInterrupted(w, ctx) {
+		return
+	}
 	if errors.Is(err, coordinationrequest.ErrNotFound) {
 		writeJSON(w, 404, map[string]string{"error": "request not found"})
 		return
@@ -63,6 +69,9 @@ func (api *API) getPlanningPreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !api.requireMembership(w, r, organizationID, userID) {
+		return
+	}
+	if planningInterrupted(w, ctx) {
 		return
 	}
 	now := time.Now().UTC()
@@ -98,8 +107,17 @@ func (api *API) getPlanningPreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	segments, bookings, err := sources.LoadPlanningSources(ctx, userID, value.RequesterUserID, from, to)
+	if planningInterrupted(w, ctx) {
+		return
+	}
 	if err != nil {
 		writeJSON(w, 503, map[string]string{"error": "bounded planning sources cannot be verified"})
+		return
+	}
+	// Evidence may have expired while sources were loading.
+	now = time.Now().UTC()
+	if !value.DeadlineAt.After(now) {
+		writeJSON(w, 409, map[string]string{"error": "request is not eligible for planning"})
 		return
 	}
 	sort.Slice(segments, func(i, j int) bool { return segments[i].ID < segments[j].ID })
@@ -109,6 +127,9 @@ func (api *API) getPlanningPreview(w http.ResponseWriter, r *http.Request) {
 		preview.ExpiresAt = value.DeadlineAt
 	}
 	for _, option := range options {
+		if _, err := coordinationrequest.ConfirmableMeeting(value, option.ID, now); err != nil {
+			continue
+		}
 		if coordinationrequest.ValidateMeetingAvailability(userID, option, segments, now) != nil {
 			continue
 		}
@@ -144,6 +165,21 @@ func (api *API) getPlanningPreview(w http.ResponseWriter, r *http.Request) {
 	}
 	digest := sha256.Sum256(encoded)
 	preview.Revision = hex.EncodeToString(digest[:])
+	if planningInterrupted(w, ctx) {
+		return
+	}
+	if !preview.ExpiresAt.After(time.Now().UTC()) {
+		writeJSON(w, 409, map[string]string{"error": "planning evidence expired"})
+		return
+	}
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, 200, preview)
+}
+
+func planningInterrupted(w http.ResponseWriter, ctx context.Context) bool {
+	if ctx.Err() == nil {
+		return false
+	}
+	writeJSON(w, 503, map[string]string{"error": "planning preview interrupted"})
+	return true
 }

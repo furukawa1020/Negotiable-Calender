@@ -17,6 +17,7 @@ import { fetchBookingResult, readCancellation, readCompletion } from './bookingT
 import { readRequestList } from './requestList'
 import { RequestBrowser } from './RequestBrowser'
 import { NotificationBrowser } from './NotificationBrowser'
+import { AuditBrowser } from './AuditBrowser'
 import { readRequestPeople } from './requestPeople'
 import { readNotifications, type AppNotification } from './notificationResponse'
 import { readAuditLogs, type AuditEvent } from './auditResponse'
@@ -1535,8 +1536,8 @@ function App() {
             {auditLoading ? <p className="people-status" role="status">監査ログを取得しています…</p> : null}
             {auditError ? <p className="people-status error" role="alert">{auditError}</p> : null}
             {!auditLoading && !auditError && auditLogs.length === 0 ? <p className="people-status">監査ログはありません。</p> : null}
-            <div className="audit-list">
-              {auditLogs.map((event) => (
+            <AuditBrowser key={`${activeOrganizationID}:${activeUserID}`} events={auditLogs}>{visible => <div className="audit-list">
+              {visible.map((event) => (
                 <article className="audit-row" key={event.id}>
                   <time>{formatDateTime(event.createdAt)}</time>
                   <div>
@@ -1546,7 +1547,7 @@ function App() {
                   <span className="audit-safe"><ShieldIcon />予定詳細なし</span>
                 </article>
               ))}
-            </div>
+            </div>}</AuditBrowser>
           </section>
         )}
       </main>

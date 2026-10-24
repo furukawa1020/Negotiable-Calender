@@ -35,6 +35,7 @@ func (s *rangeProjectionStub) GetView(context.Context, string, string, time.Time
 
 func TestProjectionRangeRejectsBeforeStorage(t *testing.T) {
 	for _, query := range []string{
+		"from=%zz", "timezone=UTC;from=bad", "unknown=value", "from=bad;ignored=1", "timezone=UTC&timezone=%zz", "Timezone=UTC",
 		"from=bad", "to=bad", "timezone=missing/zone", "from=0001-01-01T00:00:00Z", "to=0001-01-01T00:00:00Z",
 		"from=2026-01-01T00:00:00Z&to=2027-01-01T00:00:00Z", "from=2026-01-01T00:00:00Z&to=2026-01-01T00:00:00Z",
 		"from=2026-01-02T00:00:00Z&to=2026-01-01T00:00:00Z", "from=a&from=b", "to=a&to=b", "timezone=UTC&timezone=Asia/Tokyo", "from=",

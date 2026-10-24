@@ -12,6 +12,11 @@ func projectionRange(query url.Values, now time.Time) (string, time.Time, time.T
 	fail := func(message string) (string, time.Time, time.Time, error) {
 		return "", time.Time{}, time.Time{}, fmt.Errorf("%s", message)
 	}
+	for key := range query {
+		if key != "timezone" && key != "from" && key != "to" {
+			return fail("invalid calendar query")
+		}
+	}
 	for _, key := range []string{"timezone", "from", "to"} {
 		if values, ok := query[key]; ok && (len(values) != 1 || values[0] == "") {
 			return fail("invalid calendar query")

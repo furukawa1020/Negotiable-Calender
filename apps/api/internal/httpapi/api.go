@@ -773,7 +773,12 @@ func (api *API) getPublicProjection(response http.ResponseWriter, request *http.
 	if !api.requireMembership(response, request, organizationID, actorUserID) || !api.requireMembership(response, request, organizationID, request.PathValue("userId")) {
 		return
 	}
-	timezone, from, to, err := projectionRange(request.URL.Query(), time.Now())
+	query, queryErr := url.ParseQuery(request.URL.RawQuery)
+	if queryErr != nil {
+		writeJSON(response, http.StatusBadRequest, map[string]string{"error": "invalid calendar query"})
+		return
+	}
+	timezone, from, to, err := projectionRange(query, time.Now())
 	if err != nil {
 		writeJSON(response, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return

@@ -54,6 +54,10 @@ func (api *API) getPlanningPreview(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 503, map[string]string{"error": "planning preview unavailable"})
 		return
 	}
+	if value.ID != r.PathValue("requestId") || value.RequesterUserID == "" || value.RequesterUserID == value.TargetUserID {
+		writeJSON(w, 404, map[string]string{"error": "request not found"})
+		return
+	}
 	if value.TargetUserID != userID || value.OrganizationID != organizationID {
 		writeJSON(w, 403, map[string]string{"error": "only the target in the active workspace can preview"})
 		return

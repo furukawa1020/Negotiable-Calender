@@ -40,6 +40,10 @@ func PrepareProposal(value *CoordinationRequest, actor, org string, start, end, 
 			return selected, true, nil
 		}
 	}
+	if !validMutationTime(*value, now) {
+		return Option{}, false, ErrCandidateInvalid
+	}
+	now = now.UTC()
 	if value.Status != Suggested || value.AcceptedOptionID != "" {
 		return Option{}, false, ErrProposalConflict
 	}

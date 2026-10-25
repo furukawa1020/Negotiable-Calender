@@ -75,6 +75,10 @@ func PrepareResolution(value *CoordinationRequest, command ResolutionCommand, no
 		}
 		return true, nil
 	}
+	if !validMutationTime(*value, now) {
+		return false, ErrResolutionConflict
+	}
+	now = now.UTC()
 	if command.Status == Cancelled {
 		if value.Status != Pending && value.Status != Suggested && value.Status != Delegated {
 			return false, ErrResolutionConflict
@@ -121,6 +125,9 @@ func prepareCompletion(value *CoordinationRequest, command ResolutionCommand, no
 	}
 	if value.Status == Completed {
 		return true, nil
+	}
+	if !validMutationTime(*value, now) {
+		return false, ErrResolutionConflict
 	}
 	value.Status, value.UpdatedAt = Completed, now.UTC()
 	return false, nil

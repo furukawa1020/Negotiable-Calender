@@ -46,8 +46,10 @@ func TestProjectionRangeReadsOnlyOverlapsAndPreservesFullExport(t *testing.T) {
 	}
 	*trace = planningReadTrace{}
 	view, err := reader.GetView(ctx, "alice", "Asia/Tokyo", from, to)
-	if err != nil || len(view.Segments) != 3 || trace.documents != 4 {
-		t.Fatalf("calendar view: segments=%d fetched=%d error=%v", len(view.Segments), trace.documents, err)
+	// The range reader preserves every overlapping row for diagnostics/export;
+	// ambiguous rows must not become a public calendar with contradictory states.
+	if err == nil || len(view.Segments) != 0 || trace.documents != 4 {
+		t.Fatalf("ambiguous calendar accepted: segments=%d fetched=%d error=%v", len(view.Segments), trace.documents, err)
 	}
 	*trace = planningReadTrace{}
 	all, err := reader.ListForUser(ctx, "alice")

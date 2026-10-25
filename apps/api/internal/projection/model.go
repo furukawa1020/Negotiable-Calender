@@ -2,6 +2,7 @@ package projection
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 	_ "time/tzdata"
@@ -69,14 +70,26 @@ func NewView(userID, timezone string, projections []ScheduleProjection) (View, e
 	if _, err := time.LoadLocation(timezone); err != nil {
 		return View{}, fmt.Errorf("invalid timezone: %w", err)
 	}
-	view := View{UserID: userID, Timezone: timezone, Segments: make([]Segment, 0, len(projections))}
-	for _, item := range projections {
+	ordered := append([]ScheduleProjection(nil), projections...)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		if ordered[i].StartAt.Equal(ordered[j].StartAt) {
+			return ordered[i].ID < ordered[j].ID
+		}
+		return ordered[i].StartAt.Before(ordered[j].StartAt)
+	})
+	view := View{UserID: userID, Timezone: timezone, Segments: make([]Segment, 0, len(ordered))}
+	seen := make(map[string]bool, len(ordered))
+	for i, item := range ordered {
 		if item.UserID != userID {
 			return View{}, fmt.Errorf("projection owner does not match view")
 		}
 		if err := item.Validate(); err != nil {
 			return View{}, err
 		}
+		if seen[item.ID] || (i > 0 && item.StartAt.Before(ordered[i-1].EndAt)) {
+			return View{}, fmt.Errorf("ambiguous projection timeline")
+		}
+		seen[item.ID] = true
 		segment := Segment{
 			StartAt: item.StartAt, EndAt: item.EndAt,
 			Availability:           item.State.Availability,

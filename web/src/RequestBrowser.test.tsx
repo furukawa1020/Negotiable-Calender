@@ -8,6 +8,14 @@ const base: CoordinationRequest = { id: 'r-1', requesterUserId: 'alice', targetU
 const requests = [base, { ...base, id: 'r-2', title: '確定した会議', status: 'accepted' }]
 const rows = (values: CoordinationRequest[]) => <ul>{values.map(row => <li key={row.id}>{row.title}</li>)}</ul>
 afterEach(cleanup)
+it('focuses the exact notification request even behind many prefix matches', () => {
+  const similar = Array.from({ length: 25 }, (_, i) => ({ ...base, id: `r-1-${i}`, title: `別依頼 ${i}`, createdAt: '2030-01-02T00:00:00Z' }))
+  render(<RequestBrowser requests={[...similar, base]} initialRequestID="r-1">{rows}</RequestBrowser>)
+  expect(screen.getAllByRole('listitem')).toHaveLength(1)
+  expect(screen.getByRole('listitem')).toHaveTextContent(base.title)
+  fireEvent.click(screen.getByRole('button', { name: '絞り込みを解除' }))
+  expect(screen.getAllByRole('listitem')).toHaveLength(20)
+})
 it('searches normalized names and AND keywords across fields without mutating data', () => {
   expect(filterRequests(requests, 'ＡＢＣ　田中', '', '', '', { bob: '田中 花子' })).toEqual([base])
   expect(filterRequests(requests, 'abc alice', '')).toEqual([base])

@@ -539,7 +539,7 @@ describe('App', () => {
     expect(panel).toBeInTheDocument()
     expect(await screen.findByText('新しい調整依頼が届きました。')).toBeInTheDocument()
     expect(within(panel).queryByText('Product Review')).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: /新しい調整依頼が届きました/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^新しい調整依頼が届きました/ }))
     expect(globalThis.fetch).toHaveBeenCalledWith(
       expect.stringContaining('/api/v1/notifications/notification-1/read'),
       expect.objectContaining({ method: 'POST' }),

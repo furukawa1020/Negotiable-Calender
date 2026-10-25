@@ -218,6 +218,9 @@ function App() {
   const [notificationsOpen, setNotificationsOpen] = useState(false)
   const [notifications, setNotifications] = useState<AppNotification[]>([])
   const [notificationsLoading, setNotificationsLoading] = useState(false)
+  const [notificationRequestBusy, setNotificationRequestBusy] = useState('')
+  const [notificationFocus, setNotificationFocus] = useState({ id: '', version: 0 })
+  const notificationRequestLoad = useRef(0)
   const [notice, setNotice] = useState(() => calendarConsentNotice(new URLSearchParams(window.location.search).get('calendar')))
   const [calendarAnchor, setCalendarAnchor] = useState(() => new Date())
   const [calendarView, setCalendarView] = useState<CalendarView>('day')
@@ -306,6 +309,9 @@ function App() {
     setMemberProjections([])
     setPreviewLoading(false)
     notificationLoad.current++
+    notificationRequestLoad.current++
+    setNotificationRequestBusy('')
+    setNotificationFocus({ id: '', version: 0 })
     auditLoad.current++
     peopleLoad.current++
     setPeople([])
@@ -343,6 +349,8 @@ function App() {
   }
 
   const supersedeRequestReads = () => {
+    notificationRequestLoad.current++
+    setNotificationRequestBusy('')
     // A list snapshot started before this acknowledged mutation may be stale,
     // even if it is the latest list request. Do not invalidate mutation scopes.
     inboxLoad.current++
@@ -351,6 +359,13 @@ function App() {
     setSentLoading(false)
     setInboxError('')
     setSentError('')
+  }
+
+  const navigate = (view: typeof currentView) => {
+    notificationRequestLoad.current++
+    setNotificationRequestBusy('')
+    setNotificationFocus(current => current.id ? { id: '', version: current.version + 1 } : current)
+    setCurrentView(view)
   }
 
   useEffect(() => {
@@ -533,7 +548,7 @@ function App() {
     if (!scopeCurrent()) return
     const load = ++peopleLoad.current
     const isCurrent = () => scopeCurrent() && load === peopleLoad.current
-    setCurrentView('people')
+    navigate('people')
     setPeopleLoading(true)
     setPeopleError('')
     setPeople([])
@@ -570,7 +585,7 @@ function App() {
     if (!scopeCurrent()) return
     const load = ++inboxLoad.current
     const isCurrent = () => scopeCurrent() && load === inboxLoad.current
-    setCurrentView('inbox')
+    navigate('inbox')
     setInboxLoading(true)
     setInboxError('')
     try {
@@ -592,7 +607,7 @@ function App() {
     if (!scopeCurrent()) return
     const load = ++sentLoad.current
     const isCurrent = () => scopeCurrent() && load === sentLoad.current
-    setCurrentView('sent')
+    navigate('sent')
     setSentLoading(true)
     setSentError('')
     try {
@@ -630,6 +645,8 @@ function App() {
   }).format(new Date(value))
 
   const openNotifications = async () => {
+    notificationRequestLoad.current++
+    setNotificationRequestBusy('')
     const lifetime = captureRequestLifetime()
     const generation = ++notificationLoad.current
     const isCurrent = () => lifetime() && generation === notificationLoad.current
@@ -668,11 +685,46 @@ function App() {
     }
   }
 
+  const openNotificationRequest = async (item: AppNotification) => {
+    const lifetime = captureRequestLifetime()
+    if (!lifetime()) return
+    const generation = ++notificationRequestLoad.current
+    const isCurrent = () => lifetime() && generation === notificationRequestLoad.current
+    setNotificationRequestBusy(item.id)
+    try {
+      const snapshot = await fetchBookingResult(`${apiURL}/api/v1/requests/${encodeURIComponent(item.requestId)}`, {
+        headers: { 'X-Demo-User-ID': activeUserID, 'X-Organization-ID': activeOrganizationID },
+      }, response => readRescheduleSnapshot(response, item.requestId, activeOrganizationID, activeUserID), isCurrent)
+      if (!snapshot || !isCurrent()) return
+      supersedeRequestReads()
+      const sent = snapshot.requesterUserId === activeUserID
+      // Demo inbox and sent lists represent different people; do not insert a
+      // manager's request into the member's sent list.
+      if (sent && activeUserID !== requesterUserID) {
+        setNotice('この通知は別のデモ利用者の送信済み依頼です。実アカウントでは本人の依頼を開けます。')
+        return
+      }
+      const upsert = (rows: CoordinationRequest[]) => [snapshot, ...rows.filter(row => row.id !== snapshot.id)]
+      if (sent) { setSentRequests(upsert); setSentLoaded(true) }
+      else { setInboxRequests(upsert); setInboxLoaded(true) }
+      setCurrentView(sent ? 'sent' : 'inbox')
+      setNotificationFocus(current => ({ id: snapshot.id, version: current.version + 1 }))
+      setNotificationsOpen(false)
+      notificationLoad.current++
+      setNotificationsLoading(false)
+      setNotice('通知の依頼を表示しています。絞り込み解除で取得済みの一覧、更新で最新の一覧を確認できます。')
+    } catch {
+      if (isCurrent()) setNotice('依頼を開けませんでした。現在の組織での権限と通信状態を確認し、再試行してください。')
+    } finally {
+      if (isCurrent()) setNotificationRequestBusy('')
+    }
+  }
+
   const openAudit = async () => {
     const lifetime = captureRequestLifetime()
     const generation = ++auditLoad.current
     const isCurrent = () => lifetime() && generation === auditLoad.current
-    setCurrentView('audit')
+    navigate('audit')
     setAuditLoading(true)
     setAuditError('')
     try {
@@ -1184,10 +1236,13 @@ function App() {
                 {notificationsLoading ? <p role="status">取得中…</p> : null}
                 {!notificationsLoading && notifications.length === 0 ? <p>新しい通知はありません。</p> : null}
                 <NotificationBrowser key={`${activeOrganizationID}:${activeUserID}`} notifications={notifications}>{visible => visible.map((item) => (
-                  <button className={item.readAt ? 'notification-item read' : 'notification-item'} type="button" key={item.id} onClick={() => markNotificationRead(item.id)}>
+                  <div className="notification-entry" key={item.id}>
+                  <button className={item.readAt ? 'notification-item read' : 'notification-item'} type="button" onClick={() => markNotificationRead(item.id)}>
                     <span>{item.message}</span>
                     <time>{formatDateTime(item.createdAt)}</time>
                   </button>
+                  <button className="secondary-button" type="button" disabled={notificationRequestBusy === item.id} aria-label={`依頼を開く: ${item.message}`} onClick={() => { void openNotificationRequest(item) }}>{notificationRequestBusy === item.id ? '依頼を取得中…' : '依頼を開く'}</button>
+                  </div>
                 ))}</NotificationBrowser>
               </section>
             ) : null}
@@ -1247,7 +1302,7 @@ function App() {
 
       <aside className="workspace-nav">
         <nav className="top-nav" aria-label="メインナビゲーション">
-          <button aria-current={currentView === 'calendar' ? 'page' : undefined} className={currentView === 'calendar' ? 'active' : ''} type="button" onClick={() => setCurrentView('calendar')}><NavigationIcon view="calendar" />マイカレンダー</button>
+          <button aria-current={currentView === 'calendar' ? 'page' : undefined} className={currentView === 'calendar' ? 'active' : ''} type="button" onClick={() => navigate('calendar')}><NavigationIcon view="calendar" />マイカレンダー</button>
           <button aria-current={currentView === 'people' ? 'page' : undefined} className={currentView === 'people' ? 'active' : ''} type="button" onClick={openPeopleView}><NavigationIcon view="people" />組織</button>
           <button aria-current={currentView === 'inbox' ? 'page' : undefined} className={currentView === 'inbox' ? 'active' : ''} type="button" onClick={openInbox}><NavigationIcon view="inbox" />依頼</button>
           <button aria-current={currentView === 'sent' ? 'page' : undefined} className={currentView === 'sent' ? 'active' : ''} type="button" onClick={openSentRequests}><NavigationIcon view="sent" />送信済み</button>
@@ -1418,7 +1473,7 @@ function App() {
             {!inboxLoading && !inboxError && inboxRequests.length === 0 ? (
               <p className="people-status">{inboxLoaded ? '新しい依頼はありません。' : '「更新」で依頼を取得してください。'}</p>
             ) : null}
-            <RequestBrowser key={`${activeOrganizationID}:${activeUserID}:inbox`} requests={inboxRequests} loadPeople={() => fetchBookingResult(`${apiURL}/api/v1/people?organizationId=${encodeURIComponent(activeOrganizationID)}`, { headers: { 'X-Demo-User-ID': activeUserID, 'X-Organization-ID': activeOrganizationID } }, readRequestPeople, captureRequestLifetime())}>{visible => <div className="request-list">
+            <RequestBrowser key={`${activeOrganizationID}:${activeUserID}:inbox:${notificationFocus.version}`} initialRequestID={notificationFocus.id} requests={inboxRequests} loadPeople={() => fetchBookingResult(`${apiURL}/api/v1/people?organizationId=${encodeURIComponent(activeOrganizationID)}`, { headers: { 'X-Demo-User-ID': activeUserID, 'X-Organization-ID': activeOrganizationID } }, readRequestPeople, captureRequestLifetime())}>{visible => <div className="request-list">
               {visible.map((item) => (
                 <article className="request-row" key={item.id}>
                   <div className="request-summary">
@@ -1490,7 +1545,7 @@ function App() {
             {sentLoading ? <p className="people-status" role="status">送信済み依頼を取得しています…</p> : null}
             {sentError ? <p className="people-status error" role="alert">{sentError}</p> : null}
             {!sentLoading && !sentError && sentRequests.length === 0 ? <p className="people-status">{sentLoaded ? '送信済み依頼はありません。' : '「更新」で依頼を取得してください。'}</p> : null}
-            <RequestBrowser key={`${activeOrganizationID}:${activeUserID}:sent`} requests={sentRequests} loadPeople={() => fetchBookingResult(`${apiURL}/api/v1/people?organizationId=${encodeURIComponent(activeOrganizationID)}`, { headers: { 'X-Demo-User-ID': requesterUserID, 'X-Organization-ID': activeOrganizationID } }, readRequestPeople, captureRequestLifetime())}>{visible => <div className="request-list">
+            <RequestBrowser key={`${activeOrganizationID}:${activeUserID}:sent:${notificationFocus.version}`} initialRequestID={notificationFocus.id} requests={sentRequests} loadPeople={() => fetchBookingResult(`${apiURL}/api/v1/people?organizationId=${encodeURIComponent(activeOrganizationID)}`, { headers: { 'X-Demo-User-ID': requesterUserID, 'X-Organization-ID': activeOrganizationID } }, readRequestPeople, captureRequestLifetime())}>{visible => <div className="request-list">
               {visible.map((item) => {
                 const cancellable = ['pending', 'suggested', 'delegated'].includes(item.status)
                 return (

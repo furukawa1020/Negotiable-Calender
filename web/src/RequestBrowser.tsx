@@ -10,8 +10,8 @@ const statuses = [
 ] as const
 const types = [['quick_question', '短い質問'], ['meeting', '会議'], ['review', 'レビュー'], ['approval', '承認'], ['decision', '意思決定'], ['async_response', '非同期の回答'], ['urgent_contact', '緊急連絡']] as const
 const priorities = [['urgent', '緊急'], ['high', '高'], ['normal', '通常'], ['low', '低']] as const
-export function RequestBrowser({ requests, children, loadPeople }: { requests: CoordinationRequest[]; children: (rows: CoordinationRequest[]) => ReactNode; loadPeople?: () => Promise<RequestPeople | undefined> }) {
-  const [query, setQuery] = useState('')
+export function RequestBrowser({ requests, children, loadPeople, initialRequestID = '' }: { requests: CoordinationRequest[]; children: (rows: CoordinationRequest[]) => ReactNode; loadPeople?: () => Promise<RequestPeople | undefined>; initialRequestID?: string }) {
+  const [query, setQuery] = useState(initialRequestID)
   const [status, setStatus] = useState('')
   const [type, setType] = useState('')
   const [priority, setPriority] = useState('')
@@ -43,7 +43,8 @@ export function RequestBrowser({ requests, children, loadPeople }: { requests: C
       if (current()) setNamesLoading(false)
     }
   }
-  const visible = orderRequests(filterRequests(requests, query, status, type, priority, names), order)
+  const visible = orderRequests(filterRequests(requests, query, status, type, priority, names)
+    .filter(row => !initialRequestID || query !== initialRequestID || row.id === initialRequestID), order)
   const pages = Math.max(1, Math.ceil(visible.length / 20))
   const currentPage = Math.min(page, pages - 1)
   // Clamp stored state too: later refreshes must not restore an obsolete page.

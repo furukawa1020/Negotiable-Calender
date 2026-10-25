@@ -218,6 +218,13 @@ input[type="checkbox"] { accent-color: var(--green); }
 .account-menu select, .account-menu input { width: 100%; font-size: 12px; }
 .invite-controls { display: grid; gap: 6px; }
 .notification-panel { width: min(360px, calc(100vw - 80px)); }
+.notification-panel { max-height: calc(100dvh - 100px); overflow-y: auto; }
+.activity-tools { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; padding: 12px 0; border-block: 1px solid var(--line); }
+.activity-tools label { display: grid; gap: 6px; max-width: 100%; font-size: 13px; }
+.activity-tools input, .activity-tools select { min-width: 0; max-width: 100%; min-height: 36px; padding: 6px 8px; border: 1px solid #748993; border-radius: 2px; background: white; color: #172f3b; font: inherit; }
+.activity-tools .activity-checkbox { display: flex; align-items: center; gap: 6px; }
+.activity-tools .activity-checkbox input { min-height: auto; }
+.activity-tools > span { flex-basis: 100%; font-size: 12px; color: var(--muted); }
 .notification-heading { display: flex; justify-content: space-between; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
 .notification-heading strong { font-size: 14px; }
 .notification-heading span, .notification-panel > p { color: var(--muted); font-size: 12px; }

@@ -34,6 +34,13 @@ func TestRescheduleHTTP(t *testing.T) {
 	}{
 		{"success", "alice", `{"action":"propose","proposalId":"proposal-new","expectedOptionId":"old","startAt":"2099-01-01T00:00:00Z"}`, nil, 200, 1},
 		{"accept", "bob", `{"action":"accept","proposalId":"proposal-new","expectedOptionId":"old"}`, nil, 200, 1},
+		{"decline", "bob", `{"action":"decline","proposalId":"proposal-new","expectedOptionId":"old"}`, nil, 200, 1},
+		{"withdraw", "alice", `{"action":"withdraw","proposalId":"proposal-new","expectedOptionId":"old"}`, nil, 200, 1},
+		{"missing-time", "alice", `{"action":"propose","proposalId":"proposal-new","expectedOptionId":"old"}`, nil, 400, 0},
+		{"accept-time", "bob", `{"action":"accept","proposalId":"proposal-new","expectedOptionId":"old","startAt":"2099-01-01T00:00:00Z"}`, nil, 400, 0},
+		{"decline-time", "bob", `{"action":"decline","proposalId":"proposal-new","expectedOptionId":"old","startAt":"2099-01-01T00:00:00Z"}`, nil, 400, 0},
+		{"withdraw-time", "alice", `{"action":"withdraw","proposalId":"proposal-new","expectedOptionId":"old","startAt":"2099-01-01T00:00:00Z"}`, nil, 400, 0},
+		{"duplicate-action", "alice", `{"action":"accept","Action":"propose","proposalId":"proposal-new","expectedOptionId":"old","startAt":"2099-01-01T00:00:00Z"}`, nil, 400, 0},
 		{"replay", "bob", `{"action":"accept","proposalId":"proposal-new","expectedOptionId":"old"}`, coordinationrequest.ErrRescheduleRepeated, 200, 1},
 		{"outsider", "eve", `{"action":"accept","proposalId":"proposal-new","expectedOptionId":"old"}`, coordinationrequest.ErrNotFound, 404, 1},
 		{"stale", "bob", `{"action":"accept","proposalId":"proposal-new","expectedOptionId":"old"}`, coordinationrequest.ErrRescheduleInvalid, 409, 1},

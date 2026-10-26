@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react'
 import type { AppNotification } from './notificationResponse'
-import { LoadedPagination, useLoadedPage } from './LoadedPagination'
+import { LoadedPagination } from './LoadedPagination'
+import { useLoadedPage } from './useLoadedPage'
 
 const normalized = (value: string) => value.normalize('NFKC').toLocaleLowerCase('ja-JP')
 const typeLabels: Record<string, string> = { request_received: '依頼の受信', request_accepted: '日時の確定', request_changed: '依頼の変更', request_delegated: '担当の変更', request_declined: '依頼の辞退' }

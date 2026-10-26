@@ -62,6 +62,7 @@ export function RequestBrowser({ requests, children, loadPeople, initialRequestI
         <option value="newest">作成が新しい順</option>
         <option value="deadline">期限が近い順</option>
         <option value="priority">優先度が高い順</option>
+        <option value="meeting">確定した会議の開始順（未確定は後）</option>
       </select></label>
       <label>依頼種別<select value={type} onChange={event => { setType(event.target.value); setPage(0) }}>
         <option value="">すべての種別</option>

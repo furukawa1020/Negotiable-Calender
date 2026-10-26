@@ -51,6 +51,15 @@ func ValidateHandoff(value CoordinationRequest, actor, org, recipient string, no
 }
 
 func ApplyHandoff(value *CoordinationRequest, actor, recipient string, options []Option, now time.Time) error {
+	// Recheck on the transaction-local record, not only the earlier inspection.
+	if value == nil {
+		return ErrHandoffConflict
+	}
+	if replay, err := ValidateHandoff(*value, actor, value.OrganizationID, recipient, now); err != nil {
+		return err
+	} else if replay {
+		return ErrHandoffConflict
+	}
 	if !validMutationTime(*value, now) {
 		return ErrHandoffConflict
 	}

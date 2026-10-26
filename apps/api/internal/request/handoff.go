@@ -41,6 +41,9 @@ func ValidateHandoff(value CoordinationRequest, actor, org, recipient string, no
 	if value.Status != Suggested || value.AcceptedOptionID != "" || value.DelegatedUserID != "" {
 		return false, ErrHandoffConflict
 	}
+	if !validMutationTime(value, now) {
+		return false, ErrHandoffConflict
+	}
 	if !value.DeadlineAt.After(now) {
 		return false, ErrHandoffExpired
 	}
@@ -48,6 +51,10 @@ func ValidateHandoff(value CoordinationRequest, actor, org, recipient string, no
 }
 
 func ApplyHandoff(value *CoordinationRequest, actor, recipient string, options []Option, now time.Time) error {
+	if !validMutationTime(*value, now) {
+		return ErrHandoffConflict
+	}
+	now = now.UTC()
 	if len(options) < 1 || len(options) > 3 {
 		return ErrHandoffConflict
 	}

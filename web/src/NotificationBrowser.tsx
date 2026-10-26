@@ -4,7 +4,7 @@ import { LoadedPagination } from './LoadedPagination'
 import { useLoadedPage } from './useLoadedPage'
 
 const normalized = (value: string) => value.normalize('NFKC').toLocaleLowerCase('ja-JP')
-const typeLabels: Record<string, string> = { request_received: '依頼の受信', request_accepted: '日時の確定', request_changed: '依頼の変更', request_delegated: '担当の変更', request_declined: '依頼の辞退' }
+const typeLabels: Record<string, string> = { request_received: '依頼の受信', request_accepted: '日時の確定', request_changed: '依頼の変更', request_delegated: '担当の変更', request_declined: '依頼の辞退', request_async: '非同期の回答', request_cancelled: '依頼のキャンセル', request_completed: '依頼の完了' }
 export function NotificationBrowser({ notifications, children }: { notifications: AppNotification[]; children: (rows: AppNotification[]) => ReactNode }) {
   const [query, setQuery] = useState('')
   const [unreadOnly, setUnreadOnly] = useState(false)

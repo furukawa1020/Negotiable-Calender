@@ -55,6 +55,7 @@ export function RequestBrowser({ requests, children, loadPeople, initialRequestI
       <label>依頼を検索<input type="search" value={query} maxLength={200} placeholder="件名・相手・依頼ID" onChange={event => { setQuery(event.target.value); setPage(0) }} /></label>
       <label>状態<select value={status} onChange={event => { setStatus(event.target.value); setPage(0) }}>
         <option value="">すべての状態</option>
+        <option value="active">未完了のみ（受付待ち・候補提示・日時確定・担当変更）</option>
         {statuses.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
       </select></label>
       <label>並び順<select value={order} onChange={event => { setOrder(event.target.value as RequestOrder); setPage(0) }}>

@@ -15,7 +15,8 @@ export function orderRequests(requests: CoordinationRequest[], order: RequestOrd
 
 export function filterRequests(requests: CoordinationRequest[], query: string, status: string, type = '', priority = '', names: RequestPeople = {}): CoordinationRequest[] {
   const needles = normalize(query).split(/\s+/).filter(Boolean)
-  return requests.filter(row => (status === '' || row.status === status)
+  return requests.filter(row => (status === '' || (status === 'active'
+    ? ['pending', 'suggested', 'accepted', 'delegated'].includes(row.status) : row.status === status))
     && (type === '' || row.type === type) && (priority === '' || row.priority === priority)
     && needles.every(needle => [row.title, row.requesterUserId, row.targetUserId, row.id,
       Object.hasOwn(names, row.requesterUserId) ? names[row.requesterUserId] : '',

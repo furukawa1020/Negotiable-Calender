@@ -3,12 +3,23 @@ import type { AuditEvent } from './auditResponse'
 import { LoadedPagination, useLoadedPage } from './LoadedPagination'
 
 const normalized = (value: string) => value.normalize('NFKC').toLocaleLowerCase('ja-JP')
+// Use the viewer's calendar date (the same local timezone as displayed dates).
+export function auditLocalDate(value: string): string {
+  const date = new Date(value)
+  if (!Number.isFinite(date.getTime())) return ''
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
 export function AuditBrowser({ events, children }: { events: AuditEvent[]; children: (rows: AuditEvent[]) => ReactNode }) {
   const [query, setQuery] = useState('')
   const [action, setAction] = useState('')
+  const [from, setFrom] = useState('')
+  const [to, setTo] = useState('')
+  const invalidRange = Boolean(from && to && from > to)
   const terms = normalized(query).trim().split(/\s+/).filter(Boolean)
   const actions = [...new Set([...events.map(row => row.action), ...(action ? [action] : [])])].sort()
   const visible = events.filter(row => (!action || row.action === action)
+    && !invalidRange && (!from || auditLocalDate(row.createdAt) >= from)
+    && (!to || (auditLocalDate(row.createdAt) !== '' && auditLocalDate(row.createdAt) <= to))
     && terms.every(term => normalized(`${row.actorUserId} ${row.resourceType} ${row.resourceId} ${row.action}`).includes(term)))
     .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt) || a.id.localeCompare(b.id))
   const page = useLoadedPage(visible)
@@ -18,9 +29,13 @@ export function AuditBrowser({ events, children }: { events: AuditEvent[]; child
       <label>操作種別<select value={action} onChange={event => { setAction(event.target.value); page.setPage(0) }}><option value="">すべての操作</option>
         {actions.map(item => <option value={item} key={item}>{item.replaceAll('_', ' ')}</option>)}
       </select></label>
-      <button className="secondary-button" type="button" disabled={!query && !action} onClick={() => { setQuery(''); setAction(''); page.setPage(0) }}>履歴の絞り込みを解除</button>
+      <label>履歴の開始日<input type="date" value={from} onChange={event => { setFrom(event.target.value); page.setPage(0) }} /></label>
+      <label>履歴の終了日<input type="date" value={to} onChange={event => { setTo(event.target.value); page.setPage(0) }} /></label>
+      <span>端末の時間帯で両端の日付を含めて検索</span>
+      <button className="secondary-button" type="button" disabled={!query && !action && !from && !to} onClick={() => { setQuery(''); setAction(''); setFrom(''); setTo(''); page.setPage(0) }}>履歴の絞り込みを解除</button>
       <span aria-live="polite">取得済み{events.length}件中 {visible.length}件が一致・{page.rows.length}件を表示・新しい順</span>
     </div>
+    {invalidRange ? <p role="alert">終了日は開始日以降にしてください</p> : null}
     {events.length > 0 && visible.length === 0 ? <p className="people-status">条件に一致する操作履歴はありません</p> : null}
     {children(page.rows)}
     <LoadedPagination label="操作履歴" {...page} />

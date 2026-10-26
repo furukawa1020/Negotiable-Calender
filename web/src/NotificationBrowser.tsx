@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react'
 import type { AppNotification } from './notificationResponse'
-import { LoadedPagination, useLoadedPage } from './LoadedPagination'
+import { LoadedPagination } from './LoadedPagination'
+import { useLoadedPage } from './useLoadedPage'
 
 const normalized = (value: string) => value.normalize('NFKC').toLocaleLowerCase('ja-JP')
 export function NotificationBrowser({ notifications, children }: { notifications: AppNotification[]; children: (rows: AppNotification[]) => ReactNode }) {

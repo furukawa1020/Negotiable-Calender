@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react'
 import type { AuditEvent } from './auditResponse'
-import { LoadedPagination, useLoadedPage } from './LoadedPagination'
+import { LoadedPagination } from './LoadedPagination'
+import { useLoadedPage } from './useLoadedPage'
 import { auditLocalDate } from './auditLocalDate'
 
 const normalized = (value: string) => value.normalize('NFKC').toLocaleLowerCase('ja-JP')

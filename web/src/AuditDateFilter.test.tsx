@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, expect, it } from 'vitest'
-import { AuditBrowser, auditLocalDate } from './AuditBrowser'
+import { AuditBrowser } from './AuditBrowser'
+import { auditLocalDate } from './auditLocalDate'
 import type { AuditEvent } from './auditResponse'
 afterEach(cleanup)
 const base: AuditEvent = { id: 'a', organizationId: 'org', actorUserId: 'alice', action: 'request_created', resourceId: 'r', resourceType: 'request', createdAt: new Date(2030, 0, 2, 0, 0, 0).toISOString() }

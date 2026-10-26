@@ -1,14 +1,9 @@
 import { useState, type ReactNode } from 'react'
 import type { AuditEvent } from './auditResponse'
 import { LoadedPagination, useLoadedPage } from './LoadedPagination'
+import { auditLocalDate } from './auditLocalDate'
 
 const normalized = (value: string) => value.normalize('NFKC').toLocaleLowerCase('ja-JP')
-// Use the viewer's calendar date (the same local timezone as displayed dates).
-export function auditLocalDate(value: string): string {
-  const date = new Date(value)
-  if (!Number.isFinite(date.getTime())) return ''
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
-}
 export function AuditBrowser({ events, children }: { events: AuditEvent[]; children: (rows: AuditEvent[]) => ReactNode }) {
   const [query, setQuery] = useState('')
   const [action, setAction] = useState('')

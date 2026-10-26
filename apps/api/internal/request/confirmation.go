@@ -31,7 +31,7 @@ func ConfirmableMeeting(value CoordinationRequest, optionID string, now time.Tim
 // Require complete, unexpired coverage. Unknown, gaps, or contradictory closed
 // segments are not evidence that a meeting can be accepted.
 func ValidateMeetingAvailability(userID string, option Option, values []projection.ScheduleProjection, now time.Time) error {
-	if option.StartAt == nil || option.EndAt == nil {
+	if userID == "" || now.IsZero() || option.StartAt == nil || option.EndAt == nil || validRange(*option.StartAt, *option.EndAt) != nil {
 		return ErrCandidateInvalid
 	}
 	ranges := []ReservedRange{}

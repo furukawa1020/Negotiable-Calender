@@ -161,6 +161,7 @@ func validRescheduleReplayEvidence(value CoordinationRequest, p ReschedulePropos
 	if value.AcceptedOptionID != expected {
 		return false
 	}
+	var duration time.Duration
 	for _, id := range []string{p.ID, p.ExpectedOptionID} {
 		matches := 0
 		for _, option := range value.Options {
@@ -171,6 +172,12 @@ func validRescheduleReplayEvidence(value CoordinationRequest, p ReschedulePropos
 			if option.RequestID != value.ID || option.Type != OptionMeeting || option.Validate() != nil {
 				return false
 			}
+			// A time change must retain the confirmed meeting's duration.
+			current := option.EndAt.Sub(*option.StartAt)
+			if duration != 0 && current != duration {
+				return false
+			}
+			duration = current
 		}
 		if matches != 1 {
 			return false

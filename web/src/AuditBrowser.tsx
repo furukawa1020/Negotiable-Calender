@@ -3,6 +3,7 @@ import type { AuditEvent } from './auditResponse'
 import { LoadedPagination } from './LoadedPagination'
 import { useLoadedPage } from './useLoadedPage'
 import { auditLocalDate } from './auditLocalDate'
+import { auditActionLabel } from './auditActionLabel'
 
 const normalized = (value: string) => value.normalize('NFKC').toLocaleLowerCase('ja-JP')
 export function AuditBrowser({ events, children }: { events: AuditEvent[]; children: (rows: AuditEvent[]) => ReactNode }) {
@@ -24,14 +25,14 @@ export function AuditBrowser({ events, children }: { events: AuditEvent[]; child
     && (!resourceID || row.resourceId === resourceID)
     && !invalidRange && (!from || auditLocalDate(row.createdAt) >= from)
     && (!to || (auditLocalDate(row.createdAt) !== '' && auditLocalDate(row.createdAt) <= to))
-    && terms.every(term => normalized(`${row.actorUserId} ${row.resourceType} ${row.resourceId} ${row.action}`).includes(term)))
+    && terms.every(term => normalized(`${row.actorUserId} ${row.resourceType} ${row.resourceId} ${row.action} ${auditActionLabel(row.action)}`).includes(term)))
     .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt) || a.id.localeCompare(b.id))
   const page = useLoadedPage(visible)
   return <>
     <div className="activity-tools" role="search" aria-label="操作履歴の絞り込み">
       <label>操作履歴を検索<input type="search" maxLength={200} value={query} placeholder="実行者・対象ID" onChange={event => { setQuery(event.target.value); page.setPage(0) }} /></label>
       <label>操作種別<select value={action} onChange={event => { setAction(event.target.value); page.setPage(0) }}><option value="">すべての操作</option>
-        {actions.map(item => <option value={item} key={item}>{item.replaceAll('_', ' ')}</option>)}
+        {actions.map(item => <option value={item} key={item}>{auditActionLabel(item)}</option>)}
       </select></label>
       <label>履歴の開始日<input type="date" value={from} onChange={event => { setFrom(event.target.value); page.setPage(0) }} /></label>
       <label>実行者ID<select value={actor} onChange={event => { setActor(event.target.value); page.setPage(0) }}><option value="">すべての実行者</option>

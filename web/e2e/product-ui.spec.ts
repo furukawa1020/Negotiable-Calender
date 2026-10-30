@@ -117,7 +117,7 @@ for (const width of [1440, 1024, 390, 320]) {
         ['組織', '組織の公開状態', 'サンプル管理者'],
         ['依頼', '受信した依頼', '設計レビューの相談'],
         ['送信済み', '送信した依頼', '設計レビューの相談'],
-        ['監査', '操作履歴', 'request created'],
+        ['監査', '操作履歴', '依頼の作成'],
       ]) {
         await page.getByRole('navigation').getByRole('button', { name: button, exact: true }).click()
         await expect(page.getByRole('heading', { name: heading })).toBeVisible()

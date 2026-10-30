@@ -558,7 +558,7 @@ describe('App', () => {
     fireEvent.click(screen.getByRole('button', { name: '監査' }))
     const heading = await screen.findByRole('heading', { name: '操作履歴' })
     expect(heading).toBeInTheDocument()
-    expect(await screen.findByText('request accepted', { selector: '.audit-row strong' })).toBeInTheDocument()
+    expect(await screen.findByText('日時の確定', { selector: '.audit-row strong' })).toBeInTheDocument()
     expect(screen.getByText('予定詳細なし')).toBeInTheDocument()
     const auditView = heading.closest('.audit-view') as HTMLElement
     expect(within(auditView).queryByText('Product Review')).not.toBeInTheDocument()

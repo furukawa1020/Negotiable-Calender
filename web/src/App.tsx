@@ -18,6 +18,7 @@ import { readRequestList } from './requestList'
 import { RequestBrowser } from './RequestBrowser'
 import { NotificationBrowser } from './NotificationBrowser'
 import { AuditBrowser } from './AuditBrowser'
+import { auditActionLabel } from './auditActionLabel'
 import { readRequestPeople } from './requestPeople'
 import { readNotifications, type AppNotification } from './notificationResponse'
 import { readAuditLogs, type AuditEvent } from './auditResponse'
@@ -1596,7 +1597,7 @@ function App() {
                 <article className="audit-row" key={event.id}>
                   <time>{formatDateTime(event.createdAt)}</time>
                   <div>
-                    <strong>{event.action.replaceAll('_', ' ')}</strong>
+                    <strong>{auditActionLabel(event.action)}</strong>
                     <span>{event.actorUserId} · {event.resourceType} · {event.resourceId}</span>
                   </div>
                   <span className="audit-safe"><ShieldIcon />予定詳細なし</span>

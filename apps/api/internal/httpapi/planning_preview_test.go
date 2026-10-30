@@ -82,6 +82,9 @@ func TestPlanningPreviewOwnerBoundaryAndFreshness(t *testing.T) {
 		{"expired deadline", func(r *stubRequestStore, _ *stubProjectionStore, _ *stubOrganizationStore) {
 			r.value.DeadlineAt = time.Now().UTC().Add(-time.Second)
 		}, "owner", "workspace", 409},
+		{"future request update", func(r *stubRequestStore, _ *stubProjectionStore, _ *stubOrganizationStore) {
+			r.value.UpdatedAt = time.Now().UTC().Add(time.Hour)
+		}, "owner", "workspace", 409},
 		{"expired projection", func(_ *stubRequestStore, p *stubProjectionStore, _ *stubOrganizationStore) {
 			p.values[0].ExpiresAt = time.Now().UTC().Add(-time.Second)
 		}, "owner", "workspace", 409},
@@ -125,6 +128,8 @@ func TestPlanningPreviewOwnerBoundaryAndFreshness(t *testing.T) {
 
 func TestPlanningPreviewMinimizesDataAndFingerprintsChanges(t *testing.T) {
 	r, p, o := planningFixture()
+	// Change a past revision, not a timestamp ahead of the serving clock.
+	r.value.UpdatedAt = r.value.UpdatedAt.Add(-time.Minute)
 	read := func() planningPreview {
 		t.Helper()
 		w := planningCall(r, p, o, "owner", "workspace")

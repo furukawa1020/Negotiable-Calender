@@ -12,6 +12,7 @@ export function NotificationBrowser({ notifications, children }: { notifications
   const [type, setType] = useState('')
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
+  const [order, setOrder] = useState('newest')
   const invalidRange = Boolean(from && to && from > to)
   const types = [...new Set([...notifications.map(row => row.type), ...(type ? [type] : [])])].sort()
   const terms = normalized(query).trim().split(/\s+/).filter(Boolean)
@@ -20,7 +21,7 @@ export function NotificationBrowser({ notifications, children }: { notifications
     && !invalidRange && (!from || auditLocalDate(row.createdAt) >= from)
     && (!to || (auditLocalDate(row.createdAt) !== '' && auditLocalDate(row.createdAt) <= to))
     && terms.every(term => normalized(`${row.message} ${row.requestId} ${row.type}`).includes(term)))
-    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt) || a.id.localeCompare(b.id))
+    .sort((a, b) => (order === 'oldest' ? 1 : -1) * (Date.parse(a.createdAt) - Date.parse(b.createdAt)) || a.id.localeCompare(b.id))
   const page = useLoadedPage(visible)
   return <>
     <div className="activity-tools" role="search" aria-label="通知の絞り込み">
@@ -30,10 +31,11 @@ export function NotificationBrowser({ notifications, children }: { notifications
         {types.map(item => <option key={item} value={item}>{Object.hasOwn(typeLabels, item) ? typeLabels[item] : item}</option>)}
       </select></label>
       <label>通知の開始日<input type="date" value={from} onChange={event => { setFrom(event.target.value); page.setPage(0) }} /></label>
+      <label>通知の並び順<select value={order} onChange={event => { setOrder(event.target.value); page.setPage(0) }}><option value="newest">新しい順</option><option value="oldest">古い順</option></select></label>
       <label>通知の終了日<input type="date" value={to} onChange={event => { setTo(event.target.value); page.setPage(0) }} /></label>
       <span>端末の時間帯で両端の日付を含めて検索</span>
       <button className="secondary-button" type="button" disabled={!query && !unreadOnly && !type && !from && !to} onClick={() => { setQuery(''); setUnreadOnly(false); setType(''); setFrom(''); setTo(''); page.setPage(0) }}>通知の絞り込みを解除</button>
-      <span aria-live="polite">取得済み{notifications.length}件中 {visible.length}件が一致・{page.rows.length}件を表示・新しい順</span>
+      <span aria-live="polite">取得済み{notifications.length}件中 {visible.length}件が一致・{page.rows.length}件を表示・{order === 'oldest' ? '古い順' : '新しい順'}</span>
     </div>
     {invalidRange ? <p role="alert">終了日は開始日以降にしてください</p> : null}
     {notifications.length > 0 && visible.length === 0 ? <p>条件に一致する通知はありません</p> : null}

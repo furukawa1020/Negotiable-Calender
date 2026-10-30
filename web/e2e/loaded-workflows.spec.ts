@@ -44,7 +44,7 @@ for (const width of [1440, 1024, 390, 320]) {
     await page.getByRole('combobox', { name: '状態', exact: true }).selectOption('active')
     await page.getByRole('combobox', { name: '並び順' }).selectOption('meeting')
     await expect(page.locator('.request-summary h2')).toHaveText(['earlier', 'later'])
-    await page.getByLabel('参加者', { exact: true }).selectOption('peer')
+    await page.getByRole('combobox', { name: '参加者', exact: true }).selectOption('peer')
     await expect(page.locator('.request-summary h2')).toHaveText(['earlier', 'later'])
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true)
     await page.screenshot({ path: testInfo.outputPath('request-meeting-order.png'), fullPage: true })

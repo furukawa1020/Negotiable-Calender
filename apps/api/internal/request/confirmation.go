@@ -18,6 +18,9 @@ var (
 )
 
 func ConfirmableMeeting(value CoordinationRequest, optionID string, now time.Time) (Option, error) {
+	if !validMutationTime(value, now) {
+		return Option{}, ErrCandidateInvalid
+	}
 	option, err := meetingEvidence(value, optionID)
 	if err != nil {
 		return Option{}, err

@@ -9,6 +9,9 @@ export function AuditBrowser({ events, children }: { events: AuditEvent[]; child
   const [query, setQuery] = useState('')
   const [action, setAction] = useState('')
   const [actor, setActor] = useState('')
+  const [resourceType, setResourceType] = useState('')
+  const [resourceID, setResourceID] = useState('')
+  const resourceTypes = [...new Set([...events.map(row => row.resourceType), ...(resourceType ? [resourceType] : [])])].sort()
   const actors = [...new Set([...events.map(row => row.actorUserId), ...(actor ? [actor] : [])])].sort()
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
@@ -17,6 +20,8 @@ export function AuditBrowser({ events, children }: { events: AuditEvent[]; child
   const actions = [...new Set([...events.map(row => row.action), ...(action ? [action] : [])])].sort()
   const visible = events.filter(row => (!action || row.action === action)
     && (!actor || row.actorUserId === actor)
+    && (!resourceType || row.resourceType === resourceType)
+    && (!resourceID || row.resourceId === resourceID)
     && !invalidRange && (!from || auditLocalDate(row.createdAt) >= from)
     && (!to || (auditLocalDate(row.createdAt) !== '' && auditLocalDate(row.createdAt) <= to))
     && terms.every(term => normalized(`${row.actorUserId} ${row.resourceType} ${row.resourceId} ${row.action}`).includes(term)))
@@ -33,8 +38,12 @@ export function AuditBrowser({ events, children }: { events: AuditEvent[]; child
         {actors.map(id => <option key={id} value={id}>{id}</option>)}
       </select></label>
       <label>履歴の終了日<input type="date" value={to} onChange={event => { setTo(event.target.value); page.setPage(0) }} /></label>
+      <label>対象種別<select value={resourceType} onChange={event => { setResourceType(event.target.value); page.setPage(0) }}><option value="">すべての対象</option>
+        {resourceTypes.map(item => <option key={item} value={item}>{item}</option>)}
+      </select></label>
+      <label>対象ID（完全一致）<input type="text" value={resourceID} maxLength={200} onChange={event => { setResourceID(event.target.value); page.setPage(0) }} /></label>
       <span>端末の時間帯で両端の日付を含めて検索</span>
-      <button className="secondary-button" type="button" disabled={!query && !action && !actor && !from && !to} onClick={() => { setQuery(''); setAction(''); setActor(''); setFrom(''); setTo(''); page.setPage(0) }}>履歴の絞り込みを解除</button>
+      <button className="secondary-button" type="button" disabled={!query && !action && !actor && !resourceType && !resourceID && !from && !to} onClick={() => { setQuery(''); setAction(''); setActor(''); setResourceType(''); setResourceID(''); setFrom(''); setTo(''); page.setPage(0) }}>履歴の絞り込みを解除</button>
       <span aria-live="polite">取得済み{events.length}件中 {visible.length}件が一致・{page.rows.length}件を表示・新しい順</span>
     </div>
     {invalidRange ? <p role="alert">終了日は開始日以降にしてください</p> : null}

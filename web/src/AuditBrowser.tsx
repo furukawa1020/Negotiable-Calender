@@ -8,12 +8,15 @@ const normalized = (value: string) => value.normalize('NFKC').toLocaleLowerCase(
 export function AuditBrowser({ events, children }: { events: AuditEvent[]; children: (rows: AuditEvent[]) => ReactNode }) {
   const [query, setQuery] = useState('')
   const [action, setAction] = useState('')
+  const [actor, setActor] = useState('')
+  const actors = [...new Set([...events.map(row => row.actorUserId), ...(actor ? [actor] : [])])].sort()
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
   const invalidRange = Boolean(from && to && from > to)
   const terms = normalized(query).trim().split(/\s+/).filter(Boolean)
   const actions = [...new Set([...events.map(row => row.action), ...(action ? [action] : [])])].sort()
   const visible = events.filter(row => (!action || row.action === action)
+    && (!actor || row.actorUserId === actor)
     && !invalidRange && (!from || auditLocalDate(row.createdAt) >= from)
     && (!to || (auditLocalDate(row.createdAt) !== '' && auditLocalDate(row.createdAt) <= to))
     && terms.every(term => normalized(`${row.actorUserId} ${row.resourceType} ${row.resourceId} ${row.action}`).includes(term)))
@@ -26,9 +29,12 @@ export function AuditBrowser({ events, children }: { events: AuditEvent[]; child
         {actions.map(item => <option value={item} key={item}>{item.replaceAll('_', ' ')}</option>)}
       </select></label>
       <label>履歴の開始日<input type="date" value={from} onChange={event => { setFrom(event.target.value); page.setPage(0) }} /></label>
+      <label>実行者ID<select value={actor} onChange={event => { setActor(event.target.value); page.setPage(0) }}><option value="">すべての実行者</option>
+        {actors.map(id => <option key={id} value={id}>{id}</option>)}
+      </select></label>
       <label>履歴の終了日<input type="date" value={to} onChange={event => { setTo(event.target.value); page.setPage(0) }} /></label>
       <span>端末の時間帯で両端の日付を含めて検索</span>
-      <button className="secondary-button" type="button" disabled={!query && !action && !from && !to} onClick={() => { setQuery(''); setAction(''); setFrom(''); setTo(''); page.setPage(0) }}>履歴の絞り込みを解除</button>
+      <button className="secondary-button" type="button" disabled={!query && !action && !actor && !from && !to} onClick={() => { setQuery(''); setAction(''); setActor(''); setFrom(''); setTo(''); page.setPage(0) }}>履歴の絞り込みを解除</button>
       <span aria-live="polite">取得済み{events.length}件中 {visible.length}件が一致・{page.rows.length}件を表示・新しい順</span>
     </div>
     {invalidRange ? <p role="alert">終了日は開始日以降にしてください</p> : null}

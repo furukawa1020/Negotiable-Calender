@@ -39,7 +39,7 @@ func ValidateConfirmedCancellation(value CoordinationRequest, actor, optionID st
 	if value.Status == Cancelled {
 		return ErrAlreadyCancelled
 	}
-	if value.Status != Accepted {
+	if value.Status != Accepted || !validMutationTime(value, now) {
 		return ErrCancellationInvalid
 	}
 	if option.StartAt.After(now) {

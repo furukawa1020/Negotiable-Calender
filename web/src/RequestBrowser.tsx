@@ -15,6 +15,8 @@ export function RequestBrowser({ requests, children, loadPeople, initialRequestI
   const [status, setStatus] = useState('')
   const [type, setType] = useState('')
   const [priority, setPriority] = useState('')
+  const [participant, setParticipant] = useState('')
+  const participants = [...new Set([...requests.flatMap(row => [row.requesterUserId, row.targetUserId]), ...(participant ? [participant] : [])])].sort()
   const [order, setOrder] = useState<RequestOrder>('newest')
   const [page, setPage] = useState(0)
   const [names, setNames] = useState<RequestPeople>({})
@@ -44,6 +46,7 @@ export function RequestBrowser({ requests, children, loadPeople, initialRequestI
     }
   }
   const visible = orderRequests(filterRequests(requests, query, status, type, priority, names)
+    .filter(row => !participant || row.requesterUserId === participant || row.targetUserId === participant)
     .filter(row => !initialRequestID || query !== initialRequestID || row.id === initialRequestID), order)
   const pages = Math.max(1, Math.ceil(visible.length / 20))
   const currentPage = Math.min(page, pages - 1)
@@ -72,7 +75,10 @@ export function RequestBrowser({ requests, children, loadPeople, initialRequestI
         <option value="">すべての優先度</option>
         {priorities.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
       </select></label>
-      <button type="button" className="secondary-button" disabled={!query && !status && !type && !priority} onClick={() => { setQuery(''); setStatus(''); setType(''); setPriority(''); setPage(0) }}>絞り込みを解除</button>
+      <label>参加者<select value={participant} onChange={event => { setParticipant(event.target.value); setPage(0) }}><option value="">すべての参加者</option>
+        {participants.map(id => <option key={id} value={id}>{Object.hasOwn(names, id) ? `${names[id]} (${id})` : id}</option>)}
+      </select></label>
+      <button type="button" className="secondary-button" disabled={!query && !status && !type && !priority && !participant} onClick={() => { setQuery(''); setStatus(''); setType(''); setPriority(''); setParticipant(''); setPage(0) }}>絞り込みを解除</button>
       {loadPeople ? <button type="button" className="secondary-button" disabled={namesLoading} onClick={() => { void loadNames() }}>{namesLoading ? '氏名を取得中…' : '検索用の氏名を取得'}</button> : null}
       {namesMessage ? <span className="request-count" aria-live="polite">{namesMessage}</span> : null}
       <span className="request-count" aria-live="polite">{requests.length}件中 {visible.length}件{pages > 1 ? `に一致・${currentPage * 20 + 1}〜${currentPage * 20 + displayed.length}件を表示` : 'を表示'}</span>

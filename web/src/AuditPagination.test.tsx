@@ -14,7 +14,7 @@ it('pages history, resets on action/search changes and clamps refreshed snapshot
  expect(screen.getAllByRole('listitem')).toHaveLength(1)
  view.rerender(<AuditBrowser events={values.slice(0,21)}>{rows}</AuditBrowser>)
  expect(screen.getByText('2 / 2 ページ')).toBeInTheDocument()
- fireEvent.change(screen.getByRole('combobox'), { target: { value: 'request_created' } })
+ fireEvent.change(screen.getByLabelText('操作種別'), { target: { value: 'request_created' } })
  expect(screen.getByText('1 / 2 ページ')).toBeInTheDocument()
  fireEvent.click(screen.getByRole('button', { name: '次のページ' }))
  fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'r0' } })

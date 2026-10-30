@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/negotiable-calendar/negotiable-calendar/apps/api/internal/audit"
@@ -44,6 +45,9 @@ func ValidateCreationFreshness(value CoordinationRequest, now time.Time) error {
 }
 
 func CreationID(organizationID, actor, key string) (string, error) {
+	if strings.TrimSpace(organizationID) == "" || strings.TrimSpace(actor) == "" {
+		return "", ErrCreationForbidden
+	}
 	if !creationKeyPattern.MatchString(key) {
 		return "", fmt.Errorf("invalid idempotency key")
 	}

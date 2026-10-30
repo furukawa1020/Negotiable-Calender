@@ -71,7 +71,7 @@ func ConflictsWithMeeting(option Option, other CoordinationRequest) bool {
 	// Validate identity, selection uniqueness and type before classifying a
 	// reservation as meeting/non-meeting or deciding whether its times overlap.
 	ranges, err := ReservationRanges([]CoordinationRequest{other})
-	if err != nil || option.StartAt == nil || option.EndAt == nil || !option.EndAt.After(*option.StartAt) {
+	if err != nil || option.StartAt == nil || option.EndAt == nil || validRange(*option.StartAt, *option.EndAt) != nil {
 		return true
 	}
 	for _, reserved := range ranges {
